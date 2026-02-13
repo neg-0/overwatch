@@ -1,0 +1,31 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "jsx": "react-jsx",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "@overwatch/shared": [
+        "../shared/src/index.ts"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*",
+    "vite-env.d.ts"
+  ],
+  "references": [
+    {
+      "path": "../shared"
+    }
+  ]
+}
