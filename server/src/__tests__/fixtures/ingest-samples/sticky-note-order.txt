@@ -1,0 +1,11 @@
+2x F-16 CAS
+TGT: 9.55N 112.89E
+TOT: 1430Z
+CALLSIGN: RAGE 21
+TANKER: AR ALPHA
+Need SATCOM + GPS
+FROM/TO: Kadena
+
+Also need ISR drone on station by 1400Z
+same target area
+call SHADOW 42

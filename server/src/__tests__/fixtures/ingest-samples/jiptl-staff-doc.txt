@@ -1,0 +1,58 @@
+JOINT INTEGRATED PRIORITIZED TARGET LIST (JIPTL)
+OPERATION PACIFIC SHIELD — ATO CYCLE 025
+EFFECTIVE: 01 MAR 2026 1200Z TO 02 MAR 2026 1159Z
+CLASSIFICATION: SECRET
+ISSUING AUTHORITY: JTCB / USINDOPACOM J3
+
+PRIORITY 1: AIR DEFENSE SUPPRESSION
+  Effect: DESTROY
+  Target Set: Adversary IADS Nodes (HQ-9, S-400 batteries)
+  BE Numbers: 0127-00001, 0127-00002, 0127-00003
+  Target Names:
+    1.1 SAM Battery ALPHA — Fiery Cross Reef (9.5500N, 112.8900E)
+    1.2 SAM Battery BRAVO — Subi Reef (10.9200N, 114.0800E)
+    1.3 EWR Station CHARLIE — Mischief Reef (9.9000N, 115.5300E)
+  Justification: Required per Campaign Plan Priority 1 to gain air superiority. JP 3-01 mandates SEAD prior to force projection.
+
+PRIORITY 2: COMMAND AND CONTROL DEGRADATION
+  Effect: DEGRADE
+  Target Set: Adversary C2 nodes and communications infrastructure
+  BE Numbers: 0228-00010, 0228-00011
+  Target Names:
+    2.1 Regional C2 Center — Hainan Island (18.2500N, 109.5000E)
+    2.2 SIGINT Collection Facility — Woody Island (16.8300N, 112.3400E)
+  Justification: Disrupts adversary OODA loop and coordination capability per Campaign Plan Priority 2.
+
+PRIORITY 3: MARITIME DENIAL
+  Effect: DENY
+  Target Set: PLAN surface combatants and submarine pens
+  BE Numbers: 0315-00005, 0315-00006
+  Target Names:
+    3.1 PLAN DDG Task Group — South China Sea patrol area (14.5000N, 115.0000E)
+    3.2 Submarine Base DELTA — Yulin Naval Base (18.2100N, 109.5500E)
+  Justification: Protect SLOCs and deny adversary naval freedom of maneuver per Campaign Plan Priority 3.
+
+PRIORITY 4: SPACE ASSET PROTECTION
+  Effect: PROTECT
+  Target Set: Adversary ASAT capabilities
+  BE Numbers: 0442-00001
+  Target Names:
+    4.1 Ground-Based ASAT Launcher — Korla Test Range (41.7600N, 86.1500E)
+  Justification: Protect US GPS, SATCOM, OPIR constellations per Campaign Plan Priority 4.
+
+PRIORITY 5: ISR PERSISTENCE
+  Effect: SUSTAIN
+  Target Set: ISR coverage areas of interest
+  AOIs:
+    5.1 South China Sea — full-time coverage required
+    5.2 East China Sea — Senkaku Islands vicinity
+    5.3 Taiwan Strait — transit monitoring
+  Justification: Maintain battlespace awareness per Campaign Plan Priority 5.
+
+COORDINATION: All strike nominations against Priority 1-3 targets require JTCB approval.
+             Collateral damage estimation required for all targets in populated areas.
+             Space effects coordination through 614 AOC/CSpOC.
+
+APPROVED BY:
+VADM Robert T. Williams
+Director, Joint Targeting Coordination Board

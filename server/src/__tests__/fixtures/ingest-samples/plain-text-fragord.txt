@@ -1,0 +1,33 @@
+FROM: 613 AOC / CFACC OPERATIONS
+TO: ALL STRIKE PACKAGES
+SUBJ: FRAGORD 025-001 — RETASKING MSN4001 AND ADDING ISR SUPPORT
+DTG: 011330ZMAR26
+
+1. SITUATION UPDATE. ISR reports indicate SAM Battery ALPHA at Fiery Cross Reef has been relocated approximately 2km northeast of previous position. Updated coordinates follow. Additionally, SIGINT indicates a mobile TEL battery has been identified near the original site requiring immediate ISR attention.
+
+2. CHANGES TO ATO 025A.
+
+   a. MISSION MSN4001 (VIPER 11 — 4x F-35A): TARGET COORDINATES UPDATED.
+      - OLD coordinates: 9.5500N, 112.8900E
+      - NEW coordinates: 9.5700N, 112.9100E (SAM Battery ALPHA relocated position)
+      - TOT remains: 011430ZMAR26/011530ZMAR26
+      - All other mission parameters UNCHANGED.
+
+   b. NEW MISSION ADDED — ISR SUPPORT:
+      - Mission ID: MSN4010
+      - Callsign: SHADOW 41
+      - Aircraft: 1x MQ-9A
+      - Unit: 432d Wing / Andersen AFB
+      - Mission Type: ISR
+      - Orbit Point: 9.5500N, 112.9000E (original SAM position — surveillance for mobile TEL)
+      - On-station: 011400ZMAR26 to 012200ZMAR26
+      - Space needs: SATCOM (priority 1), GPS (priority 1)
+      - Data feed: Link-16 to VIPER 11 and AOC
+
+3. COORDINATION. VIPER 11 flight lead coordinate with SHADOW 41 for updated target confirmation prior to IP. ISR feed available on Link-16 NPG 12.
+
+4. AUTHORITY. This FRAGORD is effective immediately upon receipt.
+
+V/R
+Col Michael J. Torres
+Director of Operations, 613 AOC

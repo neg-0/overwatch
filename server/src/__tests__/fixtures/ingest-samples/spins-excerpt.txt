@@ -1,0 +1,35 @@
+SPECIAL INSTRUCTIONS (SPINS) — ATO CYCLE 025
+OPERATION PACIFIC SHIELD
+EFFECTIVE: 01 MAR 2026 1200Z TO 02 MAR 2026 1159Z
+
+1. GENERAL.
+   a. All missions comply with Theater ROE and LOAC.
+   b. Positive identification (PID) required before weapons release.
+   c. Civilian casualty avoidance is the #1 constraint on all kinetic operations.
+
+2. AIRSPACE CONTROL.
+   a. Altitude deconfliction: Fixed-wing above FL180, rotary-wing below FL100.
+   b. Restricted Operating Zones (ROZ):
+      - ROZ CRIMSON: 10.0N-11.0N / 113.0E-115.0E (active SEAD corridor)
+      - ROZ STEEL: 14.0N-15.0N / 115.0E-117.0E (maritime strike area)
+   c. All aircraft squawk modes as assigned in ATO.
+
+3. TANKER OPERATIONS.
+   a. AR Track ALPHA: FL220, 15.0N/118.0E to 16.0N/120.0E (KC-135)
+   b. AR Track BRAVO: FL250, 20.0N/122.0E to 21.0N/124.0E (KC-46A)
+   c. Backup tanker on 15-minute alert at Kadena AB.
+
+4. COMBAT SEARCH AND RESCUE (CSAR).
+   a. CSAR alert posture: 30-minute scramble from USS Ronald Reagan.
+   b. RESCORT: 2x F/A-18F on 15-minute alert.
+   c. CSAR freq: Primary 282.8 MHz, Secondary 243.0 MHz.
+
+5. SPACE SUPPORT.
+   a. GPS degradation warning: Report any GPS anomalies on SPACE OPS freq.
+   b. SATCOM priority: 1) CSAR, 2) C2, 3) ISR feeds, 4) Routine comms.
+   c. OPIR data feed to AOC: continuous, 5-minute refresh cycle.
+
+6. COMMUNICATIONS.
+   a. Primary C2: SATCOM Channel ALPHA
+   b. Backup C2: HF 8992 kHz
+   c. ISR data link: Link-16 NPG assigned per mission.
