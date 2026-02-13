@@ -1,0 +1,584 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum OrderType {
+  ATO
+  MTO
+  STO
+  OPORD
+  EXORD
+  FRAGORD
+  ACO
+  SPINS
+}
+
+enum Domain {
+  AIR
+  MARITIME
+  SPACE
+  LAND
+}
+
+enum MissionStatus {
+  PLANNED
+  BRIEFED
+  LAUNCHED
+  AIRBORNE
+  ON_STATION
+  ENGAGED
+  EGRESSING
+  RTB
+  RECOVERED
+  CANCELLED
+  DIVERTED
+  DELAYED
+}
+
+enum WaypointType {
+  DEP
+  IP
+  CP
+  TGT
+  EGR
+  REC
+  ORBIT
+  REFUEL
+  CAP
+  PATROL
+}
+
+enum TimeWindowType {
+  TOT
+  ONSTA
+  OFFSTA
+  REFUEL
+  COVERAGE
+  SUPPRESS
+  TRANSIT
+}
+
+enum SupportType {
+  TANKER
+  SEAD
+  ISR
+  EW
+  ESCORT
+  CAP
+}
+
+enum SpaceCapabilityType {
+  GPS
+  SATCOM              // Legacy — kept for backward compat
+  SATCOM_PROTECTED    // AEHF — jam-resistant, strategic
+  SATCOM_WIDEBAND     // WGS — high-bandwidth ISR/C2
+  SATCOM_TACTICAL     // MUOS — UHF mobile tactical
+  OPIR
+  ISR_SPACE
+  EW_SPACE
+  WEATHER
+  PNT
+  LINK16              // Not space-dependent, tracked for completeness
+}
+
+enum Affiliation {
+  FRIENDLY
+  HOSTILE
+  NEUTRAL
+  UNKNOWN
+}
+
+enum Classification {
+  UNCLASSIFIED
+  CUI
+  CONFIDENTIAL
+  SECRET
+  TOP_SECRET
+}
+
+// ─── Scenario & Strategy ─────────────────────────────────────────────────────
+
+model Scenario {
+  id             String              @id @default(uuid())
+  name           String
+  description    String
+  theater        String
+  adversary      String
+  startDate      DateTime
+  endDate        DateTime
+  classification Classification      @default(UNCLASSIFIED)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  strategies       StrategyDocument[]
+  planningDocs     PlanningDocument[]
+  taskingOrders    TaskingOrder[]
+  units            Unit[]
+  bases            Base[]
+  spaceAssets      SpaceAsset[]
+  simulations      SimulationState[]
+  simEvents        SimEvent[]
+  scenarioInjects  ScenarioInject[]
+
+  @@map("scenarios")
+}
+
+model StrategyDocument {
+  id             String   @id @default(uuid())
+  scenarioId     String
+  scenario       Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  title          String
+  docType        String   // NDS, NMS, JSCP, CONPLAN, OPLAN, CAMPAIGN_PLAN, JFC_GUIDANCE, COMPONENT_GUIDANCE
+  content        String   @db.Text
+  authorityLevel String
+  effectiveDate  DateTime
+  tier           Int      @default(0) // 1=NDS, 2=NMS, 3=JSCP, 4=CONPLAN, 5=OPLAN
+  createdAt      DateTime @default(now())
+
+  // Doctrine cascade — each doc references its parent authority
+  parentDocId    String?
+  parentDoc      StrategyDocument?  @relation("DocCascade", fields: [parentDocId], references: [id])
+  childDocs      StrategyDocument[] @relation("DocCascade")
+
+  // Ingestion metadata
+  sourceFormat   String?  // MEMORANDUM, PLAIN_TEXT, etc.
+  confidence     Float?   // LLM classification confidence 0.0–1.0
+  reviewFlags    Json?    // Items needing human review
+  ingestedAt     DateTime?
+
+  planningDocs   PlanningDocument[]
+
+  @@map("strategy_documents")
+}
+
+model PlanningDocument {
+  id             String            @id @default(uuid())
+  scenarioId     String
+  scenario       Scenario          @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  strategyDocId  String?
+  strategyDoc    StrategyDocument? @relation(fields: [strategyDocId], references: [id])
+  title          String
+  docType        String            // JIPTL, JPEL, COMPONENT_PRIORITY, SPINS, ACO, MAAP
+  content        String            @db.Text
+  docTier        Int               @default(0) // 1=CONPLAN, 2=OPLAN, 3=JIPTL, 4=MAAP, 5=ACO/SPINS
+  effectiveDate  DateTime
+  createdAt      DateTime          @default(now())
+
+  // Ingestion metadata
+  sourceFormat   String?  // STAFF_DOC, USMTF, PLAIN_TEXT, etc.
+  confidence     Float?   // LLM classification confidence 0.0–1.0
+  reviewFlags    Json?    // Items needing human review
+  ingestedAt     DateTime?
+
+  priorities     PriorityEntry[]
+  taskingOrders  TaskingOrder[]
+
+  @@map("planning_documents")
+}
+
+model PriorityEntry {
+  id              String           @id @default(uuid())
+  planningDocId   String
+  planningDoc     PlanningDocument @relation(fields: [planningDocId], references: [id], onDelete: Cascade)
+  rank            Int
+  targetId        String?
+  effect          String
+  description     String
+  justification   String           @db.Text
+  createdAt       DateTime         @default(now())
+
+  @@map("priority_entries")
+}
+
+// ─── Tasking Orders ──────────────────────────────────────────────────────────
+
+model TaskingOrder {
+  id               String            @id @default(uuid())
+  scenarioId       String
+  scenario         Scenario          @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  planningDocId    String?
+  planningDoc      PlanningDocument? @relation(fields: [planningDocId], references: [id])
+  orderType        OrderType
+  orderId          String            // e.g. "ATO-2026-025A"
+  issuingAuthority String
+  effectiveStart   DateTime
+  effectiveEnd     DateTime
+  classification   Classification    @default(UNCLASSIFIED)
+  atoDayNumber     Int?
+  rawText          String?           @db.Text
+  rawFormat        String?           // USMTF, OTH_GOLD, MTF_XML, PLAIN_TEXT
+  createdAt        DateTime          @default(now())
+
+  // Ingestion metadata
+  sourceFormat     String?  // USMTF, OTH_GOLD, MTF_XML, MEMORANDUM, PLAIN_TEXT
+  confidence       Float?   // LLM classification confidence 0.0–1.0
+  reviewFlags      Json?    // Items needing human review
+  ingestedAt       DateTime?
+
+  missionPackages  MissionPackage[]
+
+  @@map("tasking_orders")
+}
+
+model MissionPackage {
+  id              String       @id @default(uuid())
+  taskingOrderId  String
+  taskingOrder    TaskingOrder @relation(fields: [taskingOrderId], references: [id], onDelete: Cascade)
+  packageId       String       // e.g. "PKGA01"
+  priorityRank    Int
+  missionType     String
+  effectDesired   String
+  createdAt       DateTime     @default(now())
+
+  missions        Mission[]
+
+  @@map("mission_packages")
+}
+
+model Mission {
+  id              String          @id @default(uuid())
+  packageId       String
+  package         MissionPackage  @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  missionId       String          // e.g. "MSN4001"
+  callsign        String?
+  domain          Domain
+  unitId          String?
+  unit            Unit?           @relation(fields: [unitId], references: [id])
+  platformType    String
+  platformCount   Int             @default(1)
+  missionType     String
+  status          MissionStatus   @default(PLANNED)
+  affiliation     Affiliation     @default(FRIENDLY)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  waypoints       Waypoint[]
+  timeWindows     TimeWindow[]
+  targets         MissionTarget[]
+  supportReqs     SupportRequirement[]
+  spaceNeeds      SpaceNeed[]
+  positionUpdates PositionUpdate[]
+
+  @@map("missions")
+}
+
+model Waypoint {
+  id            String       @id @default(uuid())
+  missionId     String
+  mission       Mission      @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  waypointType  WaypointType
+  sequence      Int
+  latitude      Float
+  longitude     Float
+  altitude_ft   Float?
+  speed_kts     Float?
+  name          String?
+  createdAt     DateTime     @default(now())
+
+  @@map("waypoints")
+}
+
+model TimeWindow {
+  id          String         @id @default(uuid())
+  missionId   String
+  mission     Mission        @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  windowType  TimeWindowType
+  startTime   DateTime
+  endTime     DateTime?
+  createdAt   DateTime       @default(now())
+
+  @@map("time_windows")
+}
+
+model MissionTarget {
+  id               String    @id @default(uuid())
+  missionId        String
+  mission          Mission   @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  targetId         String
+  beNumber         String?
+  targetName       String
+  latitude         Float
+  longitude        Float
+  targetCategory   String?
+  priorityRank     Int?
+  desiredEffect    String
+  collateralConcern String?
+  createdAt        DateTime  @default(now())
+
+  @@map("mission_targets")
+}
+
+model SupportRequirement {
+  id                  String      @id @default(uuid())
+  missionId           String
+  mission             Mission     @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  supportType         SupportType
+  supportingMissionId String?
+  details             String?
+  createdAt           DateTime    @default(now())
+
+  @@map("support_requirements")
+}
+
+// ─── Units & Assets ──────────────────────────────────────────────────────────
+
+model Unit {
+  id              String      @id @default(uuid())
+  scenarioId      String
+  scenario        Scenario    @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  unitName        String
+  unitDesignation String
+  serviceBranch   String
+  domain          Domain
+  baseLocation    String
+  baseLat         Float
+  baseLon         Float
+  baseId          String?
+  base            Base?       @relation(fields: [baseId], references: [id])
+  affiliation     Affiliation @default(FRIENDLY)
+  createdAt       DateTime    @default(now())
+
+  missions        Mission[]
+  assets          Asset[]
+
+  @@map("units")
+}
+
+model AssetType {
+  id               String   @id @default(uuid())
+  name             String   @unique
+  domain           Domain
+  category         String
+  milsymbolCode    String?
+  commsSystems     Json?    // [{band:"EHF", system:"AEHF", role:"primary"}, {band:"UHF", system:"MUOS", role:"backup"}]
+  gpsType          String?  // M-CODE, SAASM, STANDARD
+  dataLinks        String[] // ["LINK16", "MADL", "LINK4A"]
+  createdAt        DateTime @default(now())
+
+  assets           Asset[]
+
+  @@map("asset_types")
+}
+
+model Asset {
+  id          String    @id @default(uuid())
+  unitId      String
+  unit        Unit      @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  assetTypeId String
+  assetType   AssetType @relation(fields: [assetTypeId], references: [id])
+  tailNumber  String?
+  name        String?
+  status      String    @default("OPERATIONAL") // OPERATIONAL, MAINTENANCE, DAMAGED, DESTROYED
+  createdAt   DateTime  @default(now())
+
+  @@map("assets")
+}
+
+// ─── Space Domain ────────────────────────────────────────────────────────────
+
+model SpaceAsset {
+  id            String   @id @default(uuid())
+  scenarioId    String
+  scenario      Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  name          String
+  constellation String
+  noradId       String?
+  tleLine1      String?
+  tleLine2      String?
+  capabilities  SpaceCapabilityType[]
+  status        String   @default("OPERATIONAL") // OPERATIONAL, MAINTENANCE, DEGRADED, LOST
+  inclination   Float?
+  eccentricity  Float?
+  periodMin     Float?
+  apogeeKm      Float?
+  perigeeKm     Float?
+  createdAt     DateTime @default(now())
+
+  spaceNeeds     SpaceNeed[]
+  coverageWindows SpaceCoverageWindow[]
+
+  @@map("space_assets")
+}
+
+model SpaceNeed {
+  id               String              @id @default(uuid())
+  missionId        String
+  mission          Mission             @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  spaceAssetId     String?
+  spaceAsset       SpaceAsset?         @relation(fields: [spaceAssetId], references: [id])
+  capabilityType   SpaceCapabilityType
+  priority         Int
+  role             String              @default("PRIMARY") // PRIMARY, BACKUP, CONTINGENCY
+  commsBand        String?             // EHF, SHF, UHF, L-BAND, Ku-BAND
+  systemName       String?             // AEHF, WGS, MUOS — specific satellite system
+  startTime        DateTime
+  endTime          DateTime
+  coverageLat      Float?
+  coverageLon      Float?
+  coverageRadiusKm Float?
+  fulfilled        Boolean             @default(false)
+  createdAt        DateTime            @default(now())
+
+  @@map("space_needs")
+}
+
+model SpaceCoverageWindow {
+  id                String              @id @default(uuid())
+  spaceAssetId      String
+  spaceAsset        SpaceAsset          @relation(fields: [spaceAssetId], references: [id], onDelete: Cascade)
+  startTime         DateTime
+  endTime           DateTime
+  maxElevation      Float
+  maxElevationTime  DateTime
+  centerLat         Float
+  centerLon         Float
+  swathWidthKm      Float
+  capabilityType    SpaceCapabilityType
+  createdAt         DateTime            @default(now())
+
+  @@map("space_coverage_windows")
+}
+
+// ─── Simulation ──────────────────────────────────────────────────────────────
+
+model SimulationState {
+  id               String   @id @default(uuid())
+  scenarioId       String
+  scenario         Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  status           String   @default("IDLE") // IDLE, RUNNING, PAUSED, STOPPED
+  simTime          DateTime
+  realStartTime    DateTime
+  compressionRatio Float    @default(720) // 1 real minute = 12 sim hours
+  currentAtoDay    Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@map("simulation_states")
+}
+
+model PositionUpdate {
+  id          String        @id @default(uuid())
+  missionId   String
+  mission     Mission       @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  callsign    String?
+  domain      Domain
+  timestamp   DateTime
+  latitude    Float
+  longitude   Float
+  altitude_ft Float?
+  heading     Float?
+  speed_kts   Float?
+  status      MissionStatus
+  fuelState   String?
+  createdAt   DateTime      @default(now())
+
+  @@index([missionId, timestamp])
+  @@map("position_updates")
+}
+
+// ─── Decision Support ────────────────────────────────────────────────────────
+
+model LeadershipDecision {
+  id                 String   @id @default(uuid())
+  scenarioId         String
+  decisionType       String   // ASSET_REALLOCATION, PRIORITY_SHIFT, MAINTENANCE_SCHEDULE, CONTINGENCY
+  description        String   @db.Text
+  affectedAssetIds   String[]
+  affectedMissionIds String[]
+  rationale          String   @db.Text
+  status             String   @default("PROPOSED") // PROPOSED, APPROVED, EXECUTED
+  createdAt          DateTime @default(now())
+  executedAt         DateTime?
+
+  @@map("leadership_decisions")
+}
+
+// ─── Ingestion Audit ─────────────────────────────────────────────────────────
+
+model IngestLog {
+  id              String   @id @default(uuid())
+  scenarioId      String
+  inputHash       String   // SHA-256 of rawText for dedup
+  hierarchyLevel  String   // STRATEGY, PLANNING, ORDER
+  documentType    String   // NMS, JIPTL, ATO, FRAGORD, etc.
+  sourceFormat    String   // USMTF, OTH_GOLD, MEMORANDUM, PLAIN_TEXT, etc.
+  confidence      Float    // Classification confidence 0.0–1.0
+  createdRecordId String?  // ID of the created StrategyDocument / PlanningDocument / TaskingOrder
+  parentLinkId    String?  // ID of linked parent document
+  extractedCounts Json?    // { missions: 4, waypoints: 12, targets: 3, ... }
+  reviewFlagCount Int      @default(0)
+  parseTimeMs     Int      // Time taken to classify + normalize + persist
+  errorMessage    String?  @db.Text
+  createdAt       DateTime @default(now())
+
+  @@index([scenarioId, createdAt])
+  @@index([inputHash])
+  @@map("ingest_logs")
+}
+
+// ─── Simulation Events ───────────────────────────────────────────────────────
+
+model SimEvent {
+  id          String   @id @default(uuid())
+  scenarioId  String
+  scenario    Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  simTime     DateTime           // When in sim-time the event occurred
+  eventType   String             // SATELLITE_DESTROYED, SATELLITE_JAMMED, UNIT_DESTROYED, COMMS_DEGRADED
+  targetId    String             // ID of the affected asset (SpaceAsset, Unit, etc.)
+  targetType  String             // "SpaceAsset", "Unit"
+  description String
+  effectsJson Json?              // Downstream effects — lost coverage, impacted missions
+  createdAt   DateTime @default(now())
+
+  @@index([scenarioId, simTime])
+  @@map("sim_events")
+}
+
+// ─── Bases / Installations ───────────────────────────────────────────────────
+
+model Base {
+  id          String   @id @default(uuid())
+  scenarioId  String
+  scenario    Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  name        String   // e.g. "Kadena AB"
+  baseType    String   // AIRBASE, NAVAL_BASE, JOINT_BASE
+  latitude    Float
+  longitude   Float
+  country     String   // e.g. "Japan"
+  icaoCode    String?  // e.g. "RODN" for Kadena
+  createdAt   DateTime @default(now())
+
+  units       Unit[]
+
+  @@map("bases")
+}
+
+// ─── MSEL Injects ────────────────────────────────────────────────────────────
+
+model ScenarioInject {
+  id          String    @id @default(uuid())
+  scenarioId  String
+  scenario    Scenario  @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  triggerDay  Int       // ATO day number
+  triggerHour Int       // Hour within day (0-23)
+  injectType  String    // FRICTION, INTEL, CRISIS, SPACE
+  title       String
+  description String    @db.Text
+  impact      String    // Operational impact description
+  fired       Boolean   @default(false)
+  firedAt     DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([scenarioId, triggerDay])
+  @@map("scenario_injects")
+}
