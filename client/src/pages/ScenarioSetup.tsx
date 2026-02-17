@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ArtifactResult, useOverwatchStore } from '../store/overwatch-store';
+import { GenerationProgressModal } from '../components/GenerationProgressModal';
+import { useOverwatchStore } from '../store/overwatch-store';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -48,7 +49,6 @@ export function ScenarioSetup() {
     resumeScenarioGeneration,
     activeScenarioId,
     generationProgress,
-    artifactResults,
   } = useOverwatchStore();
 
   const [generating, setGenerating] = useState(false);
@@ -56,6 +56,7 @@ export function ScenarioSetup() {
   const [scenarioDetail, setScenarioDetail] = useState<any>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showModelPanel, setShowModelPanel] = useState(false);
+  const [showProgressModal, setShowProgressModal] = useState(false);
 
   const [config, setConfig] = useState<ScenarioConfig>({
     name: 'PACIFIC DEFENDER 2026',
@@ -110,6 +111,7 @@ export function ScenarioSetup() {
     setResult(null);
     setScenarioDetail(null);
     setExpanded(null);
+    setShowProgressModal(true);
     useOverwatchStore.setState({ generationProgress: null });
     try {
       const data = await generateScenario({ ...config, modelOverrides });
@@ -125,6 +127,7 @@ export function ScenarioSetup() {
     const scenarioId = result?.data?.id || activeScenarioId;
     if (!scenarioId) return;
     setGenerating(true);
+    setShowProgressModal(true);
     useOverwatchStore.setState({ generationProgress: null });
     try {
       const data = await resumeScenarioGeneration(scenarioId, modelOverrides);
@@ -326,69 +329,24 @@ export function ScenarioSetup() {
                 </div>
               )}
 
-              {/* ─── Live Artifact Results ──────────────────────────────── */}
-              {artifactResults.length > 0 && (
-                <div style={{
-                  marginTop: '12px',
-                  padding: '10px 12px',
-                  background: 'var(--bg-secondary)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: '8px',
-                }}>
-                  <div style={{
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    color: 'var(--text-muted)',
-                    textTransform: 'uppercase' as const,
-                    letterSpacing: '0.05em',
-                    marginBottom: '8px',
-                  }}>
-                    Generation Log
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    {artifactResults.map((r: ArtifactResult, i: number) => (
-                      <div key={i} style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        fontSize: '12px',
-                        padding: '4px 6px',
-                        borderRadius: '4px',
-                        background: r.status === 'error'
-                          ? 'rgba(255, 82, 82, 0.06)'
-                          : r.status === 'placeholder'
-                            ? 'rgba(255, 171, 0, 0.06)'
-                            : 'rgba(0, 200, 83, 0.06)',
-                      }}>
-                        <span style={{ fontSize: '14px' }}>
-                          {r.status === 'success' ? '✓' : r.status === 'placeholder' ? '⚠' : '✗'}
-                        </span>
-                        <span style={{
-                          fontWeight: 600,
-                          color: r.status === 'error'
-                            ? 'var(--accent-danger)'
-                            : r.status === 'placeholder'
-                              ? 'var(--accent-warning)'
-                              : 'var(--accent-success)',
-                          minWidth: '80px',
-                        }}>
-                          {r.artifact}
-                        </span>
-                        <span style={{
-                          flex: 1,
-                          color: 'var(--text-muted)',
-                          fontSize: '11px',
-                        }}>
-                          {r.message || `${r.outputLength.toLocaleString()} chars`}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+              {/* ─── Generation Progress — open modal button if in progress */}
+              {isGenerating && !showProgressModal && (
+                <div
+                  style={{
+                    marginTop: '12px', padding: '12px', borderRadius: '8px',
+                    background: 'rgba(0, 212, 255, 0.06)', border: '1px solid rgba(0, 212, 255, 0.15)',
+                    cursor: 'pointer', textAlign: 'center',
+                  }}
+                  onClick={() => setShowProgressModal(true)}
+                >
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--accent-primary)' }}>
+                    ⚡ View Generation Progress
+                  </span>
                 </div>
               )}
 
-              {/* ─── Artifact Cards (existing scenario or post-generation) */}
-              {scenarioDetail ? (
+              {/* ─── Artifact Cards (existing scenario, post-generation) */}
+              {isComplete && scenarioDetail ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <ArtifactSection
                     icon="📄" title="Strategy Documents"
@@ -503,7 +461,7 @@ export function ScenarioSetup() {
                   )}
                 </div>
               ) : (
-                /* ─── Static Preview (before generation) ─────────────── */
+                /* ─── Static Preview (before generation / during generation) */
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   {ARTIFACT_MODEL_CONFIG.map(item => (
                     <GenerationItem
@@ -583,6 +541,16 @@ export function ScenarioSetup() {
           )}
         </div>
       </div>
+
+      <GenerationProgressModal
+        open={showProgressModal}
+        onClose={() => {
+          setShowProgressModal(false);
+          // Refresh scenario detail when modal closes after completion
+          const scenarioId = result?.data?.id || activeScenarioId;
+          if (scenarioId) loadScenarioDetail(scenarioId);
+        }}
+      />
     </>
   );
 }
