@@ -98,7 +98,7 @@ export function DocumentIntake() {
 
   // Toasts
   const [toasts, setToasts] = useState<string[]>([]);
-  const toastTimeout = useRef<ReturnType<typeof setTimeout>>();
+  const toastTimeout = useRef<ReturnType<typeof setTimeout>>(null);
 
   const addToast = useCallback((message: string) => {
     setToasts(prev => [...prev.slice(-4), message]);

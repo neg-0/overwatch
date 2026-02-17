@@ -955,7 +955,10 @@ async function applyInjectEffect(inject: { id: string; scenarioId: string; injec
     case 'FRICTION': {
       // Delay or cancel a random active mission
       const missions = await prisma.mission.findMany({
-        where: { scenarioId: inject.scenarioId, status: { in: ['PLANNED', 'LAUNCHED', 'AIRBORNE'] } },
+        where: {
+          package: { taskingOrder: { scenarioId: inject.scenarioId } },
+          status: { in: ['PLANNED', 'LAUNCHED', 'AIRBORNE'] },
+        },
       });
       if (missions.length > 0) {
         const target = missions[Math.floor(Math.random() * missions.length)];
@@ -1014,8 +1017,8 @@ async function recordBDA(io: Server): Promise<void> {
   // (no SimEvent with type BDA_RECORDED for that mission)
   const completedMissions = await prisma.mission.findMany({
     where: {
-      scenarioId: currentSim.scenarioId,
-      status: 'COMPLETE',
+      package: { taskingOrder: { scenarioId: currentSim.scenarioId } },
+      status: 'RECOVERED',
     },
     include: { targets: true },
   });
