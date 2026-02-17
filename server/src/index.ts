@@ -73,6 +73,22 @@ app.use('/api/injects', injectRoutes);
 app.use('/api/events', eventsRoutes);
 app.use('/api/advisor', createAdvisorRoutes(io));
 
+// ─── Static File Serving (production) ────────────────────────────────────────
+// In production, serve the built Vite client. API routes above take priority.
+if (config.nodeEnv !== 'development') {
+  const path = await import('path');
+  const { fileURLToPath } = await import('url');
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const clientDist = path.resolve(__dirname, '../../client/dist');
+
+  app.use(express.static(clientDist));
+
+  // SPA fallback — serve index.html for any non-API route
+  app.get('*', (_req, res) => {
+    res.sendFile(path.join(clientDist, 'index.html'));
+  });
+}
+
 // ─── Start Server ────────────────────────────────────────────────────────────
 
 httpServer.listen(config.port, () => {

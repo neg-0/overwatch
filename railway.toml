@@ -1,0 +1,34 @@
+# ─── Overwatch Railway Configuration ─────────────────────────────────────────
+#
+# Single-service deploy: Express serves both the API and the built Vite client.
+# Add a PostgreSQL plugin via the Railway dashboard for the database.
+#
+# Required environment variables (set in Railway dashboard):
+#   DATABASE_URL    → auto-injected by the PostgreSQL plugin
+#   OPENAI_API_KEY  → your OpenAI key
+#   NODE_ENV        → set to "production"
+#
+# Optional environment variables:
+#   MAPBOX_TOKEN    → for the map view
+#   LLM_FLAGSHIP    → override default LLM model (default: gpt-5.2)
+#   LLM_MID_RANGE   → override mid-range model (default: gpt-5-mini)
+#   LLM_FAST        → override fast model (default: gpt-5-nano)
+#   UDL_USERNAME    → UDL credentials
+#   UDL_PASSWORD    → UDL credentials
+
+[build]
+builder = "NIXPACKS"
+buildCommand = """
+npm ci && \
+npm -w shared run build && \
+npm -w client run build && \
+npx prisma generate --schema=server/prisma/schema.prisma && \
+npm -w server run build
+"""
+
+[deploy]
+startCommand = "npx prisma migrate deploy --schema=server/prisma/schema.prisma && npm -w server run start"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
