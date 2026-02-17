@@ -29,10 +29,11 @@ export async function disconnectPrisma(): Promise<void> {
 
 export async function cleanDatabase(): Promise<void> {
   const prisma = getTestPrisma();
-  // Delete in dependency order
+  // Delete in strict dependency order — children before parents
   await prisma.ingestLog.deleteMany();
   await prisma.positionUpdate.deleteMany();
   await prisma.spaceCoverageWindow.deleteMany();
+  await prisma.spaceAllocation.deleteMany();
   await prisma.spaceNeed.deleteMany();
   await prisma.supportRequirement.deleteMany();
   await prisma.missionTarget.deleteMany();
@@ -41,11 +42,13 @@ export async function cleanDatabase(): Promise<void> {
   await prisma.mission.deleteMany();
   await prisma.missionPackage.deleteMany();
   await prisma.taskingOrder.deleteMany();
+  // Asset references both Unit (cascade) and AssetType — delete asset first
   await prisma.asset.deleteMany();
-  await prisma.assetType.deleteMany();
   await prisma.unit.deleteMany();
+  await prisma.assetType.deleteMany();
   await prisma.spaceAsset.deleteMany();
   await prisma.priorityEntry.deleteMany();
+  await prisma.strategyPriority.deleteMany();
   await prisma.planningDocument.deleteMany();
   await prisma.strategyDocument.deleteMany();
   await prisma.scenarioInject.deleteMany();
@@ -189,6 +192,194 @@ export async function seedTestScenario(): Promise<TestSeedResult> {
     missionId: mission.id,
     packageId: pkg.id,
     orderId: order.id,
+  };
+}
+
+// ─── Allocation-Specific Seed ────────────────────────────────────────────────
+
+export interface AllocationSeedResult {
+  scenarioId: string;
+  strategyDocId: string;
+  strategyPriorityId: string;
+  planningDocId: string;
+  priorityEntryId: string;
+  orderId: string;
+  packageId: string;
+  missionId: string;
+  spaceNeedId: string;
+  spaceAssetId: string;
+}
+
+/**
+ * Seed a scenario with full traceability:
+ * Scenario → StrategyDoc → StrategyPriority → PlanningDoc → PriorityEntry → Order → Pkg → Mission → SpaceNeed
+ * + an operational SpaceAsset with a coverage window overlapping the need.
+ */
+export async function seedAllocationScenario(): Promise<AllocationSeedResult> {
+  const prisma = getTestPrisma();
+  const now = new Date();
+  const start = new Date(now.getTime() - 2 * 3600000);
+  const end = new Date(now.getTime() + 24 * 3600000);
+
+  const scenario = await prisma.scenario.create({
+    data: {
+      name: 'Allocation Test Scenario',
+      description: 'Allocation test with full traceability',
+      theater: 'PACOM',
+      adversary: 'OPFOR',
+      startDate: start,
+      endDate: end,
+      classification: 'UNCLASSIFIED',
+    },
+  });
+
+  const stratDoc = await prisma.strategyDocument.create({
+    data: {
+      scenarioId: scenario.id,
+      title: 'NMS Pacific Theater',
+      docType: 'NMS',
+      authorityLevel: 'SecDef',
+      tier: 2,
+      content: 'Strategy content for allocation test',
+      effectiveDate: start,
+    },
+  });
+
+  const stratPriority = await prisma.strategyPriority.create({
+    data: {
+      strategyDocId: stratDoc.id,
+      rank: 1,
+      objective: 'Space superiority over contested regions',
+      description: 'Ensure GPS and SATCOM superiority for all deployed forces in the Pacific theater',
+    },
+  });
+
+  const planDoc = await prisma.planningDocument.create({
+    data: {
+      scenarioId: scenario.id,
+      strategyDocId: stratDoc.id,
+      title: 'CONOP Pacific',
+      docType: 'CONOP',
+      content: 'Planning doc for allocation test',
+      effectiveDate: start,
+    },
+  });
+
+  const priorityEntry = await prisma.priorityEntry.create({
+    data: {
+      planningDocId: planDoc.id,
+      rank: 1,
+      effect: 'Ensure GPS coverage for maritime operations',
+      description: 'GPS coverage priority for Pacific maritime ops',
+      justification: 'GPS is critical for precision navigation of strike packages in contested waters',
+      strategyPriorityId: stratPriority.id,
+    },
+  });
+
+  const unit = await prisma.unit.create({
+    data: {
+      scenarioId: scenario.id,
+      unitName: 'Test Unit',
+      unitDesignation: 'ALLOC-1',
+      serviceBranch: 'USAF',
+      domain: 'AIR',
+      baseLocation: 'Kadena AB',
+      baseLat: 26.35,
+      baseLon: 127.77,
+    },
+  });
+
+  const order = await prisma.taskingOrder.create({
+    data: {
+      scenarioId: scenario.id,
+      planningDocId: planDoc.id,
+      orderType: 'ATO',
+      orderId: 'ATO-ALLOC-001',
+      issuingAuthority: 'CFACC 613AOC',
+      effectiveStart: start,
+      effectiveEnd: end,
+      atoDayNumber: 1,
+    },
+  });
+
+  const pkg = await prisma.missionPackage.create({
+    data: {
+      taskingOrderId: order.id,
+      packageId: 'PKG-ALLOC-01',
+      priorityRank: 1,
+      missionType: 'OCA',
+      effectDesired: 'Suppress IADS',
+    },
+  });
+
+  const mission = await prisma.mission.create({
+    data: {
+      packageId: pkg.id,
+      missionId: 'MSN-ALLOC-001',
+      callsign: 'VIPER 11',
+      domain: 'AIR',
+      unitId: unit.id,
+      platformType: 'F-35A',
+      platformCount: 4,
+      missionType: 'OCA',
+      status: 'PLANNED',
+      affiliation: 'FRIENDLY',
+    },
+  });
+
+  const spaceNeed = await prisma.spaceNeed.create({
+    data: {
+      missionId: mission.id,
+      capabilityType: 'GPS',
+      priority: 1,
+      startTime: start,
+      endTime: end,
+      missionCriticality: 'CRITICAL',
+      fallbackCapability: 'GPS_MILITARY',
+      riskIfDenied: 'Loss of precision navigation for strike package',
+      priorityEntryId: priorityEntry.id,
+    },
+  });
+
+  const spaceAsset = await prisma.spaceAsset.create({
+    data: {
+      scenarioId: scenario.id,
+      name: 'GPS III SV01',
+      constellation: 'GPS',
+      status: 'OPERATIONAL',
+      capabilities: ['GPS'],
+      inclination: 55.0,
+      periodMin: 718.0,
+      eccentricity: 0.002,
+    },
+  });
+
+  // Create a coverage window that overlaps the space need
+  await prisma.spaceCoverageWindow.create({
+    data: {
+      spaceAssetId: spaceAsset.id,
+      capabilityType: 'GPS',
+      startTime: start,
+      endTime: end,
+      maxElevation: 45.0,
+      maxElevationTime: new Date(start.getTime() + 3 * 3600000),
+      centerLat: 26.35,
+      centerLon: 127.77,
+      swathWidthKm: 12000,
+    },
+  });
+
+  return {
+    scenarioId: scenario.id,
+    strategyDocId: stratDoc.id,
+    strategyPriorityId: stratPriority.id,
+    planningDocId: planDoc.id,
+    priorityEntryId: priorityEntry.id,
+    orderId: order.id,
+    packageId: pkg.id,
+    missionId: mission.id,
+    spaceNeedId: spaceNeed.id,
+    spaceAssetId: spaceAsset.id,
   };
 }
 
