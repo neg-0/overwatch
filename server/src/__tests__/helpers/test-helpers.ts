@@ -1,7 +1,7 @@
 /**
  * Shared test helpers for integration and E2E tests.
  */
-import { PrismaClient } from '@prisma/client';
+import { GenerationStatus, PrismaClient } from '@prisma/client';
 import express from 'express';
 import { createServer, type Server as HttpServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
@@ -48,6 +48,7 @@ export async function cleanDatabase(): Promise<void> {
   await prisma.priorityEntry.deleteMany();
   await prisma.planningDocument.deleteMany();
   await prisma.strategyDocument.deleteMany();
+  await prisma.scenarioInject.deleteMany();
   await prisma.simulationState.deleteMany();
   await prisma.leadershipDecision.deleteMany();
   await prisma.scenario.deleteMany();
@@ -61,6 +62,36 @@ export interface TestSeedResult {
   missionId: string;
   packageId: string;
   orderId: string;
+}
+
+export interface FailedScenarioSeedResult {
+  scenarioId: string;
+}
+
+/**
+ * Seed a scenario with generationStatus = 'FAILED' for resume endpoint testing.
+ */
+export async function seedFailedScenario(): Promise<FailedScenarioSeedResult> {
+  const prisma = getTestPrisma();
+  const now = new Date();
+
+  const scenario = await prisma.scenario.create({
+    data: {
+      name: 'Failed Scenario',
+      description: 'Scenario that failed mid-generation',
+      theater: 'TEST',
+      adversary: 'OPFOR',
+      startDate: new Date(now.getTime() - 2 * 3600000),
+      endDate: new Date(now.getTime() + 24 * 3600000),
+      classification: 'UNCLASSIFIED',
+      generationStatus: GenerationStatus.FAILED,
+      generationStep: 'Campaign Plan',
+      generationProgress: 25,
+      generationError: 'OpenAI API timeout',
+    },
+  });
+
+  return { scenarioId: scenario.id };
 }
 
 export async function seedTestScenario(): Promise<TestSeedResult> {

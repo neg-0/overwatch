@@ -1,3 +1,4 @@
+import { GenerationStatus } from '@prisma/client';
 import { Socket, Server as SocketIOServer } from 'socket.io';
 
 let ioInstance: SocketIOServer | null = null;
@@ -89,6 +90,18 @@ export function broadcastAlertGap(scenarioId: string, data: {
   recommendation: string;
 }) {
   ioInstance?.to(`scenario:${scenarioId}`).emit('alert:gap', data);
+}
+
+export function broadcastGenerationProgress(scenarioId: string, data: {
+  step: string;
+  progress: number;
+  status: GenerationStatus;
+  error?: string;
+}) {
+  ioInstance?.to(`scenario:${scenarioId}`).emit('scenario:generation-progress', {
+    scenarioId,
+    ...data,
+  });
 }
 
 export function getIO(): SocketIOServer | null {

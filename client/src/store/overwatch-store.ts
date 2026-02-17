@@ -1,6 +1,45 @@
 import { io, Socket } from 'socket.io-client';
 import { create } from 'zustand';
 
+// ─── Scenario Generation Types ─────────────────────────────────────────────────
+
+export interface ModelOverrides {
+  strategyDocs?: string;
+  campaignPlan?: string;
+  orbat?: string;
+  planningDocs?: string;
+  maap?: string;
+  mselInjects?: string;
+  dailyOrders?: string;
+}
+
+export interface GenerateScenarioConfig {
+  name: string;
+  theater?: string;
+  adversary?: string;
+  description?: string;
+  duration?: number;
+  compressionRatio?: number;
+  modelOverrides?: ModelOverrides;
+}
+
+export interface ApiResponse<T = unknown> {
+  success: boolean;
+  data?: T;
+  error?: string;
+  message?: string;
+  timestamp: string;
+}
+
+export interface ScenarioSummary {
+  id: string;
+  name: string;
+  theater: string;
+  adversary: string;
+  generationStatus: string;
+  generationProgress: number;
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface SimulationState {
@@ -80,6 +119,14 @@ interface OverwatchStore {
   // Events
   simEvents: SimEvent[];
 
+  // Generation tracking
+  generationProgress: {
+    step: string;
+    progress: number;
+    status: 'GENERATING' | 'COMPLETE' | 'FAILED';
+    error?: string;
+  } | null;
+
   // Actions
   connect: () => void;
   disconnect: () => void;
@@ -89,9 +136,10 @@ interface OverwatchStore {
   pauseSimulation: () => Promise<void>;
   resumeSimulation: () => Promise<void>;
   stopSimulation: () => Promise<void>;
-  generateScenario: (config: any) => Promise<any>;
+  generateScenario: (config: GenerateScenarioConfig) => Promise<ApiResponse<ScenarioSummary>>;
   deleteScenario: (id: string) => Promise<void>;
-  fetchScenarioDetail: (id: string) => Promise<any>;
+  fetchScenarioDetail: (id: string) => Promise<Record<string, unknown> | null>;
+  resumeScenarioGeneration: (id: string, modelOverrides?: ModelOverrides) => Promise<ApiResponse>;
 
   // Timeline playback
   seekTo: (simTime: string) => Promise<void>;
@@ -120,6 +168,7 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
   coverageWindows: [],
   alerts: [],
   simEvents: [],
+  generationProgress: null,
 
   // ─── WebSocket Connection ────────────────────────────────────────────────
   connect: () => {
@@ -203,8 +252,24 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
 
     // Order published
     socket.on('order:published', (data: any) => {
+      console.log('[WS] Order published:', data);
       const alerts = [...get().alerts, `${data.orderType} Day ${data.day} published`];
       set({ alerts });
+    });
+
+    socket.on('scenario:generation-progress', (data: any) => {
+      set({
+        generationProgress: {
+          step: data.step,
+          progress: data.progress,
+          status: data.status,
+          error: data.error,
+        },
+      });
+      // Auto-refresh scenarios when generation completes
+      if (data.status === 'COMPLETE') {
+        get().fetchScenarios();
+      }
     });
 
     set({ socket });
@@ -241,7 +306,7 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
     }
   },
 
-  generateScenario: async (config: any) => {
+  generateScenario: async (config: GenerateScenarioConfig) => {
     const res = await fetch('/api/scenarios/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -281,6 +346,21 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
     } catch (err) {
       console.error('[STORE] Failed to fetch scenario detail:', err);
       return null;
+    }
+  },
+
+  resumeScenarioGeneration: async (id: string, modelOverrides?: ModelOverrides) => {
+    try {
+      const res = await fetch(`/api/scenarios/${id}/resume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modelOverrides }),
+      });
+      const data = await res.json();
+      return data;
+    } catch (err) {
+      console.error('[STORE] Failed to resume generation:', err);
+      return { success: false, error: String(err) };
     }
   },
 

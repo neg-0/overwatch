@@ -7,7 +7,9 @@ import {
   cleanDatabase,
   createTestApp,
   disconnectPrisma,
+  seedFailedScenario,
   seedTestScenario,
+  type FailedScenarioSeedResult,
   type TestApp,
   type TestSeedResult,
 } from '../helpers/test-helpers.js';
@@ -68,7 +70,7 @@ describe('Scenario API', () => {
   });
 
   describe('POST /api/scenarios/generate', () => {
-    it('creates a placeholder scenario and returns 202', async () => {
+    it('creates a scenario with GENERATING status and returns 202', async () => {
       const res = await fetch(`${app.baseUrl}/api/scenarios/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -84,7 +86,86 @@ describe('Scenario API', () => {
       expect(res.status).toBe(202);
       expect(body.success).toBe(true);
       expect(body.data.name).toBe('Generated Scenario');
+      expect(body.data.generationStatus).toBe('GENERATING');
       expect(body.message).toContain('Scenario created');
+    });
+
+    it('returns 400 when name is missing', async () => {
+      const res = await fetch(`${app.baseUrl}/api/scenarios/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ theater: 'PACOM', duration: 7 }),
+      });
+      const body: any = await res.json();
+      expect(res.status).toBe(400);
+      expect(body.success).toBe(false);
+      expect(body.error).toContain('name');
+    });
+
+    it('returns 400 when name is empty string', async () => {
+      const res = await fetch(`${app.baseUrl}/api/scenarios/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: '   ', theater: 'PACOM' }),
+      });
+      const body: any = await res.json();
+      expect(res.status).toBe(400);
+      expect(body.success).toBe(false);
+    });
+  });
+
+  describe('GET /api/scenarios/:id/generation-status', () => {
+    it('returns generation status fields', async () => {
+      const res = await fetch(`${app.baseUrl}/api/scenarios/${seed.scenarioId}/generation-status`);
+      const body: any = await res.json();
+      expect(res.status).toBe(200);
+      expect(body.success).toBe(true);
+      expect(body.data).toHaveProperty('generationStatus');
+      expect(body.data).toHaveProperty('generationStep');
+      expect(body.data).toHaveProperty('generationProgress');
+    });
+
+    it('returns 404 for nonexistent scenario', async () => {
+      const res = await fetch(`${app.baseUrl}/api/scenarios/00000000-0000-0000-0000-000000000000/generation-status`);
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe('POST /api/scenarios/:id/resume', () => {
+    it('returns 400 when scenario is not in FAILED state', async () => {
+      // seed scenario has default PENDING status
+      const res = await fetch(`${app.baseUrl}/api/scenarios/${seed.scenarioId}/resume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const body: any = await res.json();
+      expect(res.status).toBe(400);
+      expect(body.success).toBe(false);
+      expect(body.error).toContain('FAILED');
+    });
+
+    it('returns 404 for nonexistent scenario', async () => {
+      const res = await fetch(`${app.baseUrl}/api/scenarios/00000000-0000-0000-0000-000000000000/resume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(404);
+    });
+
+    it('returns 202 when scenario is FAILED and can be resumed', async () => {
+      const failedSeed: FailedScenarioSeedResult = await seedFailedScenario();
+
+      const res = await fetch(`${app.baseUrl}/api/scenarios/${failedSeed.scenarioId}/resume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const body: any = await res.json();
+      expect(res.status).toBe(202);
+      expect(body.success).toBe(true);
+      expect(body.data.resumingFromStep).toBe('Campaign Plan');
     });
   });
 });

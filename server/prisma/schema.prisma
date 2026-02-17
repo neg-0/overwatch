@@ -108,6 +108,13 @@ enum Classification {
 
 // ─── Scenario & Strategy ─────────────────────────────────────────────────────
 
+enum GenerationStatus {
+  PENDING
+  GENERATING
+  COMPLETE
+  FAILED
+}
+
 model Scenario {
   id             String              @id @default(uuid())
   name           String
@@ -117,8 +124,15 @@ model Scenario {
   startDate      DateTime
   endDate        DateTime
   classification Classification      @default(UNCLASSIFIED)
+  compressionRatio Float             @default(720) // Default sim speed: 1 real min = 12 sim hrs
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
+
+  // Generation pipeline tracking
+  generationStatus   GenerationStatus @default(PENDING)
+  generationStep     String?                        // Current step name (e.g. "Strategic Context")
+  generationError    String?  @db.Text              // Error message if FAILED
+  generationProgress Int      @default(0)           // 0-100 percentage
 
   strategies       StrategyDocument[]
   planningDocs     PlanningDocument[]

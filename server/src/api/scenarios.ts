@@ -1,3 +1,4 @@
+import { GenerationStatus } from '@prisma/client';
 import { Router } from 'express';
 import prisma from '../db/prisma-client.js';
 import { generateFullScenario } from '../services/scenario-generator.js';
@@ -25,7 +26,7 @@ scenarioRoutes.get('/', async (_req, res) => {
   }
 });
 
-// Get scenario detail
+// Get scenario detail (includes all artifacts)
 scenarioRoutes.get('/:id', async (req, res) => {
   try {
     const scenario = await prisma.scenario.findUnique({
@@ -38,6 +39,30 @@ scenarioRoutes.get('/:id', async (req, res) => {
         },
         units: { include: { assets: { include: { assetType: true } } } },
         spaceAssets: true,
+        scenarioInjects: { orderBy: { triggerDay: 'asc' } },
+        taskingOrders: { orderBy: { atoDayNumber: 'asc' } },
+      },
+    });
+    if (!scenario) {
+      return res.status(404).json({ success: false, error: 'Scenario not found', timestamp: new Date().toISOString() });
+    }
+    res.json({ success: true, data: scenario, timestamp: new Date().toISOString() });
+  } catch (error) {
+    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+  }
+});
+
+// Lightweight generation status check
+scenarioRoutes.get('/:id/generation-status', async (req, res) => {
+  try {
+    const scenario = await prisma.scenario.findUnique({
+      where: { id: req.params.id },
+      select: {
+        id: true,
+        generationStatus: true,
+        generationStep: true,
+        generationProgress: true,
+        generationError: true,
       },
     });
     if (!scenario) {
@@ -52,40 +77,108 @@ scenarioRoutes.get('/:id', async (req, res) => {
 // Generate a new scenario (triggers LLM pipeline)
 scenarioRoutes.post('/generate', async (req, res) => {
   try {
-    const { name, theater, adversary, description, duration, compressionRatio } = req.body;
+    const { name, theater, adversary, description, duration, compressionRatio, modelOverrides } = req.body;
 
-    // Respond immediately with accepted status, then generate in background
-    const placeholderScenario = await prisma.scenario.create({
+    // Input validation
+    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+      return res.status(400).json({ success: false, error: 'name is required and must be a non-empty string', timestamp: new Date().toISOString() });
+    }
+    const safeDuration = Math.max(1, Math.min(Number(duration) || 14, 90));
+    const safeCompression = Number(compressionRatio) || 720;
+
+    // Create the scenario record first — generator works against this ID
+    const scenario = await prisma.scenario.create({
       data: {
-        name: name || 'PACIFIC DEFENDER 2026',
+        name: name.trim(),
         description: description || 'Multi-domain joint operation scenario',
         theater: theater || 'INDOPACOM — Western Pacific',
         adversary: adversary || 'Near-peer state adversary (Pacific)',
         startDate: new Date('2026-03-01T00:00:00Z'),
-        endDate: new Date(Date.now() + (duration || 14) * 24 * 3600000),
+        endDate: new Date(Date.now() + safeDuration * 24 * 3600000),
         classification: 'UNCLASSIFIED',
+        compressionRatio: safeCompression,
+        generationStatus: GenerationStatus.GENERATING,
       },
     });
 
     res.status(202).json({
       success: true,
-      data: placeholderScenario,
+      data: scenario,
       message: 'Scenario created. LLM generation pipeline started in background.',
       timestamp: new Date().toISOString(),
     });
 
-    // Fire-and-forget LLM generation (updates the scenario with generated content)
+    // Fire-and-forget — generator uses the SAME scenario ID, no duplicate
     generateFullScenario({
-      name: name || 'PACIFIC DEFENDER 2026',
-      theater: theater || 'INDOPACOM — Western Pacific',
-      adversary: adversary || 'Near-peer state adversary (Pacific)',
-      description: description || 'Multi-domain joint operation scenario',
-      duration: duration || 14,
-      compressionRatio: compressionRatio || 720,
-    }).then(scenarioId => {
-      console.log(`[SCENARIO] Background generation complete: ${scenarioId}`);
+      scenarioId: scenario.id,
+      name: scenario.name,
+      theater: scenario.theater,
+      adversary: scenario.adversary,
+      description: scenario.description,
+      duration: safeDuration,
+      compressionRatio: safeCompression,
+      modelOverrides,
+    }).then(() => {
+      console.log(`[SCENARIO] Background generation complete: ${scenario.id}`);
     }).catch(err => {
-      console.error('[SCENARIO] Background generation failed:', err);
+      console.error(`[SCENARIO] Background generation failed: ${scenario.id}`, err);
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+  }
+});
+
+// Resume a failed generation from the last failed step
+scenarioRoutes.post('/:id/resume', async (req, res) => {
+  try {
+    // Atomic update prevents double-resume race condition.
+    // Only transitions FAILED → GENERATING; returns count = 0 if already resumed.
+    const updated = await prisma.scenario.updateMany({
+      where: { id: req.params.id, generationStatus: GenerationStatus.FAILED },
+      data: { generationStatus: GenerationStatus.GENERATING },
+    });
+
+    if (updated.count === 0) {
+      // Could be 404 or wrong status — distinguish
+      const exists = await prisma.scenario.findUnique({ where: { id: req.params.id } });
+      if (!exists) {
+        return res.status(404).json({ success: false, error: 'Scenario not found', timestamp: new Date().toISOString() });
+      }
+      return res.status(400).json({
+        success: false,
+        error: `Cannot resume — status is "${exists.generationStatus}", expected "FAILED"`,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // Re-fetch the scenario for full context
+    const scenario = await prisma.scenario.findUniqueOrThrow({ where: { id: req.params.id } });
+    const { modelOverrides } = req.body || {};
+
+    const duration = Math.ceil((scenario.endDate.getTime() - scenario.startDate.getTime()) / (24 * 3600000));
+
+    res.status(202).json({
+      success: true,
+      data: { id: scenario.id, resumingFromStep: scenario.generationStep },
+      message: `Resuming generation from step: ${scenario.generationStep}`,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Resume from the failed step
+    generateFullScenario({
+      scenarioId: scenario.id,
+      name: scenario.name,
+      theater: scenario.theater,
+      adversary: scenario.adversary,
+      description: scenario.description,
+      duration,
+      compressionRatio: scenario.compressionRatio,
+      modelOverrides,
+      resumeFromStep: scenario.generationStep || undefined,
+    }).then(() => {
+      console.log(`[SCENARIO] Resume generation complete: ${scenario.id}`);
+    }).catch(err => {
+      console.error(`[SCENARIO] Resume generation failed: ${scenario.id}`, err);
     });
   } catch (error) {
     res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });

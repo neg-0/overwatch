@@ -1,7 +1,9 @@
+import { GenerationStatus, OrderType } from '@prisma/client';
 import OpenAI from 'openai';
 import { v4 as uuid } from 'uuid';
 import { config } from '../config.js';
 import prisma from '../db/prisma-client.js';
+import { broadcastGenerationProgress } from '../websocket/ws-server.js';
 import { ingestDocument } from './doc-ingest.js';
 
 // ─── OpenAI Client ───────────────────────────────────────────────────────────
@@ -12,8 +14,8 @@ const openai = new OpenAI({
 
 // ─── Model Selection by Task Complexity ──────────────────────────────────────
 
-function getModel(tier: 'flagship' | 'midRange' | 'fast'): string {
-  return config.llm[tier];
+function getModel(tier: 'flagship' | 'midRange' | 'fast', override?: string): string {
+  return override || config.llm[tier];
 }
 
 // ─── Prompt Templates ────────────────────────────────────────────────────────
@@ -58,6 +60,7 @@ async function generateStrategicContext(
   description: string,
   startDate: Date,
   endDate: Date,
+  modelOverride?: string,
 ) {
   const cascade = [
     {
@@ -124,7 +127,7 @@ Do NOT include operational details — this is national-level guidance.`,
         .replace('{docTypeSpecific}', doc.docTypeSpecific);
 
       const response = await openai.chat.completions.create({
-        model: getModel('flagship'),
+        model: getModel('flagship', modelOverride),
         messages: [{ role: 'user', content: prompt }],
         reasoning_effort: 'high',
         max_completion_tokens: 3000,
@@ -230,6 +233,7 @@ async function generateCampaignPlan(
   description: string,
   startDate: Date,
   endDate: Date,
+  modelOverride?: string,
 ) {
   // Get the JSCP (tier 3) to feed into campaign planning
   const jscp = await prisma.strategyDocument.findFirst({
@@ -325,7 +329,7 @@ Include both AIR and MARITIME domain units. Do NOT include LAND domain.
         .replace(/\{docTypeSpecific\}/g, doc.docTypeSpecific);
 
       const response = await openai.chat.completions.create({
-        model: getModel('flagship'),
+        model: getModel('flagship', modelOverride),
         messages: [{ role: 'user', content: prompt }],
         reasoning_effort: 'high',
         max_completion_tokens: 5000,
@@ -536,82 +540,128 @@ Return ONLY valid JSON.`;
 
 // ─── Generation Functions ────────────────────────────────────────────────────
 
+export interface ModelOverrides {
+  strategyDocs?: string;   // NDS, NMS, JSCP
+  campaignPlan?: string;   // CONPLAN, OPLAN
+  orbat?: string;          // Joint Force ORBAT (drives prompt → AI output)
+  planningDocs?: string;   // JIPTL, SPINS, ACO
+  maap?: string;           // Master Air Attack Plan
+  mselInjects?: string;    // Friction events
+  dailyOrders?: string;    // ATO, MTO, STO
+}
+
 export interface GenerateScenarioOptions {
+  scenarioId: string;
   name: string;
   theater: string;
   adversary: string;
   description: string;
   duration: number;
   compressionRatio: number;
+  modelOverrides?: ModelOverrides;
+  resumeFromStep?: string;  // Step name to resume from
+}
+
+// ─── Generation Steps (ordered) ──────────────────────────────────────────────
+
+const GENERATION_STEPS = [
+  { name: 'Strategic Context', progress: 10 },
+  { name: 'Campaign Plan', progress: 25 },
+  { name: 'Theater Bases', progress: 35 },
+  { name: 'Joint Force ORBAT', progress: 50 },
+  { name: 'Space Constellation', progress: 60 },
+  { name: 'Planning Documents', progress: 75 },
+  { name: 'MAAP', progress: 85 },
+  { name: 'MSEL Injects', progress: 95 },
+] as const;
+
+async function updateGenerationStatus(
+  scenarioId: string,
+  status: GenerationStatus,
+  step?: string,
+  progress?: number,
+  error?: string,
+) {
+  await prisma.scenario.update({
+    where: { id: scenarioId },
+    data: {
+      generationStatus: status,
+      ...(step !== undefined && { generationStep: step }),
+      ...(progress !== undefined && { generationProgress: progress }),
+      ...(error !== undefined && { generationError: error }),
+      ...(status === GenerationStatus.COMPLETE && { generationError: null }),
+    },
+  });
+  broadcastGenerationProgress(scenarioId, {
+    step: step || '',
+    progress: progress || 0,
+    status,
+    ...(error && { error }),
+  });
 }
 
 export async function generateFullScenario(options: GenerateScenarioOptions): Promise<string> {
   const {
-    name,
+    scenarioId,
     theater,
     adversary,
     description,
     duration,
-    compressionRatio,
+    modelOverrides = {},
+    resumeFromStep,
   } = options;
 
   const startDate = new Date('2026-03-01T00:00:00Z');
   const endDate = new Date(startDate.getTime() + duration * 24 * 3600000);
 
-  console.log('[SCENARIO] Creating scenario record...');
+  // Determine which step to start from (for resume)
+  let startIndex = 0;
+  if (resumeFromStep) {
+    const idx = GENERATION_STEPS.findIndex(s => s.name === resumeFromStep);
+    if (idx >= 0) startIndex = idx;
+    console.log(`[SCENARIO] Resuming from step ${startIndex}: ${resumeFromStep}`);
+  }
 
-  // 1. Create the scenario
-  const scenario = await prisma.scenario.create({
-    data: {
-      name,
-      description,
-      theater,
-      adversary,
-      startDate,
-      endDate,
-      classification: 'UNCLASSIFIED',
-    },
-  });
+  await updateGenerationStatus(scenarioId, GenerationStatus.GENERATING, GENERATION_STEPS[startIndex].name, 0);
+  console.log(`[SCENARIO] Starting generation for ${scenarioId}`);
 
-  console.log(`[SCENARIO] Created: ${scenario.id}`);
+  // ─── Step runner — derive from GENERATION_STEPS to avoid duplication ────────
+  const stepFns: Record<string, () => Promise<void>> = {
+    'Strategic Context': () => generateStrategicContext(scenarioId, theater, adversary, description, startDate, endDate, modelOverrides.strategyDocs),
+    'Campaign Plan': () => generateCampaignPlan(scenarioId, theater, adversary, description, startDate, endDate, modelOverrides.campaignPlan),
+    'Theater Bases': () => generateBases(scenarioId),
+    'Joint Force ORBAT': () => generateJointForce(scenarioId, theater, adversary, modelOverrides.orbat),
+    'Space Constellation': () => generateSpaceConstellation(scenarioId),
+    'Planning Documents': () => generatePlanningDocuments(scenarioId, theater, adversary, modelOverrides.planningDocs),
+    'MAAP': () => generateMAAP(scenarioId, theater, adversary, modelOverrides.maap),
+    'MSEL Injects': () => generateMSELInjects(scenarioId, theater, adversary, duration, modelOverrides.mselInjects),
+  };
 
-  // 2. Doctrine cascade: NDS → NMS → JSCP (flagship model for quality)
-  console.log('[SCENARIO] Generating strategic context cascade...');
-  await generateStrategicContext(scenario.id, theater, adversary, description, startDate, endDate);
+  const steps = GENERATION_STEPS.map(s => ({
+    ...s,
+    fn: stepFns[s.name] || (() => Promise.resolve()),
+  }));
 
-  // 3. Campaign plan cascade: JSCP → CONPLAN → OPLAN (with force sizing)
-  console.log('[SCENARIO] Generating campaign plan (CONPLAN + OPLAN)...');
-  await generateCampaignPlan(scenario.id, theater, adversary, description, startDate, endDate);
+  for (let i = startIndex; i < steps.length; i++) {
+    const step = steps[i];
+    try {
+      console.log(`[SCENARIO] Step ${i + 1}/${steps.length}: ${step.name}...`);
+      await updateGenerationStatus(scenarioId, GenerationStatus.GENERATING, step.name, step.progress);
+      await step.fn();
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      console.error(`[SCENARIO] FAILED at step "${step.name}":`, errorMsg);
+      await updateGenerationStatus(scenarioId, GenerationStatus.FAILED, step.name, step.progress, errorMsg);
+      throw err; // re-throw for the API route to handle
+    }
+  }
 
-  // 4. Create real INDOPACOM installations
-  console.log('[SCENARIO] Generating theater bases...');
-  await generateBases(scenario.id);
-
-  // 5. Generate units and assets from OPLAN force sizing (or fallback)
-  console.log('[SCENARIO] Generating joint force ORBAT...');
-  await generateJointForce(scenario.id, theater, adversary);
-
-  // 6. Generate space assets
-  console.log('[SCENARIO] Generating space constellation...');
-  await generateSpaceConstellation(scenario.id);
-
-  // 7. Generate initial planning documents (JIPTL, SPINS, ACO)
-  console.log('[SCENARIO] Generating planning documents...');
-  await generatePlanningDocuments(scenario.id, theater, adversary);
-
-  // 8. Generate MAAP (bridges OPLAN + JIPTL → daily ATO generation)
-  console.log('[SCENARIO] Generating MAAP...');
-  await generateMAAP(scenario.id, theater, adversary);
-
-  // 9. Generate MSEL injects (friction events across all days)
-  console.log('[SCENARIO] Generating MSEL injects...');
-  await generateMSELInjects(scenario.id, theater, adversary, duration);
-
-  console.log(`[SCENARIO] Generation complete for ${scenario.id}`);
-  return scenario.id;
+  await updateGenerationStatus(scenarioId, GenerationStatus.COMPLETE, 'Done', 100);
+  console.log(`[SCENARIO] Generation complete for ${scenarioId}`);
+  return scenarioId;
 }
 
-async function generateJointForce(scenarioId: string, theater: string, adversary: string) {
+async function generateJointForce(scenarioId: string, theater: string, adversary: string, modelOverride?: string) {
   // ─── Platform Comms Catalog (grounded truth — NOT AI-generated) ────────────
   const assetTypes = [
     {
@@ -975,7 +1025,7 @@ async function generateSpaceConstellation(scenarioId: string) {
   console.log(`  [SPACE] Created ${spaceAssets.length} space assets across 6 constellations`);
 }
 
-async function generatePlanningDocuments(scenarioId: string, theater: string, adversary: string) {
+async function generatePlanningDocuments(scenarioId: string, theater: string, adversary: string, modelOverride?: string) {
   // Fetch strategy documents to feed context into planning doc generation
   const strategyDocs = await prisma.strategyDocument.findMany({
     where: { scenarioId },
@@ -1032,7 +1082,7 @@ Format with sections covering:
         .replace(/\${"{docTypeInstructions}"}/g, docTypeInstructions[doc.docType] || '');
 
       const response = await openai.chat.completions.create({
-        model: getModel('midRange'),
+        model: getModel('midRange', modelOverride),
         messages: [{ role: 'user', content: prompt }],
         reasoning_effort: 'medium',
         max_completion_tokens: 4000,
@@ -1122,7 +1172,7 @@ Include sections:
 The MAAP should be 800-1200 words.
 Return ONLY the document text, no JSON, no markdown fences.`;
 
-async function generateMAAP(scenarioId: string, theater: string, adversary: string) {
+async function generateMAAP(scenarioId: string, theater: string, adversary: string, modelOverride?: string) {
   // Pull OPLAN content
   const oplan = await prisma.strategyDocument.findFirst({
     where: { scenarioId, docType: 'OPLAN', tier: 5 },
@@ -1161,7 +1211,7 @@ async function generateMAAP(scenarioId: string, theater: string, adversary: stri
 
   try {
     const response = await openai.chat.completions.create({
-      model: getModel('flagship'),
+      model: getModel('flagship', modelOverride),
       messages: [{ role: 'user', content: prompt }],
       reasoning_effort: 'high',
       max_completion_tokens: 4000,
@@ -1258,6 +1308,7 @@ async function generateMSELInjects(
   theater: string,
   adversary: string,
   totalDays: number,
+  modelOverride?: string,
 ) {
   // Build context summaries
   const units = await prisma.unit.findMany({
@@ -1287,7 +1338,7 @@ async function generateMSELInjects(
 
   try {
     const response = await openai.chat.completions.create({
-      model: getModel('midRange'),
+      model: getModel('midRange', modelOverride),
       messages: [{ role: 'user', content: prompt }],
       reasoning_effort: 'medium',
       max_completion_tokens: 4000,
@@ -1348,7 +1399,7 @@ async function generateMSELInjects(
 
 // ─── Order Generation (called per sim day) ───────────────────────────────────
 
-export async function generateDayOrders(scenarioId: string, atoDay: number): Promise<void> {
+export async function generateDayOrders(scenarioId: string, atoDay: number, modelOverride?: string): Promise<void> {
   const scenario = await prisma.scenario.findUnique({
     where: { id: scenarioId },
     include: {
@@ -1475,14 +1526,14 @@ export async function generateDayOrders(scenarioId: string, atoDay: number): Pro
   await generateOrder(scenarioId, 'ATO', atoDay, dayDate, {
     ...sharedContext,
     spaceNeeds: '',
-  }, planningDocId);
+  }, planningDocId, modelOverride);
 
   // Generate MTO — linked to JIPTL planning doc
   console.log(`[ORDERS] Generating MTO Day ${atoDay}...`);
   await generateOrder(scenarioId, 'MTO', atoDay, dayDate, {
     ...sharedContext,
     spaceNeeds: '',
-  }, planningDocId);
+  }, planningDocId, modelOverride);
 
   // Generate STO (depends on ATO/MTO space needs) — linked to JIPTL planning doc
   console.log(`[ORDERS] Generating STO Day ${atoDay}...`);
@@ -1490,7 +1541,7 @@ export async function generateDayOrders(scenarioId: string, atoDay: number): Pro
   await generateOrder(scenarioId, 'STO', atoDay, dayDate, {
     ...sharedContext,
     spaceNeeds: spaceNeedsSummary,
-  }, planningDocId);
+  }, planningDocId, modelOverride);
 }
 
 async function generateOrder(
@@ -1500,6 +1551,7 @@ async function generateOrder(
   dayDate: Date,
   context: Record<string, string>,
   planningDocId: string | null = null,
+  modelOverride?: string,
 ) {
   const promptTemplate = orderType === 'ATO' ? ATO_PROMPT : orderType === 'MTO' ? MTO_PROMPT : STO_PROMPT;
 
@@ -1512,7 +1564,7 @@ async function generateOrder(
 
   try {
     const response = await openai.chat.completions.create({
-      model: getModel('midRange'),
+      model: getModel('midRange', modelOverride),
       messages: [{ role: 'user', content: prompt }],
       reasoning_effort: 'medium',
       response_format: { type: 'json_object' },
@@ -1526,7 +1578,7 @@ async function generateOrder(
       data: {
         scenarioId,
         planningDocId,
-        orderType: orderType as any,
+        orderType: orderType as OrderType,
         orderId: orderData.orderId || `${orderType} -2026 - ${String(atoDay).padStart(3, '0')} A`,
         issuingAuthority: orderData.issuingAuthority || `${orderType} Authority`,
         effectiveStart: dayDate,
