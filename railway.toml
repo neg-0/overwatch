@@ -18,8 +18,9 @@
 
 [build]
 builder = "NIXPACKS"
+# Nixpacks runs `npm ci` automatically in the install phase — do NOT repeat it here.
+# Build order: shared types → client static bundle → prisma client → server tsc
 buildCommand = """
-npm ci && \
 npm -w shared run build && \
 npm -w client run build && \
 npx prisma generate --schema=server/prisma/schema.prisma && \
