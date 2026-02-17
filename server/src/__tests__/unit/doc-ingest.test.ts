@@ -329,11 +329,11 @@ describe('Document Ingestion — Normalization', () => {
     expect(stratData.docType).toBe('NMS');
     expect(reviewFlags).toHaveLength(0);
 
-    // Verify mid-range model used for normalization
+    // Verify mid-range model used for normalization with low reasoning effort
     expect(mockCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         model: 'gpt-5-mini',
-        reasoning_effort: 'medium',
+        reasoning_effort: 'low',
       }),
     );
   });
