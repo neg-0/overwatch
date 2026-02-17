@@ -79,16 +79,38 @@ enum SupportType {
 
 enum SpaceCapabilityType {
   GPS
+  GPS_MILITARY        // M-code, SAASM — military-grade PNT
   SATCOM              // Legacy — kept for backward compat
   SATCOM_PROTECTED    // AEHF — jam-resistant, strategic
   SATCOM_WIDEBAND     // WGS — high-bandwidth ISR/C2
   SATCOM_TACTICAL     // MUOS — UHF mobile tactical
-  OPIR
-  ISR_SPACE
-  EW_SPACE
-  WEATHER
-  PNT
+  OPIR                // Overhead Persistent IR (missile warning)
+  ISR_SPACE           // Space-based ISR (imaging, SIGINT, ELINT)
+  EW_SPACE            // Space-based Electronic Warfare
+  WEATHER             // Environmental monitoring
+  PNT                 // Position, Navigation, Timing
   LINK16              // Not space-dependent, tracked for completeness
+  SIGINT_SPACE        // Space-based SIGINT collection
+  SDA                 // Space Domain Awareness (debris tracking, conjunction)
+  LAUNCH_DETECT       // Launch detection / early warning
+  CYBER_SPACE         // Space-segment cyber operations
+  DATALINK            // Tactical data link relay (space-based)
+  SSA                 // Space Situational Awareness
+}
+
+enum MissionCriticality {
+  CRITICAL    // Loss = mission failure, no workaround
+  ESSENTIAL   // Loss = degraded mission, partial workaround
+  ENHANCING   // Loss = reduced effectiveness, full workaround
+  ROUTINE     // Loss = inconvenience, easily substituted
+}
+
+enum AllocationStatus {
+  FULFILLED   // Need met by assigned asset
+  DEGRADED    // Fallback capability assigned, reduced effectiveness
+  CONTENTION  // Multiple needs competing, awaiting resolution
+  DENIED      // No asset available, mission accepts risk
+  PENDING     // Not yet evaluated
 }
 
 enum Affiliation {
@@ -172,8 +194,27 @@ model StrategyDocument {
   ingestedAt     DateTime?
 
   planningDocs   PlanningDocument[]
+  priorities     StrategyPriority[]
 
   @@map("strategy_documents")
+}
+
+// AI-extracted strategic priorities from strategy documents (NDS objectives, NMS goals, etc.)
+model StrategyPriority {
+  id               String           @id @default(uuid())
+  strategyDocId    String
+  strategyDoc      StrategyDocument @relation(fields: [strategyDocId], references: [id], onDelete: Cascade)
+  rank             Int              // Priority rank within the document
+  objective        String           // Short objective label
+  description      String           @db.Text  // Full objective text
+  effect           String?          // Desired strategic effect
+  confidence       Float?           // AI extraction confidence 0.0–1.0
+  createdAt        DateTime         @default(now())
+
+  // Downstream traceability — planning priorities that derive from this
+  derivedPriorities PriorityEntry[]
+
+  @@map("strategy_priorities")
 }
 
 model PlanningDocument {
@@ -202,15 +243,22 @@ model PlanningDocument {
 }
 
 model PriorityEntry {
-  id              String           @id @default(uuid())
-  planningDocId   String
-  planningDoc     PlanningDocument @relation(fields: [planningDocId], references: [id], onDelete: Cascade)
-  rank            Int
-  targetId        String?
-  effect          String
-  description     String
-  justification   String           @db.Text
-  createdAt       DateTime         @default(now())
+  id                String            @id @default(uuid())
+  planningDocId     String
+  planningDoc       PlanningDocument  @relation(fields: [planningDocId], references: [id], onDelete: Cascade)
+  rank              Int
+  targetId          String?
+  effect            String
+  description       String
+  justification     String            @db.Text
+  createdAt         DateTime          @default(now())
+
+  // AI-traced origin — which strategy priority does this derive from?
+  strategyPriorityId String?
+  strategyPriority   StrategyPriority? @relation(fields: [strategyPriorityId], references: [id])
+
+  // Downstream — space needs that reference this priority
+  spaceNeeds        SpaceNeed[]
 
   @@map("priority_entries")
 }
@@ -419,8 +467,9 @@ model SpaceAsset {
   perigeeKm     Float?
   createdAt     DateTime @default(now())
 
-  spaceNeeds     SpaceNeed[]
-  coverageWindows SpaceCoverageWindow[]
+  spaceNeeds       SpaceNeed[]
+  coverageWindows  SpaceCoverageWindow[]
+  allocations      SpaceAllocation[]
 
   @@map("space_assets")
 }
@@ -444,7 +493,38 @@ model SpaceNeed {
   fulfilled        Boolean             @default(false)
   createdAt        DateTime            @default(now())
 
+  // AI-traced priority origin — which JIPTL/planning priority drives this need?
+  priorityEntryId  String?
+  priorityEntry    PriorityEntry?      @relation(fields: [priorityEntryId], references: [id])
+
+  // Fallback & criticality (AI-assessed during order parsing)
+  fallbackCapability SpaceCapabilityType?  // What capability can substitute if primary denied?
+  missionCriticality MissionCriticality    @default(ESSENTIAL)
+  riskIfDenied       String?             // AI-generated risk assessment text
+
+  allocations      SpaceAllocation[]
+
   @@map("space_needs")
+}
+
+// ─── Space Allocation Decisions ──────────────────────────────────────────────
+
+model SpaceAllocation {
+  id               String              @id @default(uuid())
+  spaceNeedId      String
+  spaceNeed        SpaceNeed           @relation(fields: [spaceNeedId], references: [id], onDelete: Cascade)
+  spaceAssetId     String?
+  spaceAsset       SpaceAsset?         @relation(fields: [spaceAssetId], references: [id])
+  status           AllocationStatus    @default(PENDING)
+  allocatedCapability SpaceCapabilityType? // May differ from requested if degraded
+  rationale        String?             @db.Text  // AI-generated allocation reasoning
+  riskLevel        String?             // LOW, MODERATE, HIGH, CRITICAL
+  contentionGroup  String?             // Groups competing needs (same cap/time/area)
+  resolvedAt       DateTime?
+  createdAt        DateTime            @default(now())
+
+  @@index([spaceNeedId])
+  @@map("space_allocations")
 }
 
 model SpaceCoverageWindow {

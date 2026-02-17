@@ -2094,3 +2094,131 @@ body {
     transform: translateY(0);
   }
 }
+
+/* ─── Hierarchy Tree ──────────────────────────────────────────────────────── */
+
+.hierarchy-legend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.hierarchy-legend__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hierarchy-legend__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.hierarchy-node {
+  margin-bottom: 2px;
+}
+
+.hierarchy-node__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  transition: background 0.15s;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.hierarchy-node__header:hover {
+  background: var(--bg-hover);
+}
+
+.hierarchy-node--traced > .hierarchy-node__header {
+  background: rgba(59, 130, 246, 0.12);
+  border-left: 3px solid var(--accent-primary);
+  padding-left: 7px;
+}
+
+.hierarchy-node__toggle {
+  font-size: 10px;
+  color: var(--text-muted);
+  transition: transform 0.15s;
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.hierarchy-node__toggle.expanded {
+  transform: rotate(90deg);
+}
+
+.hierarchy-node__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+  margin: 0 4px;
+}
+
+.hierarchy-node__label {
+  font-weight: 500;
+  color: var(--text-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hierarchy-node__sublabel {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hierarchy-node__badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
+  color: #000;
+  margin-left: auto;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.hierarchy-node__children {
+  border-left: 1px solid var(--border-subtle);
+  margin-left: 17px;
+  padding-left: 4px;
+}
+
+.hierarchy-trace-link {
+  font-size: 11px;
+  color: var(--accent-primary);
+  padding: 4px 10px 4px 34px;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.hierarchy-trace-link:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

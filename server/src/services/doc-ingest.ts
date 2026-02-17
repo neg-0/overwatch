@@ -113,6 +113,9 @@ export interface NormalizedOrder {
       spaceNeeds: Array<{
         capabilityType: string;
         priority: number;
+        fallbackCapability?: string;
+        missionCriticality?: string;
+        riskIfDenied?: string;
       }>;
     }>;
   }>;
@@ -183,16 +186,23 @@ DOCUMENT TO CLASSIFY:
 
 export async function classifyDocument(rawText: string, sourceHint?: string): Promise<ClassifyResult> {
   const hint = sourceHint ? `\n[HINT: The user suggests this might be ${sourceHint} format]\n` : '';
+  // Truncate very long docs to avoid exceeding prompt token limits
+  const truncatedText = rawText.length > 15000 ? rawText.substring(0, 15000) + '\n[... truncated for classification ...]' : rawText;
 
   const response = await openai.chat.completions.create({
     model: getModel('fast'),
-    messages: [{ role: 'user', content: CLASSIFY_PROMPT + hint + rawText }],
+    messages: [{ role: 'user', content: CLASSIFY_PROMPT + hint + truncatedText }],
     reasoning_effort: 'low',
-    max_completion_tokens: 500,
+    max_completion_tokens: 4000,
     response_format: { type: 'json_object' },
   });
 
   const content = response.choices[0]?.message?.content;
+  const finishReason = response.choices[0]?.finish_reason;
+  const usage = response.usage;
+  const reasoningTokens = (usage as any)?.completion_tokens_details?.reasoning_tokens ?? 0;
+  console.log(`  [INGEST] Classify: ${content?.length ?? 0} chars (finish_reason: ${finishReason}, reasoning_tokens: ${reasoningTokens}, output_tokens: ${usage?.completion_tokens ?? 0}, max_tokens: 4000)`);
+
   if (!content) throw new Error('Classification returned empty response');
 
   const result = JSON.parse(content) as ClassifyResult;
@@ -212,21 +222,32 @@ const STRATEGY_NORMALIZE_PROMPT = `You are a military intelligence analyst extra
 Extract the following into JSON:
 {
   "title": "Document title",
-  "docType": "NMS|CAMPAIGN_PLAN|JFC_GUIDANCE|COMPONENT_GUIDANCE",
-  "authorityLevel": "SecDef|CCDR|JFC|JFCC-Space|etc.",
+  "docType": "NDS|NMS|JSCP|CONPLAN|OPLAN|CAMPAIGN_PLAN|JFC_GUIDANCE|COMPONENT_GUIDANCE",
+  "authorityLevel": "SecDef|CJCS|CCDR|JFC|JFCC-Space|etc.",
   "content": "Full text content preserved",
   "effectiveDate": "ISO 8601 date",
+  "tier": 0,
   "priorities": [
     {
       "rank": 1,
+      "objective": "Short objective label (e.g., 'Maintain air superiority')",
       "effect": "The desired strategic effect",
-      "description": "Short headline for this priority",
+      "description": "Full objective description",
       "justification": "Why this priority matters"
     }
   ]
 }
 
-Extract ALL priorities mentioned, even implicit ones. If the document lists objectives, goals, or key tasks — treat each as a priority entry with a rank.
+IMPORTANT: Set "tier" based on document type:
+- NDS = 1, NMS = 2, JSCP = 3, CONPLAN = 4, OPLAN = 5
+- Other types = 0
+
+Extract ALL priorities, objectives, goals, and key tasks. Each numbered item or strategic objective should be a separate priority entry with:
+- A concise "objective" label (what is being pursued)
+- The "effect" (what outcome is desired)
+- A detailed "description" (full text of the priority)
+- A "justification" (why this matters strategically)
+
 If no clear date is mentioned, use today's date.
 Return ONLY valid JSON.
 
@@ -320,7 +341,13 @@ Extract ALL available information into this JSON structure:
             { "supportType": "TANKER|SEAD|ISR|EW|ESCORT|CAP", "details": "Optional details" }
           ],
           "spaceNeeds": [
-            { "capabilityType": "GPS|SATCOM|OPIR|ISR_SPACE|EW_SPACE|WEATHER|PNT", "priority": 1 }
+            {
+              "capabilityType": "GPS|GPS_MILITARY|SATCOM|SATCOM_PROTECTED|SATCOM_WIDEBAND|SATCOM_TACTICAL|OPIR|ISR_SPACE|EW_SPACE|WEATHER|PNT|SIGINT_SPACE|SDA|LAUNCH_DETECT|DATALINK|SSA",
+              "priority": 1,
+              "fallbackCapability": "GPS|SATCOM|etc. or null — what can substitute if primary denied?",
+              "missionCriticality": "CRITICAL|ESSENTIAL|ENHANCING|ROUTINE",
+              "riskIfDenied": "Short risk assessment if this space capability is not available"
+            }
           ]
         }
       ]
@@ -365,12 +392,17 @@ export async function normalizeDocument(
   const response = await openai.chat.completions.create({
     model: getModel('midRange'),
     messages: [{ role: 'user', content: prompt + rawText }],
-    reasoning_effort: 'medium',
-    max_completion_tokens: 8000,
+    reasoning_effort: 'low',
+    max_completion_tokens: 16000,
     response_format: { type: 'json_object' },
   });
 
   const content = response.choices[0]?.message?.content;
+  const finishReason = response.choices[0]?.finish_reason;
+  const usage = response.usage;
+  const reasoningTokens = (usage as any)?.completion_tokens_details?.reasoning_tokens ?? 0;
+  console.log(`  [INGEST] Normalize (${classification.hierarchyLevel}): ${content?.length ?? 0} chars (finish_reason: ${finishReason}, reasoning_tokens: ${reasoningTokens}, output_tokens: ${usage?.completion_tokens ?? 0}, max_tokens: 16000)`);
+
   if (!content) throw new Error('Normalization returned empty response');
 
   const parsed = JSON.parse(content);
@@ -385,11 +417,14 @@ export async function normalizeDocument(
 // ─── Stage 3: Link & Persist ────────────────────────────────────────────────
 
 async function findParentStrategyDoc(scenarioId: string, _classification: ClassifyResult): Promise<string | null> {
-  // Find the most relevant strategy document for this planning doc
-  // Prefer documents with matching authority level, fall back to most recent
+  // Tier-aware: prefer highest-tier strategy doc (OPLAN=5 > CONPLAN=4 > JSCP=3 etc.)
+  // This ensures JIPTL links to OPLAN rather than NDS
   const strategyDocs = await prisma.strategyDocument.findMany({
     where: { scenarioId },
-    orderBy: { effectiveDate: 'desc' },
+    orderBy: [
+      { tier: 'desc' },          // Highest tier first (OPLAN > CONPLAN > ...)
+      { effectiveDate: 'desc' }, // Most recent within same tier
+    ],
     take: 1,
   });
 
@@ -423,22 +458,51 @@ async function persistStrategy(
 ): Promise<{ createdId: string; parentLinkId?: string }> {
   const effectiveDate = new Date(data.effectiveDate || classification.effectiveDateStr || new Date().toISOString());
 
+  // Determine tier from AI output or docType mapping
+  const tierMap: Record<string, number> = { NDS: 1, NMS: 2, JSCP: 3, CONPLAN: 4, OPLAN: 5 };
+  const docType = data.docType || classification.documentType;
+  const tier = (data as any).tier || tierMap[docType] || 0;
+
+  // Find parent strategy doc via cascade — link to highest-tier doc below this one's tier
+  const parentDoc = await prisma.strategyDocument.findFirst({
+    where: { scenarioId, tier: { lt: tier } },
+    orderBy: [{ tier: 'desc' }, { effectiveDate: 'desc' }],
+  });
+
   const created = await prisma.strategyDocument.create({
     data: {
       scenarioId,
       title: data.title || classification.title,
-      docType: data.docType || classification.documentType,
+      docType,
       content: data.content || rawText,
       authorityLevel: data.authorityLevel || classification.issuingAuthority,
       effectiveDate,
+      tier,
+      parentDocId: parentDoc?.id || null,
       sourceFormat: classification.sourceFormat,
       confidence: classification.confidence,
       ingestedAt: new Date(),
     },
   });
 
-  console.log(`  [INGEST] Strategy doc created: ${created.title}`);
-  return { createdId: created.id };
+  // Extract and persist strategic priorities (AI-derived)
+  let priorityCount = 0;
+  for (const p of data.priorities || []) {
+    await prisma.strategyPriority.create({
+      data: {
+        strategyDocId: created.id,
+        rank: p.rank,
+        objective: (p as any).objective || p.description?.substring(0, 100) || `Priority ${p.rank}`,
+        description: p.description || p.justification,
+        effect: p.effect || null,
+        confidence: classification.confidence,
+      },
+    });
+    priorityCount++;
+  }
+
+  console.log(`  [INGEST] Strategy doc created: ${created.title} (tier ${tier}) with ${priorityCount} strategic priorities`);
+  return { createdId: created.id, parentLinkId: parentDoc?.id };
 }
 
 async function persistPlanning(
@@ -464,8 +528,37 @@ async function persistPlanning(
     },
   });
 
-  // Create priority entries
+  // Create priority entries with AI-traced links to strategy priorities
+  // Fetch strategy priorities from the linked strategy doc to perform traceability matching
+  let strategyPriorities: { id: string; rank: number; objective: string; description: string }[] = [];
+  if (strategyDocId) {
+    strategyPriorities = await prisma.strategyPriority.findMany({
+      where: { strategyDocId },
+      select: { id: true, rank: true, objective: true, description: true },
+      orderBy: { rank: 'asc' },
+    });
+  }
+
   for (const p of data.priorities || []) {
+    // Best-effort traceability: match planning priority to strategy priority
+    // Uses keyword overlap between planning effect/description and strategy objective/description
+    let bestMatchId: string | null = null;
+    if (strategyPriorities.length > 0) {
+      const planText = `${p.effect} ${p.description} ${p.justification}`.toLowerCase();
+      let bestScore = 0;
+      for (const sp of strategyPriorities) {
+        const spText = `${sp.objective} ${sp.description}`.toLowerCase();
+        // Simple keyword overlap score
+        const spWords = spText.split(/\s+/).filter(w => w.length > 3);
+        const matches = spWords.filter(w => planText.includes(w)).length;
+        const score = spWords.length > 0 ? matches / spWords.length : 0;
+        if (score > bestScore && score > 0.15) {
+          bestScore = score;
+          bestMatchId = sp.id;
+        }
+      }
+    }
+
     await prisma.priorityEntry.create({
       data: {
         planningDocId: created.id,
@@ -474,6 +567,7 @@ async function persistPlanning(
         effect: p.effect,
         description: p.description,
         justification: p.justification,
+        strategyPriorityId: bestMatchId,
       },
     });
   }
@@ -641,12 +735,31 @@ async function persistOrder(
         });
       }
 
-      // Space needs
+      // Space needs — with fallback, criticality, and priority traceability
       for (const sn of msn.spaceNeeds || []) {
-        const validCapTypes = ['GPS', 'SATCOM', 'SATCOM_PROTECTED', 'SATCOM_WIDEBAND', 'SATCOM_TACTICAL', 'OPIR', 'ISR_SPACE', 'EW_SPACE', 'WEATHER', 'PNT', 'LINK16'] as const;
+        const validCapTypes = ['GPS', 'GPS_MILITARY', 'SATCOM', 'SATCOM_PROTECTED', 'SATCOM_WIDEBAND', 'SATCOM_TACTICAL', 'OPIR', 'ISR_SPACE', 'EW_SPACE', 'WEATHER', 'PNT', 'LINK16', 'SIGINT_SPACE', 'SDA', 'LAUNCH_DETECT', 'CYBER_SPACE', 'DATALINK', 'SSA'] as const;
         const capabilityType = validCapTypes.includes(sn.capabilityType as any)
           ? (sn.capabilityType as typeof validCapTypes[number])
           : 'GPS';
+
+        const fallbackCapability = sn.fallbackCapability && validCapTypes.includes(sn.fallbackCapability as any)
+          ? (sn.fallbackCapability as typeof validCapTypes[number])
+          : null;
+
+        const validCriticalities = ['CRITICAL', 'ESSENTIAL', 'ENHANCING', 'ROUTINE'] as const;
+        const missionCriticality = validCriticalities.includes(sn.missionCriticality as any)
+          ? (sn.missionCriticality as typeof validCriticalities[number])
+          : 'ESSENTIAL';
+
+        // Trace space need to best-matching priority entry from the parent planning doc
+        let priorityEntryId: string | null = null;
+        if (planningDocId) {
+          // Match by mission priority rank against planning doc priority ranks
+          const matchingPriority = await prisma.priorityEntry.findFirst({
+            where: { planningDocId, rank: pkg.priorityRank || 1 },
+          });
+          priorityEntryId = matchingPriority?.id || null;
+        }
 
         await prisma.spaceNeed.create({
           data: {
@@ -655,6 +768,10 @@ async function persistOrder(
             priority: sn.priority || 5,
             startTime: effectiveStart,
             endTime: effectiveEnd,
+            fallbackCapability,
+            missionCriticality,
+            riskIfDenied: sn.riskIfDenied || null,
+            priorityEntryId,
           },
         });
         spaceNeedCount++;

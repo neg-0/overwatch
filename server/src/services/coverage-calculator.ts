@@ -23,6 +23,7 @@ const EARTH_RADIUS_KM = 6371.0;
  */
 const MIN_ELEVATION_BY_CAPABILITY: Record<SpaceCapabilityType, number> = {
   GPS: 5,                // GPS works at very low elevation angles
+  GPS_MILITARY: 5,       // M-code, SAASM — same constellation as GPS
   SATCOM: 5,             // Wide-beam SATCOM antennas (legacy)
   SATCOM_PROTECTED: 10,  // AEHF — directional, needs higher angle
   SATCOM_WIDEBAND: 5,    // WGS — wide-beam SHF
@@ -33,6 +34,12 @@ const MIN_ELEVATION_BY_CAPABILITY: Record<SpaceCapabilityType, number> = {
   WEATHER: 10,           // Weather imaging
   PNT: 5,                // Precision navigation/timing — similar to GPS
   LINK16: 0,             // Not space-dependent, placeholder
+  SIGINT_SPACE: 15,      // SIGINT collection — moderate elevation needed
+  SDA: 5,                // Space domain awareness — wide field of regard
+  LAUNCH_DETECT: 10,     // Launch detection / early warning
+  CYBER_SPACE: 0,        // Cyber ops — not coverage dependent
+  DATALINK: 5,           // Tactical data link relay
+  SSA: 5,                // Space situational awareness
 };
 
 /**
@@ -41,6 +48,7 @@ const MIN_ELEVATION_BY_CAPABILITY: Record<SpaceCapabilityType, number> = {
  */
 const SWATH_WIDTH_BY_CAPABILITY: Record<SpaceCapabilityType, number> = {
   GPS: 12000,             // GPS covers very wide area
+  GPS_MILITARY: 12000,    // M-code — same constellation
   SATCOM: 8000,           // GEO SATCOM covers huge footprint (legacy)
   SATCOM_PROTECTED: 4000, // AEHF — narrower protected spot beams
   SATCOM_WIDEBAND: 8000,  // WGS — wide-area SHF coverage
@@ -51,6 +59,12 @@ const SWATH_WIDTH_BY_CAPABILITY: Record<SpaceCapabilityType, number> = {
   WEATHER: 3000,          // Weather imaging swath
   PNT: 12000,             // Same as GPS
   LINK16: 0,              // Not space-dependent, placeholder
+  SIGINT_SPACE: 1500,     // SIGINT collection footprint
+  SDA: 40000,             // Space domain awareness — full hemisphere
+  LAUNCH_DETECT: 6000,    // Launch detection coverage
+  CYBER_SPACE: 0,         // Cyber ops — not coverage dependent
+  DATALINK: 3000,         // Data link relay coverage
+  SSA: 40000,             // Space situational awareness — full hemisphere
 };
 
 // ─── Types ───────────────────────────────────────────────────────────────────

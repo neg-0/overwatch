@@ -2,6 +2,7 @@ import { GenerationStatus } from '@prisma/client';
 import { Router } from 'express';
 import prisma from '../db/prisma-client.js';
 import { generateFullScenario } from '../services/scenario-generator.js';
+import { allocateSpaceResources } from '../services/space-allocator.js';
 
 export const scenarioRoutes = Router();
 
@@ -32,15 +33,43 @@ scenarioRoutes.get('/:id', async (req, res) => {
     const scenario = await prisma.scenario.findUnique({
       where: { id: req.params.id },
       include: {
-        strategies: { orderBy: { effectiveDate: 'asc' } },
-        planningDocs: {
+        strategies: {
+          orderBy: { effectiveDate: 'asc' },
           include: { priorities: { orderBy: { rank: 'asc' } } },
+        },
+        planningDocs: {
+          include: {
+            priorities: {
+              orderBy: { rank: 'asc' },
+              include: { strategyPriority: true },
+            },
+          },
           orderBy: { effectiveDate: 'asc' },
         },
         units: { include: { assets: { include: { assetType: true } } } },
         spaceAssets: true,
         scenarioInjects: { orderBy: { triggerDay: 'asc' } },
-        taskingOrders: { orderBy: { atoDayNumber: 'asc' } },
+        taskingOrders: {
+          orderBy: { atoDayNumber: 'asc' },
+          include: {
+            missionPackages: {
+              include: {
+                missions: {
+                  include: {
+                    spaceNeeds: {
+                      include: {
+                        allocations: true,
+                        priorityEntry: {
+                          include: { strategyPriority: true },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     });
     if (!scenario) {
@@ -192,6 +221,104 @@ scenarioRoutes.post('/:id/resume', async (req, res) => {
       console.log(`[SCENARIO] Resume generation complete: ${scenario.id}`);
     }).catch(err => {
       console.error(`[SCENARIO] Resume generation failed: ${scenario.id}`, err);
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+  }
+});
+
+// ─── Document Hierarchy (full traceability tree) ────────────────────────────
+scenarioRoutes.get('/:id/hierarchy', async (req, res) => {
+  try {
+    const scenario = await prisma.scenario.findUnique({
+      where: { id: req.params.id },
+      select: {
+        id: true,
+        name: true,
+        theater: true,
+        strategies: {
+          orderBy: [{ tier: 'desc' }, { effectiveDate: 'asc' }],
+          include: {
+            priorities: { orderBy: { rank: 'asc' } },
+            childDocs: {
+              orderBy: { tier: 'desc' },
+              select: { id: true, title: true, docType: true, tier: true },
+            },
+          },
+        },
+        planningDocs: {
+          orderBy: { effectiveDate: 'asc' },
+          include: {
+            strategyDoc: { select: { id: true, title: true, docType: true, tier: true } },
+            priorities: {
+              orderBy: { rank: 'asc' },
+              include: {
+                strategyPriority: { select: { id: true, rank: true, objective: true } },
+              },
+            },
+          },
+        },
+        taskingOrders: {
+          orderBy: { atoDayNumber: 'asc' },
+          include: {
+            planningDoc: { select: { id: true, title: true, docType: true } },
+            missionPackages: {
+              include: {
+                missions: {
+                  include: {
+                    spaceNeeds: {
+                      include: {
+                        priorityEntry: {
+                          select: { id: true, rank: true, effect: true, strategyPriorityId: true },
+                        },
+                        allocations: true,
+                      },
+                    },
+                    _count: {
+                      select: { waypoints: true, targets: true },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!scenario) {
+      return res.status(404).json({ success: false, error: 'Scenario not found', timestamp: new Date().toISOString() });
+    }
+
+    res.json({ success: true, data: scenario, timestamp: new Date().toISOString() });
+  } catch (error) {
+    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+  }
+});
+
+// ─── Space Allocations (contention detection + resolution) ──────────────────
+scenarioRoutes.get('/:id/allocations', async (req, res) => {
+  try {
+    const day = parseInt(req.query.day as string, 10);
+    if (isNaN(day) || day < 1) {
+      return res.status(400).json({
+        success: false,
+        error: 'Query parameter "day" is required and must be a positive integer (ATO day number)',
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    const scenario = await prisma.scenario.findUnique({ where: { id: req.params.id } });
+    if (!scenario) {
+      return res.status(404).json({ success: false, error: 'Scenario not found', timestamp: new Date().toISOString() });
+    }
+
+    const report = await allocateSpaceResources(req.params.id, day);
+
+    res.json({
+      success: true,
+      data: report,
+      timestamp: new Date().toISOString(),
     });
   } catch (error) {
     res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });

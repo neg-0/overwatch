@@ -5,6 +5,7 @@ import { CommandDashboard } from './pages/CommandDashboard';
 import { DecisionPanel } from './pages/DecisionPanel';
 import { DocumentIntake } from './pages/DocumentIntake';
 import { GanttView } from './pages/GanttView';
+import { HierarchyView } from './pages/HierarchyView';
 import { MapView } from './pages/MapView';
 import { OrdersView } from './pages/OrdersView';
 import { ScenarioSetup } from './pages/ScenarioSetup';
@@ -130,6 +131,21 @@ export default function App() {
               </svg>
               Doc Intake
             </NavLink>
+            <NavLink to="/hierarchy" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <svg className="nav-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 2v6" />
+                <path d="M6 8h12" />
+                <path d="M6 8v6" />
+                <path d="M18 8v6" />
+                <path d="M3 14h6" />
+                <path d="M15 14h6" />
+                <path d="M3 14v4" />
+                <path d="M9 14v4" />
+                <path d="M15 14v4" />
+                <path d="M21 14v4" />
+              </svg>
+              Hierarchy
+            </NavLink>
           </div>
 
           <div className="nav-section">
@@ -213,6 +229,7 @@ export default function App() {
           <Route path="/scenario" element={<ScenarioSetup />} />
           <Route path="/decisions" element={<DecisionPanel />} />
           <Route path="/intake" element={<DocumentIntake />} />
+          <Route path="/hierarchy" element={<HierarchyView />} />
         </Routes>
       </main>
 

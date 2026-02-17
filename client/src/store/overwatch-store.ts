@@ -138,6 +138,10 @@ interface OverwatchStore {
   // Per-artifact generation results (live from WebSocket)
   artifactResults: ArtifactResult[];
 
+  // Hierarchy + allocation data
+  hierarchyData: Record<string, unknown> | null;
+  allocationReport: Record<string, unknown> | null;
+
   // Actions
   connect: () => void;
   disconnect: () => void;
@@ -158,6 +162,10 @@ interface OverwatchStore {
   fetchSimEvents: (scenarioId: string) => Promise<void>;
   createSimEvent: (event: Omit<SimEvent, 'id' | 'createdAt'>) => Promise<void>;
   fetchScenarioTimeRange: (scenarioId: string) => Promise<void>;
+
+  // Hierarchy + Allocation
+  fetchHierarchy: (scenarioId: string) => Promise<void>;
+  fetchAllocations: (scenarioId: string, day: number) => Promise<void>;
 }
 
 export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
@@ -181,6 +189,8 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
   simEvents: [],
   generationProgress: null,
   artifactResults: [],
+  hierarchyData: null,
+  allocationReport: null,
 
   // ─── WebSocket Connection ────────────────────────────────────────────────
   connect: () => {
@@ -524,6 +534,31 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
       }
     } catch (err) {
       console.error('[STORE] Failed to fetch scenario time range:', err);
+    }
+  },
+
+  // ─── Hierarchy + Allocation ─────────────────────────────────────────────
+  fetchHierarchy: async (scenarioId: string) => {
+    try {
+      const res = await fetch(`/api/scenarios/${scenarioId}/hierarchy`);
+      const data = await res.json();
+      if (data.success) {
+        set({ hierarchyData: data.data });
+      }
+    } catch (err) {
+      console.error('[STORE] Failed to fetch hierarchy:', err);
+    }
+  },
+
+  fetchAllocations: async (scenarioId: string, day: number) => {
+    try {
+      const res = await fetch(`/api/scenarios/${scenarioId}/allocations?day=${day}`);
+      const data = await res.json();
+      if (data.success) {
+        set({ allocationReport: data.data });
+      }
+    } catch (err) {
+      console.error('[STORE] Failed to fetch allocations:', err);
     }
   },
 }));
