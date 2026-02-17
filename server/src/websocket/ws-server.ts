@@ -104,6 +104,19 @@ export function broadcastGenerationProgress(scenarioId: string, data: {
   });
 }
 
+export function broadcastArtifactResult(scenarioId: string, data: {
+  step: string;
+  artifact: string;
+  status: 'success' | 'placeholder' | 'error';
+  outputLength: number;
+  message?: string;
+}) {
+  ioInstance?.to(`scenario:${scenarioId}`).emit('scenario:artifact-result', {
+    scenarioId,
+    ...data,
+  });
+}
+
 export function getIO(): SocketIOServer | null {
   return ioInstance;
 }

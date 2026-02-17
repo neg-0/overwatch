@@ -51,6 +51,7 @@ export async function cleanDatabase(): Promise<void> {
   await prisma.scenarioInject.deleteMany();
   await prisma.simulationState.deleteMany();
   await prisma.leadershipDecision.deleteMany();
+  await prisma.generationLog.deleteMany();
   await prisma.scenario.deleteMany();
 }
 

@@ -74,6 +74,19 @@ scenarioRoutes.get('/:id/generation-status', async (req, res) => {
   }
 });
 
+// Get generation logs for a scenario (full audit trail)
+scenarioRoutes.get('/:id/generation-logs', async (req, res) => {
+  try {
+    const logs = await prisma.generationLog.findMany({
+      where: { scenarioId: req.params.id },
+      orderBy: { createdAt: 'asc' },
+    });
+    res.json({ success: true, data: logs, timestamp: new Date().toISOString() });
+  } catch (error) {
+    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+  }
+});
+
 // Generate a new scenario (triggers LLM pipeline)
 scenarioRoutes.post('/generate', async (req, res) => {
   try {

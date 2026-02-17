@@ -5,6 +5,7 @@ import { config } from '../config.js';
 import prisma from '../db/prisma-client.js';
 import { broadcastGenerationProgress } from '../websocket/ws-server.js';
 import { ingestDocument } from './doc-ingest.js';
+import { callLLMWithRetry, logGenerationAttempt } from './generation-logger.js';
 
 // ─── OpenAI Client ───────────────────────────────────────────────────────────
 
@@ -46,7 +47,7 @@ Then include numbered paragraphs covering:
 {docTypeSpecific}
 
 Use actual US military doctrine and realistic command structures. Reference real doctrinal publications (JP 5-0, JP 3-0, JP 3-30, JP 3-52, CJCSI 3170.01, etc.).
-The document should be 800-1200 words.
+The document should be 2000-3000 words. Be thorough and detailed — this document feeds downstream planning artifacts.
 Return ONLY the memorandum text, no JSON, no markdown fences.`;
 
 // ─── Cascading Strategy Document Generator ───────────────────────────────────
@@ -126,23 +127,28 @@ Do NOT include operational details — this is national-level guidance.`,
         .replace('{parentContext}', parentContext)
         .replace('{docTypeSpecific}', doc.docTypeSpecific);
 
-      const response = await openai.chat.completions.create({
+      const result = await callLLMWithRetry({
+        openai,
         model: getModel('flagship', modelOverride),
         messages: [{ role: 'user', content: prompt }],
-        reasoning_effort: 'high',
-        max_completion_tokens: 3000,
+        maxTokens: 16000,
+        reasoningEffort: 'medium',
+        minOutputLength: 1000,
+        scenarioId,
+        step: 'Strategic Context',
+        artifact: doc.type,
       });
 
-      const memoText = response.choices[0]?.message?.content || '';
+      const memoText = result.content;
 
-      if (!memoText || memoText.length < 50) {
-        console.warn(`  [STRATEGY] LLM output too short for ${doc.type}, creating placeholder`);
+      if (!memoText || memoText.length < 1000) {
+        // callLLMWithRetry already logged this as placeholder
         const created = await prisma.strategyDocument.create({
           data: {
             scenarioId,
             title: doc.title,
             docType: doc.type,
-            content: `[PLACEHOLDER] ${doc.type} generation returned minimal content.`,
+            content: memoText || `[PLACEHOLDER] ${doc.type} generation returned minimal content.`,
             authorityLevel: doc.authorityLevel,
             effectiveDate: startDate,
             tier: doc.tier,
@@ -183,6 +189,17 @@ Do NOT include operational details — this is national-level guidance.`,
       parentText = memoText;
     } catch (error) {
       console.error(`  [STRATEGY] Failed to generate ${doc.type}:`, error);
+      await logGenerationAttempt({
+        scenarioId,
+        step: 'Strategic Context',
+        artifact: doc.type,
+        model: getModel('flagship', modelOverride),
+        rawOutput: '',
+        outputLength: 0,
+        status: 'error',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        durationMs: 0,
+      });
       const created = await prisma.strategyDocument.create({
         data: {
           scenarioId,
@@ -219,7 +236,7 @@ PARENT AUTHORITY DOCUMENT:
 {docTypeSpecific}
 
 Use official memorandum format. Reference real doctrinal publications (JP 5-0, JP 3-0, JP 3-52, CJCSI 3170.01).
-The document should be 1000-1500 words.
+The document should be 3000-4000 words. Include detailed force allocation tables, phasing constructs, and scheme of maneuver. This document drives ORBAT generation and daily ATO planning.
 Return ONLY the memorandum text, no markdown fences.`;
 
 // ─── Campaign Plan Generator (JSCP → CONPLAN → OPLAN) ───────────────────────
@@ -325,24 +342,29 @@ Include both AIR and MARITIME domain units. Do NOT include LAND domain.
         .replace(/\{description\}/g, description)
         .replace(/\{startDate\}/g, startDate.toISOString())
         .replace(/\{endDate\}/g, endDate.toISOString())
-        .replace(/\{parentText\}/g, parentText.substring(0, 4000))
+        .replace(/\{parentText\}/g, parentText.substring(0, 10000))
         .replace(/\{docTypeSpecific\}/g, doc.docTypeSpecific);
 
-      const response = await openai.chat.completions.create({
+      const result = await callLLMWithRetry({
+        openai,
         model: getModel('flagship', modelOverride),
         messages: [{ role: 'user', content: prompt }],
-        reasoning_effort: 'high',
-        max_completion_tokens: 5000,
+        maxTokens: 25000,
+        reasoningEffort: 'medium',
+        minOutputLength: 1500,
+        scenarioId,
+        step: 'Campaign Plan',
+        artifact: doc.type,
       });
 
-      const docText = response.choices[0]?.message?.content || '';
+      const docText = result.content;
 
-      if (!docText || docText.length < 100) {
-        console.warn(`  [CAMPAIGN] LLM output too short for ${doc.type}, creating placeholder`);
+      if (!docText || docText.length < 1500) {
+        // callLLMWithRetry already logged this as placeholder
         const placeholder = await prisma.strategyDocument.create({
           data: {
             scenarioId, title: doc.title, docType: doc.type,
-            content: `[PLACEHOLDER] ${doc.type} generation returned minimal content.`,
+            content: docText || `[PLACEHOLDER] ${doc.type} generation returned minimal content.`,
             authorityLevel: doc.authorityLevel, effectiveDate: startDate,
             tier: doc.tier, parentDocId,
           },
@@ -352,21 +374,44 @@ Include both AIR and MARITIME domain units. Do NOT include LAND domain.
         continue;
       }
 
-      // Self-ingest through doc pipeline
-      console.log(`  [CAMPAIGN] Self-ingesting ${doc.type} (${docText.length} chars)...`);
-      const ingestResult = await ingestDocument(scenarioId, docText, 'MEMORANDUM');
-      console.log(`  [CAMPAIGN] Ingested ${doc.type}: ${ingestResult.createdId} (${(ingestResult.confidence * 100).toFixed(0)}% confidence)`);
-
-      // Update the ingested doc with cascade metadata
-      await prisma.strategyDocument.update({
-        where: { id: ingestResult.createdId },
-        data: { parentDocId, tier: doc.tier, docType: doc.type, title: doc.title, authorityLevel: doc.authorityLevel },
+      // Save directly to strategy document table (CONPLAN/OPLAN are part of the strategy cascade)
+      const created = await prisma.strategyDocument.create({
+        data: {
+          scenarioId,
+          title: doc.title,
+          docType: doc.type,
+          content: docText,
+          authorityLevel: doc.authorityLevel,
+          effectiveDate: startDate,
+          tier: doc.tier,
+          parentDocId,
+        },
       });
 
-      parentDocId = ingestResult.createdId;
+      // Self-ingest through doc pipeline (non-fatal — for structured data extraction)
+      console.log(`  [CAMPAIGN] Self-ingesting ${doc.type} (${docText.length} chars)...`);
+      try {
+        const ingestResult = await ingestDocument(scenarioId, docText, 'MEMORANDUM');
+        console.log(`  [CAMPAIGN] Ingested ${doc.type}: ${ingestResult.createdId} (${(ingestResult.confidence * 100).toFixed(0)}% confidence)`);
+      } catch (ingestErr) {
+        console.warn(`  [CAMPAIGN] Self-ingest for ${doc.type} failed (non-fatal):`, ingestErr);
+      }
+
+      parentDocId = created.id;
       parentText = docText;
     } catch (error) {
       console.error(`  [CAMPAIGN] Failed to generate ${doc.type}:`, error);
+      await logGenerationAttempt({
+        scenarioId,
+        step: 'Campaign Plan',
+        artifact: doc.type,
+        model: getModel('flagship', modelOverride),
+        rawOutput: '',
+        outputLength: 0,
+        status: 'error',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        durationMs: 0,
+      });
       const placeholder = await prisma.strategyDocument.create({
         data: {
           scenarioId, title: doc.title, docType: doc.type,
@@ -396,7 +441,7 @@ Generate a "{docType}" in official staff document format. The document should be
 "{docTypeInstructions}"
 
 Include realistic details specific to the "{theater}" theater and "{adversary}" adversary.
-The document should be 600-1000 words.
+The document should be 1500-2500 words. Include specific targets, units, frequencies, and procedures.
 Return ONLY the document text, no JSON, no markdown fences.`;
 
 const ATO_PROMPT = `You are a military operations officer generating a realistic Air Tasking Order (ATO) for Day "{atoDay}".
@@ -1034,7 +1079,7 @@ async function generatePlanningDocuments(scenarioId: string, theater: string, ad
 
   // Extract strategic priorities from strategy doc content
   const strategyPriorities = strategyDocs
-    .map(d => `[${d.docType}] ${d.title}: \n${d.content.substring(0, 500)}...`)
+    .map(d => `[${d.docType}] ${d.title}: \n${d.content.substring(0, 2000)}...`)
     .join('\n\n');
 
   const docTypeInstructions: Record<string, string> = {
@@ -1075,29 +1120,34 @@ Format with sections covering:
   for (const doc of planningDocTypes) {
     try {
       const prompt = PLANNING_DOC_PROMPT
-        .replace(/\${"{docType}"}/g, doc.docType)
-        .replace(/\${"{theater}"}/g, theater)
-        .replace(/\${"{adversary}"}/g, adversary)
-        .replace(/\${"{strategyPriorities}"}/g, strategyPriorities || 'No strategy documents available yet')
-        .replace(/\${"{docTypeInstructions}"}/g, docTypeInstructions[doc.docType] || '');
+        .replace(/"{docType}"/g, doc.docType)
+        .replace(/"{theater}"/g, theater)
+        .replace(/"{adversary}"/g, adversary)
+        .replace(/"{strategyPriorities}"/g, strategyPriorities || 'No strategy documents available yet')
+        .replace(/"{docTypeInstructions}"/g, docTypeInstructions[doc.docType] || '');
 
-      const response = await openai.chat.completions.create({
+      const result = await callLLMWithRetry({
+        openai,
         model: getModel('midRange', modelOverride),
         messages: [{ role: 'user', content: prompt }],
-        reasoning_effort: 'medium',
-        max_completion_tokens: 4000,
+        maxTokens: 16000,
+        reasoningEffort: 'low',
+        minOutputLength: 800,
+        scenarioId,
+        step: 'Planning Documents',
+        artifact: doc.docType,
       });
 
-      const docText = response.choices[0]?.message?.content || '';
+      const docText = result.content;
 
-      if (!docText || docText.length < 50) {
-        console.warn(`  [PLANNING] LLM output too short for ${doc.docType}, creating placeholder`);
+      if (!docText || docText.length < 800) {
+        // callLLMWithRetry already logged this as placeholder
         await prisma.planningDocument.create({
           data: {
             scenarioId,
             title: `[Placeholder] ${doc.docType} `,
             docType: doc.docType,
-            content: `[PLACEHOLDER] ${doc.docType} generation returned minimal content.`,
+            content: docText || `[PLACEHOLDER] ${doc.docType} generation returned minimal content.`,
             effectiveDate: new Date('2026-03-01T00:00:00Z'),
           },
         });
@@ -1110,6 +1160,17 @@ Format with sections covering:
       console.log(`  [PLANNING] Ingested ${doc.docType}: ${ingestResult.createdId} (${(ingestResult.confidence * 100).toFixed(0)}% confidence, ${ingestResult.extracted.priorityCount || 0} priorities)`);
     } catch (error) {
       console.error(`  [PLANNING] Failed to generate / ingest ${doc.docType}: `, error);
+      await logGenerationAttempt({
+        scenarioId,
+        step: 'Planning Documents',
+        artifact: doc.docType,
+        model: getModel('midRange', modelOverride),
+        rawOutput: '',
+        outputLength: 0,
+        status: 'error',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        durationMs: 0,
+      });
       await prisma.planningDocument.create({
         data: {
           scenarioId,
@@ -1169,7 +1230,7 @@ Include sections:
    - AWACS coverage rotation
 6. ASSESSMENT CRITERIA (measures of effectiveness for each priority)
 
-The MAAP should be 800-1200 words.
+The MAAP should be 2500-3500 words. Include detailed sortie numbers, platform assignments, and timing. This document drives daily ATO generation.
 Return ONLY the document text, no JSON, no markdown fences.`;
 
 async function generateMAAP(scenarioId: string, theater: string, adversary: string, modelOverride?: string) {
@@ -1210,24 +1271,29 @@ async function generateMAAP(scenarioId: string, theater: string, adversary: stri
     .replace(/\{spaceSummary\}/g, spaceSummary || 'No space assets available');
 
   try {
-    const response = await openai.chat.completions.create({
+    const result = await callLLMWithRetry({
+      openai,
       model: getModel('flagship', modelOverride),
       messages: [{ role: 'user', content: prompt }],
-      reasoning_effort: 'high',
-      max_completion_tokens: 4000,
+      maxTokens: 25000,
+      reasoningEffort: 'medium',
+      minOutputLength: 1500,
+      scenarioId,
+      step: 'MAAP',
+      artifact: 'MAAP',
     });
 
-    const maapText = response.choices[0]?.message?.content || '';
+    const maapText = result.content;
 
-    if (!maapText || maapText.length < 100) {
-      console.warn('  [MAAP] LLM output too short, creating placeholder');
+    if (!maapText || maapText.length < 1500) {
+      // callLLMWithRetry already logged this as placeholder
       await prisma.planningDocument.create({
         data: {
           scenarioId,
           title: 'Master Air Attack Plan (MAAP)',
           docType: 'MAAP',
           docTier: 4,
-          content: '[PLACEHOLDER] MAAP generation returned minimal content.',
+          content: maapText || '[PLACEHOLDER] MAAP generation returned minimal content.',
           effectiveDate: new Date(),
         },
       });
@@ -1248,6 +1314,17 @@ async function generateMAAP(scenarioId: string, theater: string, adversary: stri
     console.log('  [MAAP] MAAP generation complete');
   } catch (error) {
     console.error('  [MAAP] Failed to generate MAAP:', error);
+    await logGenerationAttempt({
+      scenarioId,
+      step: 'MAAP',
+      artifact: 'MAAP',
+      model: getModel('flagship', modelOverride),
+      rawOutput: '',
+      outputLength: 0,
+      status: 'error',
+      errorMessage: error instanceof Error ? error.message : String(error),
+      durationMs: 0,
+    });
     await prisma.planningDocument.create({
       data: {
         scenarioId,
@@ -1337,14 +1414,19 @@ async function generateMSELInjects(
     .replace(/\{spaceSummary\}/g, spaceSummary || 'No space assets available');
 
   try {
-    const response = await openai.chat.completions.create({
+    const result = await callLLMWithRetry({
+      openai,
       model: getModel('midRange', modelOverride),
       messages: [{ role: 'user', content: prompt }],
-      reasoning_effort: 'medium',
-      max_completion_tokens: 4000,
+      maxTokens: 12000,
+      reasoningEffort: 'low',
+      minOutputLength: 100,
+      scenarioId,
+      step: 'MSEL Injects',
+      artifact: 'MSEL',
     });
 
-    const rawText = response.choices[0]?.message?.content || '';
+    const rawText = result.content;
 
     // Parse JSON — strip markdown fences if present
     const jsonText = rawText.replace(/```json?\s*/g, '').replace(/```\s*/g, '').trim();
@@ -1358,9 +1440,24 @@ async function generateMSELInjects(
     }[];
 
     try {
-      injects = JSON.parse(jsonText);
+      const parsed = JSON.parse(jsonText);
+      // Handle both bare arrays and wrapped objects like { "injects": [...] }
+      injects = Array.isArray(parsed) ? parsed : (parsed.injects || parsed.data || Object.values(parsed).find(Array.isArray) || []);
+      if (!Array.isArray(injects) || injects.length === 0) throw new Error('No inject array found in parsed JSON');
+      console.log(`  [MSEL] Parsed ${injects.length} injects from JSON`);
     } catch {
       console.warn('  [MSEL] Failed to parse MSEL JSON, creating fallback injects');
+      await logGenerationAttempt({
+        scenarioId,
+        step: 'MSEL Injects',
+        artifact: 'MSEL_PARSE',
+        model: getModel('midRange', modelOverride),
+        rawOutput: rawText,
+        outputLength: rawText.length,
+        status: 'error',
+        errorMessage: 'JSON parse failed — using hardcoded fallback injects',
+        durationMs: 0,
+      });
       injects = [
         { triggerDay: 2, triggerHour: 6, injectType: 'FRICTION', title: 'Tanker Unavailable', description: 'KC-135 tanker diverted for higher-priority mission. AR Track BRAVO unavailable 0600-1200Z.', impact: 'Strike packages must use alternate AR track or reduce range' },
         { triggerDay: 3, triggerHour: 14, injectType: 'INTEL', title: 'Adversary SAM Repositioning', description: 'SIGINT detects adversary mobile SAM battery relocating. Previous target coordinates no longer valid.', impact: 'SEAD mission planning must be updated with new coordinates' },
@@ -1394,6 +1491,17 @@ async function generateMSELInjects(
     console.log(`  [MSEL] Created ${created} scenario injects across ${totalDays} days`);
   } catch (error) {
     console.error('  [MSEL] Failed to generate MSEL injects:', error);
+    await logGenerationAttempt({
+      scenarioId,
+      step: 'MSEL Injects',
+      artifact: 'MSEL',
+      model: getModel('midRange', modelOverride),
+      rawOutput: '',
+      outputLength: 0,
+      status: 'error',
+      errorMessage: error instanceof Error ? error.message : String(error),
+      durationMs: 0,
+    });
   }
 }
 
@@ -1557,10 +1665,9 @@ async function generateOrder(
 
   let prompt = promptTemplate;
   for (const [key, value] of Object.entries(context)) {
-    prompt = prompt.replace(new RegExp(`\\\${ "{${key}" } \\
-} `, 'g'), value);
+    prompt = prompt.replace(new RegExp(`"\\{${key}\\}"`, 'g'), value);
   }
-  prompt = prompt.replace(/\${"{atoDay}"}/g, String(atoDay));
+  prompt = prompt.replace(/"\{atoDay\}"/g, String(atoDay));
 
   try {
     const response = await openai.chat.completions.create({

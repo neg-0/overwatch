@@ -143,6 +143,7 @@ model Scenario {
   simulations      SimulationState[]
   simEvents        SimEvent[]
   scenarioInjects  ScenarioInject[]
+  generationLogs   GenerationLog[]
 
   @@map("scenarios")
 }
@@ -595,4 +596,27 @@ model ScenarioInject {
 
   @@index([scenarioId, triggerDay])
   @@map("scenario_injects")
+}
+
+// ─── Generation Audit Log ────────────────────────────────────────────────────
+
+model GenerationLog {
+  id            String   @id @default(uuid())
+  scenarioId    String
+  scenario      Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  step          String          // e.g. "Strategic Context", "Campaign Plan"
+  artifact      String          // e.g. "NDS", "CONPLAN", "JIPTL"
+  status        String          // success | placeholder | error | retry
+  model         String          // LLM model used
+  promptTokens  Int?
+  outputTokens  Int?
+  outputLength  Int             // Character count of LLM response
+  rawOutput     String? @db.Text // Full LLM response for debugging
+  errorMessage  String? @db.Text
+  retryCount    Int     @default(0)
+  durationMs    Int             // Wall-clock time for this LLM call
+  createdAt     DateTime @default(now())
+
+  @@index([scenarioId])
+  @@map("generation_logs")
 }

@@ -94,6 +94,14 @@ export interface SimEvent {
   createdAt: string;
 }
 
+export interface ArtifactResult {
+  step: string;
+  artifact: string;
+  status: 'success' | 'placeholder' | 'error';
+  outputLength: number;
+  message?: string;
+}
+
 // ─── Store Definition ────────────────────────────────────────────────────────
 
 interface OverwatchStore {
@@ -126,6 +134,9 @@ interface OverwatchStore {
     status: 'GENERATING' | 'COMPLETE' | 'FAILED';
     error?: string;
   } | null;
+
+  // Per-artifact generation results (live from WebSocket)
+  artifactResults: ArtifactResult[];
 
   // Actions
   connect: () => void;
@@ -169,6 +180,7 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
   alerts: [],
   simEvents: [],
   generationProgress: null,
+  artifactResults: [],
 
   // ─── WebSocket Connection ────────────────────────────────────────────────
   connect: () => {
@@ -272,6 +284,11 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
       }
     });
 
+    socket.on('scenario:artifact-result', (data: ArtifactResult & { scenarioId: string }) => {
+      console.log(`[WS] Artifact result: ${data.artifact} → ${data.status}`);
+      set({ artifactResults: [...get().artifactResults, data] });
+    });
+
     set({ socket });
   },
 
@@ -307,6 +324,7 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
   },
 
   generateScenario: async (config: GenerateScenarioConfig) => {
+    set({ artifactResults: [] }); // Clear previous results
     const res = await fetch('/api/scenarios/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

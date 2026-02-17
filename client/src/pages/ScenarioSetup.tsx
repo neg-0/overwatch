@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useOverwatchStore } from '../store/overwatch-store';
+import { ArtifactResult, useOverwatchStore } from '../store/overwatch-store';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -48,6 +48,7 @@ export function ScenarioSetup() {
     resumeScenarioGeneration,
     activeScenarioId,
     generationProgress,
+    artifactResults,
   } = useOverwatchStore();
 
   const [generating, setGenerating] = useState(false);
@@ -322,6 +323,67 @@ export function ScenarioSetup() {
                       ✗ {generationProgress.error}
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* ─── Live Artifact Results ──────────────────────────────── */}
+              {artifactResults.length > 0 && (
+                <div style={{
+                  marginTop: '12px',
+                  padding: '10px 12px',
+                  background: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '8px',
+                }}>
+                  <div style={{
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    color: 'var(--text-muted)',
+                    textTransform: 'uppercase' as const,
+                    letterSpacing: '0.05em',
+                    marginBottom: '8px',
+                  }}>
+                    Generation Log
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    {artifactResults.map((r: ArtifactResult, i: number) => (
+                      <div key={i} style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        fontSize: '12px',
+                        padding: '4px 6px',
+                        borderRadius: '4px',
+                        background: r.status === 'error'
+                          ? 'rgba(255, 82, 82, 0.06)'
+                          : r.status === 'placeholder'
+                            ? 'rgba(255, 171, 0, 0.06)'
+                            : 'rgba(0, 200, 83, 0.06)',
+                      }}>
+                        <span style={{ fontSize: '14px' }}>
+                          {r.status === 'success' ? '✓' : r.status === 'placeholder' ? '⚠' : '✗'}
+                        </span>
+                        <span style={{
+                          fontWeight: 600,
+                          color: r.status === 'error'
+                            ? 'var(--accent-danger)'
+                            : r.status === 'placeholder'
+                              ? 'var(--accent-warning)'
+                              : 'var(--accent-success)',
+                          minWidth: '80px',
+                        }}>
+                          {r.artifact}
+                        </span>
+                        <span style={{
+                          flex: 1,
+                          color: 'var(--text-muted)',
+                          fontSize: '11px',
+                        }}>
+                          {r.message || `${r.outputLength.toLocaleString()} chars`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 
