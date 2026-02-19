@@ -342,6 +342,10 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
     });
     const data = await res.json();
     if (data.success) {
+      const socket = get().socket;
+      if (socket?.connected) {
+        socket.emit('join:scenario', data.data.id);
+      }
       set({ activeScenarioId: data.data.id });
       get().fetchScenarios();
       get().fetchScenarioTimeRange(data.data.id);

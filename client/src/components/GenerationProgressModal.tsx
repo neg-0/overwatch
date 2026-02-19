@@ -138,9 +138,9 @@ export function GenerationProgressModal({ open, onClose }: Props) {
             return (
               <div key={step.name} style={{ display: 'flex', gap: '12px', marginBottom: idx < GENERATION_STEPS.length - 1 ? '4px' : 0 }}>
                 {/* Timeline connector */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '28px', flexShrink: 0 }}>
-                  <div style={stepIndicatorStyle(stepStatus)} className={stepStatus === 'active' ? 'pulse-glow' : ''}>
-                    {stepStatus === 'complete' ? '✓' : stepStatus === 'error' ? '✗' : stepStatus === 'active' ? '◉' : '○'}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '28px', flexShrink: 0, paddingTop: '10px' }}>
+                  <div style={stepIndicatorStyle(stepStatus)} className={stepStatus === 'active' ? 'step-spin' : ''}>
+                    {stepStatus === 'complete' ? '✓' : stepStatus === 'error' ? '✗' : ''}
                   </div>
                   {idx < GENERATION_STEPS.length - 1 && (
                     <div style={{
@@ -274,6 +274,13 @@ export function GenerationProgressModal({ open, onClose }: Props) {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
+        @keyframes step-spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        .step-spin {
+          animation: step-spin 1.2s linear infinite;
+        }
       `}</style>
     </div>
   );
@@ -379,11 +386,50 @@ const spinnerStyle: React.CSSProperties = {
 function stepIndicatorStyle(status: 'pending' | 'active' | 'complete' | 'error'): React.CSSProperties {
   const colors = {
     pending: { bg: 'transparent', border: 'var(--border-subtle)', color: 'var(--text-muted)' },
-    active: { bg: 'rgba(0, 212, 255, 0.15)', border: 'var(--accent-primary)', color: 'var(--accent-primary)' },
+    active: { bg: 'transparent', border: 'var(--accent-primary)', color: 'var(--accent-primary)' },
     complete: { bg: 'rgba(0, 200, 83, 0.15)', border: 'var(--accent-success)', color: 'var(--accent-success)' },
     error: { bg: 'rgba(255, 82, 82, 0.15)', border: 'var(--accent-danger)', color: 'var(--accent-danger)' },
   };
   const c = colors[status];
+
+  // Active step: dashed border that spins
+  if (status === 'active') {
+    return {
+      width: '28px',
+      height: '28px',
+      borderRadius: '50%',
+      border: '2px dashed var(--accent-primary)',
+      background: 'rgba(0, 212, 255, 0.08)',
+      color: c.color,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: '12px',
+      fontWeight: 700,
+      flexShrink: 0,
+    };
+  }
+
+  // Pending step: hollow circle
+  if (status === 'pending') {
+    return {
+      width: '28px',
+      height: '28px',
+      borderRadius: '50%',
+      border: `2px solid ${c.border}`,
+      background: c.bg,
+      color: c.color,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: '12px',
+      fontWeight: 700,
+      transition: 'all 0.3s ease',
+      flexShrink: 0,
+    };
+  }
+
+  // Complete / Error
   return {
     width: '28px',
     height: '28px',
