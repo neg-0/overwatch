@@ -450,16 +450,20 @@ model Asset {
 // ─── Space Domain ────────────────────────────────────────────────────────────
 
 model SpaceAsset {
-  id            String   @id @default(uuid())
+  id            String      @id @default(uuid())
   scenarioId    String
-  scenario      Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  scenario      Scenario    @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
   name          String
   constellation String
+  affiliation   Affiliation @default(FRIENDLY)
   noradId       String?
   tleLine1      String?
   tleLine2      String?
   capabilities  SpaceCapabilityType[]
   status        String   @default("OPERATIONAL") // OPERATIONAL, MAINTENANCE, DEGRADED, LOST
+  operator      String?     // Operating organization: USSF, PLASSF, VKS, NRO, etc.
+  coverageRegion String?    // GLOBAL, WESTPAC, CONUS, etc.
+  bandwidthProvided String[] // Comm bands provided: EHF, SHF, Ka, S, etc.
   inclination   Float?
   eccentricity  Float?
   periodMin     Float?
