@@ -183,6 +183,57 @@ describe('Generation Logger', () => {
 
       expect(mockBroadcast).toHaveBeenCalledOnce();
     });
+
+    it('suppresses P2003 FK constraint errors with a clean warning', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { });
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => { });
+
+      mockPrisma.generationLog.create.mockRejectedValueOnce(
+        Object.assign(new Error('FK constraint violated'), { code: 'P2003' }),
+      );
+
+      await logGenerationAttempt(makeEntry({ artifact: 'NDS' }));
+
+      // Should use console.warn, not console.error
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Scenario deleted'),
+      );
+      expect(errorSpy).not.toHaveBeenCalled();
+
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    });
+
+    it('still logs non-P2003 errors with console.error', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { });
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => { });
+
+      mockPrisma.generationLog.create.mockRejectedValueOnce(
+        Object.assign(new Error('Connection timed out'), { code: 'P1001' }),
+      );
+
+      await logGenerationAttempt(makeEntry());
+
+      expect(errorSpy).toHaveBeenCalled();
+      expect(warnSpy).not.toHaveBeenCalled();
+
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    });
+
+    it('still broadcasts even on P2003 FK error', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => { });
+
+      mockPrisma.generationLog.create.mockRejectedValueOnce(
+        Object.assign(new Error('FK constraint'), { code: 'P2003' }),
+      );
+
+      await logGenerationAttempt(makeEntry({ status: 'success' }));
+
+      expect(mockBroadcast).toHaveBeenCalledOnce();
+
+      vi.restoreAllMocks();
+    });
   });
 
   // ─── callLLMWithRetry ─────────────────────────────────────────────────────

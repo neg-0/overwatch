@@ -13,10 +13,12 @@ const { mockCreate, mockPrisma, mockBroadcastProgress, mockBroadcastArtifact } =
     strategyDocument: {
       create: vi.fn().mockResolvedValue({ id: 'strat-001', title: 'Test Strategy', content: 'Test content' }),
       findMany: vi.fn().mockResolvedValue([]),
+      findFirst: vi.fn().mockResolvedValue(null),
     },
     planningDocument: {
       create: vi.fn().mockResolvedValue({ id: 'plan-001', title: 'Test Planning Doc', content: 'Test content' }),
       findMany: vi.fn().mockResolvedValue([]),
+      findFirst: vi.fn().mockResolvedValue(null),
     },
     priorityEntry: {
       create: vi.fn().mockResolvedValue({ id: 'prio-001' }),
@@ -691,6 +693,150 @@ Target Set: Type 055 Destroyers, Yuzhao-class LPDs`;
       // $ in replacement strings has special meaning in JS regex,
       // but this is a literal replace so it should be fine
       expect(result).toContain('$1');
+    });
+  });
+
+  // ─── Deleted Scenario Guards ──────────────────────────────────────────────
+
+  describe('Deleted Scenario Guards', () => {
+    it('aborts generation when scenario is deleted before first step', async () => {
+      // findUnique returns null — scenario was deleted
+      mockPrisma.scenario.findUnique.mockResolvedValue(null);
+
+      const result = await generateFullScenario({
+        scenarioId: 'deleted-scenario',
+        name: 'Deleted Test',
+        theater: 'INDOPACOM',
+        adversary: 'PRC',
+        description: 'Test deleted scenario',
+        duration: 14,
+        compressionRatio: 1,
+      });
+
+      // Should return the scenarioId without throwing
+      expect(result).toBe('deleted-scenario');
+      // Should NOT have called any LLM (strategy docs, etc.)
+      expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    it('aborts generation gracefully on P2003 FK constraint during step', async () => {
+      // First findUnique says scenario exists
+      mockPrisma.scenario.findUnique.mockResolvedValueOnce({ id: 'fk-fail-scenario' });
+      // But the step function will fail with P2003
+      mockPrisma.scenario.update.mockResolvedValue({}); // updateGenerationStatus succeeds
+      mockCreate.mockRejectedValueOnce(
+        Object.assign(new Error('FK constraint violated'), { code: 'P2003' }),
+      );
+
+      const result = await generateFullScenario({
+        scenarioId: 'fk-fail-scenario',
+        name: 'FK Fail Test',
+        theater: 'INDOPACOM',
+        adversary: 'PRC',
+        description: 'Test FK constraint',
+        duration: 14,
+        compressionRatio: 1,
+      });
+
+      // Should return scenarioId without throwing
+      expect(result).toBe('fk-fail-scenario');
+    });
+
+    it('aborts generation gracefully on P2025 record-not-found during step', async () => {
+      // Scenario exists initially
+      mockPrisma.scenario.findUnique.mockResolvedValueOnce({ id: 'p2025-scenario' });
+      // updateGenerationStatus fails with P2025
+      mockPrisma.scenario.update
+        .mockResolvedValueOnce({}) // initial status update
+        .mockRejectedValueOnce(
+          Object.assign(new Error('Record not found'), { code: 'P2025' }),
+        );
+      // LLM call returns short so strategy doc create fails with P2025
+      mockCreate.mockResolvedValueOnce(mockLLMResponse(STRATEGY_DOC_CONTENT));
+      mockPrisma.strategyDocument.create.mockRejectedValueOnce(
+        Object.assign(new Error('Record not found'), { code: 'P2025' }),
+      );
+
+      const result = await generateFullScenario({
+        scenarioId: 'p2025-scenario',
+        name: 'P2025 Test',
+        theater: 'INDOPACOM',
+        adversary: 'PRC',
+        description: 'Test P2025 handling',
+        duration: 14,
+        compressionRatio: 1,
+      });
+
+      expect(result).toBe('p2025-scenario');
+    });
+
+    it('updateGenerationStatus catches P2025 and does not crash', async () => {
+      // findUnique returns the scenario (exists)
+      mockPrisma.scenario.findUnique.mockResolvedValueOnce({ id: 'p2025-update-test' });
+      // First update succeeds (initial GENERATING status), then second fails with P2025
+      mockPrisma.scenario.update
+        .mockResolvedValueOnce({})
+        .mockRejectedValueOnce(
+          Object.assign(new Error('No record found'), { code: 'P2025' }),
+        );
+      // LLM succeeds
+      mockCreate.mockResolvedValueOnce(mockLLMResponse(STRATEGY_DOC_CONTENT));
+      mockPrisma.strategyDocument.create.mockResolvedValueOnce({ id: 'strat-test' });
+      // Second step — scenario deleted
+      mockPrisma.scenario.findUnique.mockResolvedValueOnce(null);
+
+      const result = await generateFullScenario({
+        scenarioId: 'p2025-update-test',
+        name: 'Status Update P2025 Test',
+        theater: 'INDOPACOM',
+        adversary: 'PRC',
+        description: 'Test update guard',
+        duration: 14,
+        compressionRatio: 1,
+      });
+
+      // Should return without crashing
+      expect(result).toBe('p2025-update-test');
+    });
+
+
+    it('still propagates non-P2025 Prisma errors in updateGenerationStatus', async () => {
+      // Scenario update fails with a non-P2025 error (e.g., connection timeout)
+      mockPrisma.scenario.update.mockRejectedValueOnce(
+        Object.assign(new Error('Connection timed out'), { code: 'P1001' }),
+      );
+
+      await expect(
+        generateFullScenario({
+          scenarioId: 'connection-error',
+          name: 'Connection Error Test',
+          theater: 'INDOPACOM',
+          adversary: 'PRC',
+          description: 'Test connection error propagation',
+          duration: 14,
+          compressionRatio: 1,
+        }),
+      ).rejects.toThrow('Connection timed out');
+    });
+
+    it('logs warning to console when scenario is deleted during generation', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { });
+      mockPrisma.scenario.findUnique.mockResolvedValue(null);
+
+      await generateFullScenario({
+        scenarioId: 'warn-test-id',
+        name: 'Warning Test',
+        theater: 'INDOPACOM',
+        adversary: 'PRC',
+        description: 'Test warning logging',
+        duration: 14,
+        compressionRatio: 1,
+      });
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('warn-test-id'),
+      );
+      warnSpy.mockRestore();
     });
   });
 });
