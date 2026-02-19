@@ -47,14 +47,9 @@ All calls use `reasoning_effort: 'medium'` to balance quality with speed.
 | **Output** | 2 `StrategyDocument` records |
 | **Fallback** | Placeholder documents |
 
-**Prompt Strategy**: Uses `CAMPAIGN_PLAN_PROMPT` template. The OPLAN prompt explicitly instructs the LLM to embed a `FORCE_SIZING_TABLE` in JSON between `<!-- FORCE_SIZING_TABLE -->` delimiters.
+**Prompt Strategy**: Uses `CAMPAIGN_PLAN_PROMPT` template. The OPLAN prompt instructs the LLM to describe force requirements in narrative prose — unit designations, platforms, quantities, and basing — written as a staff officer would.
 
-**Post-processing**: After OPLAN generation, the function parses the force sizing table using regex extraction:
-```typescript
-const tableMatch = oplanContent.match(
-  /<!-- FORCE_SIZING_TABLE -->\s*([\s\S]*?)\s*<!-- \/FORCE_SIZING_TABLE -->/
-);
-```
+**Post-processing**: None. The OPLAN is stored as prose text. ORBAT extraction from this prose is handled separately by the AI ingest engine (Phase 3).
 
 ---
 
@@ -63,11 +58,11 @@ const tableMatch = oplanContent.match(
 | Property | Value |
 |---|---|
 | **Location** | `scenario-generator.ts:614–865` |
-| **Model** | None (deterministic) |
+| **Model** | None (deterministic reference data) |
 | **Output** | `Unit`, `Asset`, `AssetType` records |
-| **Fallback** | Hardcoded INDOPACOM-typical ORBAT |
+| **Source** | Reference INDOPACOM ORBAT |
 
-**Not AI-driven**, but depends on AI output. Parses the `FORCE_SIZING_TABLE` from the OPLAN to build Blue Force units. Falls back to a hardcoded ORBAT if parsing fails.
+**Not AI-driven.** Uses reference INDOPACOM ORBAT data (7 Blue Force units) to build the joint force. Phase 3 will replace this with AI-based extraction from OPLAN prose via the ingest engine.
 
 **Platform Comms Catalog**: Creates `AssetType` records with embedded comms systems:
 ```typescript

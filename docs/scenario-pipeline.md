@@ -52,7 +52,7 @@ Generates the top 3 tiers of the doctrine cascade. Each document receives its pa
 **Model**: `midRange` (o4-mini)  
 **Creates**: 2 `StrategyDocument` records (CONPLAN, OPLAN)
 
-Extends the cascade with operational planning documents. The OPLAN includes an embedded `FORCE_SIZING_TABLE` in JSON format that drives Step 5's ORBAT generation.
+Extends the cascade with operational planning documents. The OPLAN describes force requirements in prose — unit designations, platforms, quantities, and basing — which the AI ingest engine can later extract into structured ORBAT data.
 
 ---
 
@@ -80,14 +80,15 @@ Inserts real-world INDOPACOM installations with accurate coordinates:
 ### Step 5: Joint Force ORBAT
 
 **Function**: `generateJointForce()`  
-**Model**: None (deterministic parsing + fallback)  
+**Model**: None (deterministic reference data)  
 **Creates**: `Unit`, `Asset`, `AssetType` records
 
-**Primary path**: Parses the `FORCE_SIZING_TABLE` from the OPLAN (Step 3) to create Blue Force units matching the AI-generated force sizing.
+Uses reference INDOPACOM ORBAT data to build Blue Force units:
+- F-35A (388 FW, Kadena), F-16C (35 FW, Misawa), F/A-18E (CVW-5) — air
+- CVN (CSG-5), DDG (DESRON-15), SSN (SUBRON-15) — maritime
 
-**Fallback path**: If parsing fails, uses a hardcoded ORBAT with:
-- F-35A, F-22A, EA-18G, KC-135, E-3G (air)
-- DDG-51, CG-47, SSN-774, LCS (maritime)
+> [!NOTE]
+> Phase 3 will replace this with AI-based ORBAT extraction from OPLAN prose via the ingest engine.
 
 Red Force units are always hardcoded (adversary air regiments, SAM battalions, naval groups).
 

@@ -1,0 +1,38 @@
+You are generating MSEL (Master Scenario Event List) injects for a military simulation exercise.
+
+CONTEXT:
+- Theater: "INDOPACOM — Western Pacific"
+- Adversary: "People's Republic of China (PRC)"
+- Duration: 14 days
+
+ORBAT:
+Standard INDOPACOM force package
+
+SPACE ASSETS:
+GPS III, WGS, SBIRS constellation
+
+Generate 30 MSEL injects spread across the scenario timeline.
+Each inject should be realistic friction that tests decision-making.
+
+Categories:
+- FRICTION: equipment failures, weather delays, logistics problems, maintenance issues
+- INTEL: new intelligence reports, adversary repositioning, SIGINT intercepts, HUMINT tips
+- CRISIS: escalation events, civilian incidents, political constraints, ROE changes
+- SPACE: GPS degradation/jamming, SATCOM interference, debris threats, cyber attacks on space systems
+
+Distribute injects across days with higher density in Phase 2-3 (the most intense period).
+
+Return as JSON array:
+[
+  {
+    "triggerDay": 2,
+    "triggerHour": 14,
+    "injectType": "FRICTION",
+    "title": "F-35A Flight Control Software Fault",
+    "description": "388 FW reports 4 aircraft grounded due to flight control software fault requiring TCTO patch. Expected 8-hour repair window.",
+    "impact": "Reduces available DCA sorties by 16% for Day 2 afternoon cycle"
+  }
+]
+
+Generate diverse, realistic injects. Include at least 2 SPACE injects.
+Return ONLY valid JSON array, no markdown fences, no explanation text.

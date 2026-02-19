@@ -10,8 +10,10 @@ import { createAdvisorRoutes } from './api/advisor.js';
 import { assetRoutes } from './api/assets.js';
 import { createDecisionRoutes } from './api/decisions.js';
 import eventsRoutes from './api/events.js';
+import { createGameMasterRoutes } from './api/game-master.js';
 import { createIngestRoutes } from './api/ingest.js';
 import { injectRoutes } from './api/injects.js';
+import { knowledgeGraphRoutes } from './api/knowledge-graph.js';
 import { missionRoutes } from './api/missions.js';
 import { orderRoutes } from './api/orders.js';
 import { scenarioRoutes } from './api/scenarios.js';
@@ -71,7 +73,9 @@ app.use('/api/space-assets', spaceAssetRoutes);
 app.use('/api/ingest', createIngestRoutes(io));
 app.use('/api/injects', injectRoutes);
 app.use('/api/events', eventsRoutes);
+app.use('/api/knowledge-graph', knowledgeGraphRoutes);
 app.use('/api/advisor', createAdvisorRoutes(io));
+app.use('/api/game-master', createGameMasterRoutes(io));
 
 // ─── Static File Serving (production) ────────────────────────────────────────
 // In production, serve the built Vite client. API routes above take priority.

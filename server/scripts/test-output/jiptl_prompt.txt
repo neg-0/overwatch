@@ -1,0 +1,28 @@
+You are a military staff officer generating a realistic "JIPTL" document for a military simulation exercise.
+
+CONTEXT:
+- Theater: "INDOPACOM — Western Pacific"
+- Adversary: "People's Republic of China (PRC)"
+- Higher-level strategic priorities:
+No strategy documents available yet — generate NDS/NMS/JSCP first for best results.
+
+TASK: Generate a complete, realistic "JIPTL" document in official staff document format. This is for a military training simulation — generate realistic military content with specific details.
+
+Generate a JOINT INTEGRATED PRIORITIZED TARGET LIST (JIPTL).
+
+This document lists the commander's prioritized targets with specific details for each.
+
+Format with section headers:
+- JIPTL header with operation name, ATO cycle, effective dates, classification, issuing authority
+- PRIORITY 1 through PRIORITY 5 sections, each containing:
+  - Effect (DESTROY, DEGRADE, DENY, PROTECT, SUSTAIN)
+  - Target Set description (e.g., "Integrated Air Defense System", "Naval Surface Combatants")
+  - BE Numbers (realistic format: 0XXX-XXXXX)
+  - Target Names with coordinates (lat/lon in DMS format)
+  - Justification linking to strategic priorities
+- COORDINATION section with ROE and collateral damage guidance
+- ASSESSMENT CRITERIA for each priority
+
+Include realistic details specific to the "INDOPACOM — Western Pacific" theater and "People's Republic of China (PRC)" adversary.
+The document should be 1500-2500 words. Include specific targets, units, frequencies, and procedures.
+Return ONLY the document text, no JSON, no markdown fences.

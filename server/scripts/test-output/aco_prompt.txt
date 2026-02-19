@@ -1,0 +1,27 @@
+You are a military staff officer generating a realistic "ACO" document for a military simulation exercise.
+
+CONTEXT:
+- Theater: "INDOPACOM — Western Pacific"
+- Adversary: "People's Republic of China (PRC)"
+- Higher-level strategic priorities:
+No strategy documents available yet — generate NDS/NMS/JSCP first for best results.
+
+TASK: Generate a complete, realistic "ACO" document in official staff document format. This is for a military training simulation — generate realistic military content with specific details.
+
+Generate an AIRSPACE CONTROL ORDER (ACO) for the theater.
+
+This document defines all controlled airspace and procedures for deconfliction.
+
+Format with sections covering:
+1. GENERAL (ACO effective period, issuing authority, distribution)
+2. RESTRICTED OPERATING ZONES (ROZ name, coordinates as lat/lon corners, altitude blocks, effective times, controlling agency)
+3. AIR REFUELING TRACKS (track names like "AR-205 BLUE", anchor coordinates, altitude blocks, frequencies)
+4. COMBAT AIR PATROL STATIONS (station names, orbit coordinates, altitude blocks, handoff procedures)
+5. TRANSIT CORRIDORS (corridor names, entry/exit points with coordinates, altitude assignments, IFF procedures)
+6. KILL BOXES (killbox designations using GARS grid references, engagement rules, fire support coordination measures)
+7. HIGH DENSITY AIRSPACE CONTROL ZONES (HIDACZ locations, coordination requirements)
+8. MINIMUM RISK ROUTES (MRR designations, waypoints with coordinates)
+
+Include realistic details specific to the "INDOPACOM — Western Pacific" theater and "People's Republic of China (PRC)" adversary.
+The document should be 1500-2500 words. Include specific targets, units, frequencies, and procedures.
+Return ONLY the document text, no JSON, no markdown fences.

@@ -1,0 +1,197 @@
+SIMULATED AIRSPACE CONTROL ORDER (ACO)
+INDOPACOM — WESTERN PACIFIC (Training Exercise: PACIFIC SHIELD 26)
+SIMULATED FOR TRAINING PURPOSES ONLY — NOT FOR REAL-WORLD OPERATIONS
+
+1. GENERAL
+1.1 Purpose. This Airspace Control Order (ACO) establishes controlled airspace, air refueling tracks, combat air patrols (CAP), transit corridors, kill boxes, High Density Airspace Control Zones (HIDACZ), Minimum Risk Routes (MRR), and deconfliction procedures for exercise PACIFIC SHIELD 26 in the INDOPACOM — Western Pacific theater. This ACO is SIMULATED FOR TRAINING ONLY and must not be used for operational planning outside the exercise.
+1.2 Effective Period. This ACO is effective from 0000Z 01 MAR 2026 through 2359Z 14 MAR 2026. All times ZULU. Amendments or cancellations will be promulgated as Exercise ACO Supplements.
+1.3 Issuing Authority. Combined Airspace Coordination Element (CACE), Joint Task Force PACIFIC SHIELD (JTF-PS). Point of Contact: CACE Chief — LtCol S. K. Morales, sim POC radio: SIM-CACE-CTRL, sim e-mail: cace.jtfps.sim@example.mil.
+1.4 Distribution. Distributed to all exercise participating air, maritime, space, and ground units: Combined Forces Air Component (CFAC), Combined Maritime Component (CMCF), Land Component (LCF), Special Operations Component (SOCC), National Airspace Authority (simulated), and participating coalition partners.
+1.5 Authorities and References. Exercise Rules of Engagement (ROE) Annex A (SIM), Joint Airspace Control Measures Publication (SIM), Theater Airspace Control Plan (TACP-SIM). All participants will abide by exercise safety and deconfliction procedures contained herein.
+1.6 Definitions. All airspace designations in this ACO are for simulation purposes. Units will apply the ACO during mission planning and execution and adhere to published handoff, radio, and identification procedures to prevent fratricide and ensure deconfliction.
+
+2. RESTRICTED OPERATING ZONES (ROZ)
+Note: ROZs are established to segregate certain training activities (live-fire, EW, ISR) and to protect surface units. Coordinates are presented in degrees, minutes (SIM).
+
+ROZ-01 “TAROKA SHOAL” — Live-Fire Surface-to-Air Exercise
+- Corners (LAT/LON): NW 22°15.00'N, 131°20.00'E; NE 22°15.00'N, 131°40.00'E; SE 21°55.00'N, 131°40.00'E; SW 21°55.00'N, 131°20.00'E (SIM).
+- Altitude Block: Surface to FL350.
+- Effective Times: 0100Z–0600Z daily, 04–10 MAR 2026, plus scheduled extensions by NOTAM-SIM.
+- Controlling Agency: Land Component Airspace Manager (LCAM) via SIM-CONTROL-1; monitor SIM-FREQ-ROZ1 (see Annex Frequencies).
+- Restrictions: No non-participating aircraft may enter without positive coordination. Emergency ingress allowed only with explicit concurrence of LCAM and CACE.
+
+ROZ-02 “LIJIANG EW BOX” — Electronic Warfare Emissions
+- Corners: NW 24°30.00'N, 126°00.00'E; NE 24°30.00'N, 127°30.00'E; SE 23°00.00'N, 127°30.00'E; SW 23°00.00'N, 126°00.00'E.
+- Altitude Block: Surface to unrestricted, but primary EW activity concentrated FL050–FL300.
+- Effective Times: Continuous from 0000Z 02 MAR–2359Z 12 MAR 2026; EW sorties scheduled and published 24 hours in advance.
+- Controlling Agency: CFAC EW Cell; point of contact SIM-EW-CTR. All non-EW traffic must use alternate routing approved by CACE.
+
+ROZ-03 “NORTH REEF” — Maritime Strike Live-Fire
+- Corners: NW 18°00.00'N, 127°00.00'E; NE 18°00.00'N, 128°30.00'E; SE 16°30.00'N, 128°30.00'E; SW 16°30.00'N, 127°00.00'E.
+- Altitude Block: Surface to FL180.
+- Effective Times: 0700Z–1700Z 05 MAR and 11 MAR 2026.
+- Controlling Agency: CMCF Strike Coordinator (SIM-CMCF-SC). All participating strike aircraft will brief courier procedures and weapons release authority prior to ingress.
+
+3. AIR REFUELING TRACKS (ART)
+Established tanking tracks for large force sustainment and deconfliction. All ARTs are corridor-based with anchored track points and dedicated tanker frequencies. Tankers will broadcast position and status on ART frequency and monitor CACE for handoffs.
+
+AR-205 BLUE (Northern Track)
+- Anchor Coordinates: 23°45.00'N, 126°45.00'E (SIM).
+- Track Orientation: 090°/270°, 40 NM length (20 NM either side of anchor).
+- Altitude Block: FL240–FL300 (tanker orbit FL260 nominal).
+- Assigned Tanker Unit: 18th Air Refueling Wing (SIM) — KC-135R.
+- Primary Frequency: SIM-FREQ-AR-BLUE; Guard: SIM-FREQ-AR-EMERG.
+- Procedures: AR rendezvous checks at 25 NM on bearing established by ART coordinator. Control offload via pre-briefed AR rendezvous anchor points; handoff to terminal control 10 minutes prior to planned exit.
+
+AR-206 GREEN (Southern Track)
+- Anchor Coordinates: 19°30.00'N, 129°10.00'E.
+- Track Orientation: 180°/360°, 50 NM length.
+- Altitude Block: FL200–FL260 (tanker orbit FL230 nominal).
+- Assigned Tanker Unit: 5th Aerial Refuel Squadron (SIM) — KC-46A.
+- Primary Frequency: SIM-FREQ-AR-GREEN.
+- Procedures: All receivers must be on discrete predetermined TACAN channel and monitor ART frequency. Tanker-to-receiver communications require positive identification, bingo fuel checks every 15 minutes.
+
+4. COMBAT AIR PATROL (CAP) STATIONS
+CAPs are established for air defense of key assets and to provide fighter escort during strike packages. CAPs will perform handoff per the Theater Handoff Matrix and use assigned control frequencies.
+
+CAP-ALPHA (Carrier Battle Group Defense)
+- Station: Orbit centered 21°00.00'N, 125°45.00'E (SIM) — circular 30 NM radius.
+- Altitude Block: FL200–FL300.
+- Assigned Units: USS SIM-CV-1 Air Wing (F/A-18E/F), JASDF Fighter Squadron Detachment (F-2) (SIM).
+- Handoff Procedures: Control begins with Carrier Air Traffic Control (CATCC) within 60 NM. At 60 NM from carrier, control transferred to CFAC Air Defense (SIM-FREQ-CAP-A). Positive control requires Mode 4/5/S IFF, discrete authentication challenge per Exercise IFF Table.
+- ROE: Intercept procedure per Exercise Intercept Profile; use minimum necessary force. Engagement of simulated adversary only with positive ID and ROE authorization.
+
+CAP-BRAVO (Fixed-Base Airfield Defense)
+- Station: 24°00.00'N, 127°00.00'E (SIM) — 15 NM orbit.
+- Altitude Block: Surface to FL250 (primary CAP FL080–FL160).
+- Assigned Units: RAAF/USAF Combined Squadron (F-35A) (SIM).
+- Handoff Procedures: Local tower coordinates vector-to-intercept; transfer to CFAC at IAW Handoff Matrix.
+
+5. TRANSIT CORRIDORS
+Designated air corridors provide safe transit for non-combat and transit missions. Strict altitude, IFF, and communication requirements are enforced.
+
+CORRIDOR-1 “SOUTHERN PASS”
+- Entry Point: 17°30.00'N, 126°00.00'E.
+- Exit Point: 20°00.00'N, 129°00.00'E.
+- Width: 25 NM corridor centered on track.
+- Altitude Assignment: Odd flight levels (FL190–FL290) for eastbound; Even flight levels (FL180–FL280) for westbound to maintain vertical separation.
+- IFF Procedures: All corridor traffic must operate Mode 3/A and Mode S; Mode 5 preferred. Failure to comply constitutes immediate escort by CAP and possible diversion.
+- Communications: Monitor SIM-FREQ-TRANS-1; file flight plan with CACE 2 hours prior to entry.
+
+CORRIDOR-2 “STRAITS LANE”
+- Entry Point: 22°45.00'N, 130°15.00'E.
+- Exit Point: 24°15.00'N, 127°45.00'E.
+- Width: 15 NM.
+- Altitude Assignment: Reserved FL120–FL180 for low transit; FL220–FL300 for high transit; direction assigns as per NOTAM-SIM.
+- Special Procedures: All transit aircraft must squawk assigned discrete codes. Unannounced deviations will trigger HIDACZ intercept.
+
+6. KILL BOXES
+Kill boxes provide pre-coordinated airspace where attack aircraft and fire support units may engage simulated targets with reduced coordination measures while maintaining deconfliction. Use GARS (Global Area Reference System) grid references followed by engagement rules.
+
+KILLBOX-KB1 “EAST GARS-3419”
+- GARS: 3419 (SIM).
+- Boundaries: GARS cell 3419 as depicted in exercise map pack.
+- Altitude Block: Surface to FL250.
+- Engagement Rules: Type II (Aviation and Surface Fires permitted). Air-to-surface and indirect fires permitted with requirement to broadcast munition type and planned fires on SIM-FREQ-KILLBOX-KB1 15 minutes prior to engagement. No surface-to-surface fires within 5 NM of friendly positions without Fire Support Coordination Center (FSCC) clearance.
+- FSCL: Simulated FSCL-4; maximum ordnance weight-per-salvo and min-separation per Annex Fires (SIM).
+
+KILLBOX-KB2 “WEST GARS-3521”
+- GARS: 3521 (SIM).
+- Altitude Block: FL150–FL450 (air-to-air engagements permitted above FL150).
+- Engagement Rules: Type I (aviation-only). Aircraft may execute weapon deliveries without additional deconfliction if briefed in the strike package. All aircrew must confirm kill box activation via CACE and monitor SIM-FREQ-KILLBOX-KB2.
+
+7. HIGH DENSITY AIRSPACE CONTROL ZONES (HIDACZ)
+HIDACZs are designated where the volume of air traffic is high and detailed sequencing and control measures are required for safety.
+
+HIDACZ-NEAR “SOUTH ISLAND EXCLUSION”
+- Center: 21°10.00'N, 128°05.00'E.
+- Radius: 60 NM.
+- Altitude Block: Surface to FL600.
+- Coordination Requirements: All aircraft entering HIDACZ must be on discrete C2 channel and follow published sequencing. Pre-activation briefing mandatory for all participating units. Special arrival/departure windows assigned by HIDACZ Coordinator (SIM-HID-CTR).
+- Handoffs: CATCC for carriers, Tower for airfields, CFAC for CAPs; CFAC maintains master sequencing list.
+
+HIDACZ-FAR “NORTHERN APPROACH”
+- Center: 24°00.00'N, 126°30.00'E.
+- Radius: 40 NM.
+- Altitude Block: Surface to FL300.
+- Control: Joint Approach and Sequencing Unit (JASU-SIM) controls all IFR to VFR transitions. Special VR (visual recovery) lanes assigned during daylight.
+
+8. MINIMUM RISK ROUTES (MRR)
+MRRs provide safe transit for aircraft with degraded navigation or identification and for casualty evacuation. MRRs have lower altitude ceilings and require strict procedures.
+
+MRR-A “MEDICAL EVAC LANE”
+- Waypoints:
+  - WP1: 22°00.00'N, 126°15.00'E (SIM)
+  - WP2: 22°30.00'N, 127°00.00'E (SIM)
+  - WP3: 23°00.00'N, 127°45.00'E (SIM)
+- Altitude: 5,000–10,000 feet MSL.
+- Procedures: MEDEVAC flights declare “MEDEVAC MRR-A” and receive expedited sequencing. Aircraft with contaminated IFF will be escorted by CAP if necessary. Emergency comms: SIM-FREQ-MRR-URG.
+
+MRR-B “HEAVY CARGO LANE”
+- Waypoints:
+  - WP1: 18°00.00'N, 129°00.00'E
+  - WP2: 19°15.00'N, 128°00.00'E
+  - WP3: 20°30.00'N, 127°30.00'E
+- Altitude: FL060–FL120 preferred.
+- Procedures: All heavy lift aircraft must file a two-hour notice and maintain separation intervals of 15 minutes unless radar control provides positive separation.
+
+9. IDENTIFICATION, FRIENDLY-FORCE TRACKING, AND IFF
+9.1 Identification. All participating aircraft must operate IFF Mode S and Mode 5 where equipped. Mode 4 permitted for legacy platforms. Ground and maritime units must report simulated signature emissions prior to missions.
+9.2 Friendly-Force Tracking (FFT). FFT is provided by CFAC Combined Track Picture (SIM-CTP). All participants must report takeoff/landing and mission status updates to SIM-CTP on SIM-FREQ-FFT. Loss of track must be reported immediately; MRRs and HIDACZ procedures apply to re-establish positive identification.
+9.3 Authentication. Authentication challenges per Exercise Authentication Table (Annex AUTH). Challenge-response required during CAP handoffs and for transit corridor entry.
+
+10. COMMUNICATIONS AND FREQUENCIES
+10.1 Primary Exercise Frequencies (SIM). All units must validate SIM frequencies before operations:
+- SIM-FREQ-CACE-COM: 251.400 SIM
+- SIM-FREQ-AR-BLUE: 265.200 SIM
+- SIM-FREQ-AR-GREEN: 267.000 SIM
+- SIM-FREQ-CAP-A: 223.150 SIM
+- SIM-FREQ-TRANS-1: 243.050 SIM
+- SIM-FREQ-KILLBOX-KB1: 216.600 SIM
+- SIM-FREQ-KILLBOX-KB2: 218.800 SIM
+- SIM-FREQ-HIDACZ-CTR: 277.900 SIM
+- SIM-FREQ-FFT: 241.700 SIM
+10.2 Guard and Emergency. All units monitor SIM-FREQ-GUARD: 243.000 SIM. Medical emergency monitor SIM-FREQ-MED: 254.300 SIM.
+10.3 Data Links. Simulated Link-16 (TADIL-J-SIM) will be used for track dissemination where authorized. Units without Link-16 must coordinate for periodic updates via voice.
+
+11. DECONFLICTION PROCEDURES
+11.1 Vertical Deconfliction. Use published altitude blocks for ARTs, CAPs, ROZs, transit corridors, and kill boxes. Minimum vertical separation in shared altitudes is 1,000 ft up to FL290; 2,000 ft above FL290 unless under positive control.
+11.2 Lateral/Temporal Deconfliction. Sequencing windows for HIDACZ and MRR are assigned by CACE. Where conflicting missions are planned, the higher-priority mission per JTF Commander’s mission list receives precedence; lower-priority missions must re-route or reschedule.
+11.3 Electronic Warfare Deconfliction. EW sorties in ROZ-02 will publish emissions schedule 24 hours in advance. All friendly platforms will be issued EW effect boundaries and mandated to carry an EW safe distance buffer of 15 NM unless otherwise coordinated.
+11.4 Air-to-Air and Surface Fire Deconfliction. Kill box activation and FSCL entry procedures mandatory. Fire support liaison (FSL) will ensure all surface-to-surface and surface-to-air simulated fires are recorded and broadcast.
+11.5 Emergency Procedures. Lost communications: squawk 7600, proceed along MRR if in transit or orbit at last assigned altitude for CAP. Mayday/cant locate: all CAPs and tankers monitor SIM-FREQ-GUARD and assist as tasked by CACE.
+
+12. TARGETING AND SIMULATED ENGAGEMENT RULES
+12.1 Simulated Target Sets. Target sets replicate adversary PRC simulated assets (SIM-OPFOR) including SAM emplacements, simulated SLOC interdiction vessels, and simulated ISR nodes. Specific target grids are published in Exercise Target Annex (SIM-TGT).
+12.2 Simulated Weapons Effects. All weapon delivery will be simulated with adjudication by Exercise Control (EXCON). Live munitions are not used. All strikes require pre-briefed and EXCON-approved attack deconfliction times.
+12.3 Engagement Authority. Simulated Weapons Release Authority rests with JTF-PS Combined Fires Authority (CFA) per Exercise ROE. Immediate self-defense allowed for simulated hostile actions per ROE.
+
+13. ATTACHMENTS AND ANNEXES
+13.1 Annex Frequencies: detailed frequency list and guard channels.
+13.2 Annex Handoff Matrix: procedures for handoff among CATCC, CFAC, CMCF, JASU, and local towers.
+13.3 Annex Target Allocation: simulated target list and priority by phase.
+13.4 Annex Authentication: challenge/response tables.
+13.5 Exercise Maps: graphical depiction of ROZs, ARTs, CAP areas, corridors, kill boxes, HIDACZ, MRRs.
+
+14. COORDINATION & REPORTING
+14.1 Pre-Mission Coordination. All strike, ISR, EW, and tanker taskings must be coordinated with CACE 24–72 hours prior to execution as applicable. Fast-time coordination windows available for emergent tasks.
+14.2 Post-Mission Reporting. All participants must submit after-action reports (AAR) to CACE within 6 hours of mission termination, including track logs, IFF status, and any deconfliction incidents.
+14.3 Incidents. Any air safety incident, near miss, or simulated fratricide will be reported immediately to CACE and EXCON. A Safety Investigation (SIM) will be convened.
+
+15. SPECIAL INSTRUCTIONS (SIMULATION HIGHLIGHTS)
+15.1 Adversary (PRC-SIM) Tactics. OPFOR will employ simulated integrated air defense system (IADS) deployments in northeastern and north-central sectors, and simulated maritime harassment tactics in southern approaches. Friendly units must apply RCC (rules, cross-cueing, counter-EW) and adhere to ROZ/EW coordination.
+15.2 Coalition Integration. All coalition participants must supply unit liaison to CACE for joint track integration and abide by authentication procedures.
+15.3 Exercise Safety Limits. All participants remain subject to host-nation simulated airspace agreements and international safety minima; any deviation may cause exercise sanction.
+
+16. AMENDMENT PROCEDURE
+16.1 ACO Amendments. CACE will issue amendments via SIM-PRICE ACO Notice at least 2 hours prior to effect. Emergency amendments may be broadcast by CACE with immediate effect and will be followed by formal written update.
+16.2 Cancellation. All airspace measures terminate at end of effective period or upon formal cancellation. Units must acknowledge cancellation via SIM-FREQ-ACK.
+
+17. CERTIFICATION
+This ACO is issued under the authority of Combined Airspace Coordination Element (CACE), JTF-PACIFIC SHIELD (SIM). All participating units must comply with the provisions contained herein and coordinate with CACE for clarifications.
+
+Issued: 0000Z 28 FEB 2026
+Combined Airspace Coordination Element (CACE)
+Joint Task Force PACIFIC SHIELD (SIM)
+
+SIMULATION DISCLAIMER: This ACO is strictly for a simulated training exercise. Coordinates, unit names, frequencies, and procedures are for exercise realism and do not reflect operational orders or guidance for real-world operations. Any attempt to use this material for operational purposes is prohibited.

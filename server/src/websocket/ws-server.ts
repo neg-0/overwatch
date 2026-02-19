@@ -117,6 +117,16 @@ export function broadcastArtifactResult(scenarioId: string, data: {
   });
 }
 
+export function broadcastGraphUpdate(scenarioId: string, data: {
+  addedNodes: Array<{ id: string; type: string; label: string; sublabel?: string; meta?: Record<string, unknown> }>;
+  addedEdges: Array<{ source: string; target: string; relationship: string }>;
+}) {
+  ioInstance?.to(`scenario:${scenarioId}`).emit('graph:update', {
+    scenarioId,
+    ...data,
+  });
+}
+
 export function getIO(): SocketIOServer | null {
   return ioInstance;
 }

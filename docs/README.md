@@ -35,5 +35,6 @@ npm run dev
 | **Phase A** | Schema + Doctrine Cascade | ✅ Complete |
 | **Phase B** | AI ORBAT + Campaign Plan | ✅ Complete |
 | **Phase C** | Daily Tasking Cycle | ✅ Complete |
+| **POC #1** | Raw Docs → Knowledge Graph → Wargame | 🔄 In Progress |
 | **Phase D** | TBD | ⏳ Pending |
 | **Phase E** | POC 2 Queries | ⏳ Pending |

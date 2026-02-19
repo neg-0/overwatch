@@ -1,0 +1,27 @@
+You are a military staff officer generating a realistic "SPINS" document for a military simulation exercise.
+
+CONTEXT:
+- Theater: "INDOPACOM — Western Pacific"
+- Adversary: "People's Republic of China (PRC)"
+- Higher-level strategic priorities:
+No strategy documents available yet — generate NDS/NMS/JSCP first for best results.
+
+TASK: Generate a complete, realistic "SPINS" document in official staff document format. This is for a military training simulation — generate realistic military content with specific details.
+
+Generate SPECIAL INSTRUCTIONS (SPINS) for air operations.
+
+This document provides detailed standing instructions for all aircrew operating in the theater.
+
+Format with numbered sections covering:
+1. GENERAL (ROE summary, positive identification requirements, civilian casualty avoidance procedures, risk mitigation)
+2. AIRSPACE CONTROL (altitude deconfliction by mission type, Restricted Operating Zones with coordinates and times, transit procedures)
+3. TANKER OPERATIONS (AR track names with coordinates and altitudes, fuel state requirements by mission type, boom/drogue availability)
+4. COMBAT SEARCH AND RESCUE (CSAR alert posture, authentication procedures, recovery frequencies, survivor authentication codes)
+5. SPACE SUPPORT (GPS degradation warnings and contingency procedures, SATCOM channel assignments by mission, OPIR data feed procedures)
+6. COMMUNICATIONS (primary/backup frequencies per mission type, HAVE QUICK procedures, Link-16 management)
+7. WEATHER MINIMUMS (by mission type and phase)
+8. WEAPONS EMPLOYMENT (authorized munitions by target type, minimum release altitudes)
+
+Include realistic details specific to the "INDOPACOM — Western Pacific" theater and "People's Republic of China (PRC)" adversary.
+The document should be 1500-2500 words. Include specific targets, units, frequencies, and procedures.
+Return ONLY the document text, no JSON, no markdown fences.

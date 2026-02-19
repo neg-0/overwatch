@@ -1,0 +1,169 @@
+INDOPACOM — WESTERN PACIFIC
+SPECIAL INSTRUCTIONS (SPINS)
+Air Operations — Exercise Simulation Only
+Classification: SIMULATION / FOR EXERCISE USE ONLY
+Effective: Exercise Start Date — Exercise End Date
+Authority: Joint Force Air Component Commander (JFACC) / Combined Air Operations Center (CAOC)
+
+NOTE: This SPINS document is for training and simulation purposes only. All coordinates, frequencies, codes, and unit names marked with brackets or “(SIM)” are exercise placeholders and must be validated against live exercise orders, air tasking orders (ATO), and CAOC releases prior to flight. Do not employ against real-world targets or in live operations.
+
+1. GENERAL
+1.1 Purpose. Provide standing instructions for all coalition and participating aircrews operating in the INDOPACOM — Western Pacific theater during the exercise. Ensure compliance with theater RoE, Positive Identification (PID) standards, civilian casualty avoidance (CCOA), and risk mitigation.
+1.2 Theater Rules of Engagement (RoE) Summary (simulation).
+  a. Defensive Fires Only: Use of force authorized to counter hostile act or demonstrated hostile intent directed against forces, assets, or identified civilians per ROE Annex. Proportionality and discrimination must be applied.
+  b. Weapons Release Authority: Aircrew will not employ lethal munitions without pre-coordinated weapons release authority (WRA) from the CAOC or delegated Strike Authority (for time-sensitive targets, pre-designated TST authority will be published in the ATO).
+  c. De-escalation: Warning measures (visual, radio, flares) shall be used when practicable before lethal force.
+  d. No-strike Lists (NSL) and Positive Identification Lists (PID-L): CAOC will publish updated NSL and PID-L daily in the ATO and ATO supplements.
+1.3 Positive Identification (PID) Requirements.
+  a. PID Standard: Positive identification requires two independent PID means when practical (RADAR/EO/IR/visual/ID friend or foe). Single-source PID allowed only under pre-authorized emergency conditions and with higher authority concurrence.
+  b. Aircraft vs. Maritime/Surface: Visual or EO confirmation required for surface targets in maritime littoral zones; radar track correlations alone insufficient within 50 nm of high-density shipping lanes.
+  c. PID Hold Time: Hold fires for minimum of 2 minutes to attempt communication and challenge unless immediate self-defense is required.
+1.4 Civilian Casualty Avoidance (CCOA)/Collateral Damage Estimate (CDE) Requirements.
+  a. Pre-strike Planning: All strike packages must submit CDE estimates to CAOC targeting cell for automated deconfliction and approval. Minimum required CDE components include collateral estimates, civilian proximity, and civilian critical infrastructure.
+  b. Dynamic Engagements: If civilian presence is suspected, shift to precision-guided munitions (PGMs) or abort if risk cannot be mitigated.
+  c. Human Shields: Evidence of coercion must be documented; legal counsel in CAOC to be consulted prior to engagement where feasible.
+1.5 Risk Mitigation.
+  a. EMCON: Joint EMCON levels published daily. COMMS silence exceptions must be authorized.
+  b. Air Refueling and Basing: Alternate recovery fields published in ATO. Night operations over maritime transit corridors require CAP support.
+  c. Electronic Warfare (EW) Mitigation: Units must brief GPS-denial contingencies; inertial navigation backup required for all strike and ISR aircraft.
+
+2. AIRSPACE CONTROL
+2.1 Deconfliction by Altitude and Mission Type (standard theater blocks — exercise).
+  a. Air-to-Air Combat Air Patrol (CAP): FL250–FL350 unless otherwise assigned.
+  b. Strike/SEAD/DEAD: FL200–FL300 for ingress/egress; weapons release profiles per weapons brief.
+  c. ISR/Reconnaissance: FL300–FL600 depending on platform; low-level tactical drone operations authorized below FL200 in designated UAS corridors.
+  d. AEW/C2: FL300–FL400 as directed.
+  e. Rotary Wing (Overland): Below FL150; maritime SAR/ASW helicopters authorized down to surface per route clearances.
+2.2 Restricted Operating Zones (ROZ) / Restricted Maritime Airspace (RMZ).
+  a. ROZ Alpha (Exercise Mainland Littoral): Center: Nxx°xx.x' Eyyy°yy.y' (SIM); Radius: 30 nm; Hours: 0600–2200 LCL. Purpose: High risk SEAD/strike rehearsals. Entry by CAOC approval only.
+  b. ROZ Bravo (Sea Control Area): Center: Nxx°xx.x' Eyyy°yy.y' (SIM); Corridor: 20 nm along published transit lane; Hours: Continuous. Purpose: Carrier strike group operations.
+  c. RMZ Charlie (Civilian Shipping Lane Buffer): Boundaries: [see ATO Annex]. No munitions release within RMZ unless positive ID and WRA granted.
+2.3 Transit Procedures.
+  a. Entry/Exit: Aircraft transiting through ROZs must file crossing times in ADIZ/ATC flight plan and monitor transit frequency. Maintain assigned altitude block and standby for vectoring by controlling agency.
+  b. High-Risk Lanes: All flights through high-risk corridors must carry a dedicated escort or fly on protected transit tracks. Unescorted transit requires Command authorization and NOTAM acknowledgment.
+  c. Identification Procedures: Squawk assignment and IFF modes per ATO. Visual signals: wings-level, maneuvering, and rock/flash patterns standardized in Comm Plan Annex.
+
+3. TANKER OPERATIONS
+3.1 AR Track Nomenclature and Positions (SIM exercise tracks; center points listed for planning).
+  a. AR TRACK RED (Northern Lanes): Center: Nxx°xx.x' Eyyy°yy.y' (SIM), Altitude: FL210–FL230. Primary for CAP and high-end fighter packages.
+  b. AR TRACK BLUE (Central Sea): Center: Nxx°xx.x' Eyyy°yy.y' (SIM), Altitude: FL240–FL260. Primary for large strike packages and multimission aircraft.
+  c. AR TRACK GREEN (Southern Support): Center: Nxx°xx.x' Eyyy°yy.y' (SIM), Altitude: FL200–FL220. Rotary/heavy-lift transit support.
+3.2 AR Track Procedures.
+  a. Launch/Recovery Zones: Tankers will publish orbit points and initial climb/descent segments in tanker brief. Tankers will remain on assigned altitudes until tanker controller coordinates switch.
+  b. Tanker Entry Call: "TANKER [call sign], state, fuel, ETD, and assigned AR track" on tanker initial frequency. Controllers will provide pre-contact fuel states.
+3.3 Fuel State Requirements by Mission Type (minimum; simulation).
+  a. High-Threat Strike Packages: Bingo fuel defined as fuel required to reach divert base + 20 minutes holding + recovery contingency. Minimum required on ingress for refueling: Mission fuel sufficient to complete ingress + two AR contacts.
+  b. CAP/Fighter PATROL: On-station minimum state of 45 minutes on station OR ability to reach tanker with reserve fuel.
+  c. ISR/Maritime Patrol: Return-to-base minimum plus one AR if mission duration exceeds on-station endurance.
+3.4 Boom/Drogue Availability.
+  a. All tankers will publish offload capabilities in ATO: Boom capable (KC-10/KC-135 sim) and Drogue capable (KC-130/AAR probe-compatible). Mixed packages must pre-coordinate compatible receiver types.
+  b. Hot-refuel: Hot refuel on deck for rotary-wing only with squadron and base approval. Air-to-air hot rearm prohibited.
+
+4. COMBAT SEARCH AND RESCUE (CSAR)
+4.1 CSAR Alert Posture.
+  a. CSAR Condition: CAOC will declare CSAR posture levels (Green/Yellow/Red) daily in ATO. At Red, dedicated CSAR helicopters and dedicated airborne controllers (TACPs) are on immediate alert.
+  b. Dedicated Rescue Packages: Rescue package (RESCAP) numbering, call signs, and on-call times will be published in the ATO.
+4.2 Authentication Procedures.
+  a. Pre-mission Authentication: All aircrew briefed on current authentication codes and challenge-response procedures before tasking. Codes change per shift cycle and are distributed via secure exercise channels and NOTAM.
+  b. In-theater Authentication: Two-part authentication — voice challenge using challenge word and response phrase; visual authentication (IR strobes, panel displays) when radio impractical.
+4.3 Recovery Frequencies (SIM).
+  a. Primary CSAR UHF: UHF-CH-A (designator only — replace with ATO frequency).
+  b. Maritime/Shipboard Recovery: UHF-CH-B (designator).
+  c. Backup/VHF: VHF-CH-1 (designator).
+  d. Guard/Distress: Guard channels monitored by all CSAR platforms are listed in Comm Annex. Monitor guard continuously during CSAR operations.
+4.4 Survivor Authentication Codes.
+  a. Initial Survivors: Pre-designated authentication phrases and one-time visual cues (IR strobe pattern — 3 long pulses every 30 sec) issued pre-mission.
+  b. Dynamic Changes: If suspect of compromise, survivors will use override phrase and secondary IR signature; controllers will initiate verification intercept procedures.
+4.5 CSAR Execution Constraints.
+  a. Denied Area Recovery: Denied-area recoveries require explicit approval from JFACC and JSOTF (for joint exercises). Rescue packages will consider SEAD/DEAD support or use of TST pathways.
+
+5. SPACE SUPPORT
+5.1 GPS Degradation Warnings and Contingency Procedures.
+  a. GPS Status Notices: CAOC will publish daily GPS status (GREEN/AMB/RED) in ATO and space support messages. Any planned GPS degradation (simulated jamming or spoofing) will be announced 24 hours prior and in real-time updates.
+  b. Contingency Navigation: All crews must brief alternate navigation methods (INS alignment, TACAN, Celestial/visual cues, terrestrial NAVAIDs) before operations. Aircraft operating in GPS-denied environment must update nav envelopes and waypoints per CAOC guidance.
+5.2 SATCOM Channel Assignments by Mission.
+  a. ISR Data Links: Primary SATCOM for ISR — SATCOM-DL-1 (designator). Backup — SATCOM-DL-2.
+  b. Strike Packages: Primary SATCOM — SATCOM-STRIKE-1. Tactical video push via SATCOM-BRIDGE as authorized by CAOC comms cell.
+  c. Tanker/CSAR: SATCOM-AAR and CSAR SATCOM channels assigned per ATO.
+5.3 OPIR Data Feed Procedures.
+  a. Tasking: OPIR/space-based IR cueing requests must be submitted to CAOC Space Cell 2 hours prior for persistent coverage; 15–30 minute requests accepted for emergent TSTs when available.
+  b. Data Dissemination: OPIR cueing feeds will be routed to Airborne ISR CP and Strike C2 nodes via secured SIPR-equivalent exercise channels. IP addresses and port assignments issued in Space Annex.
+  c. Latency Mitigation: If latency exceeds threshold (as published in daily SITREP), consider airborne sensor re-tasking or alternative ISR assets.
+
+6. COMMUNICATIONS
+6.1 Primary and Backup Frequencies Per Mission Type (designator use — replace with ATO values).
+  a. Strike/SEAD: Primary — UHF-STRIKE-1; Backup — HF-STRIKE-1; Guard — UHF-GUARD.
+  b. CAP/ASOC: Primary — UHF-CAP-1; Backup — SATCOM-CAP-1.
+  c. ISR: Primary — SATCOM-ISR-1; Secondary — Link-16 (see 6.3).
+  d. Tanker: Primary — UHF-TANKER-1; Backup — SATCOM-AAR.
+  e. CSAR: Per Section 4.3.
+6.2 HAVE QUICK / SINCGARS Procedures.
+  a. HAVE QUICK II: Air-to-air nets operating HAVE QUICK II must program net variables (Word of the Day, TOD, Word of the Day key) per CAOC COMSEC brief. TOD updates occur every 24 hours and on-demand for compromise. Verify TOD prior to launch.
+  b. SINCGARS: Ground units and FACs using SINCGARS must coordinate frequencies and fill devices through CAOC comms cell. Frequency-hopping parameters will be distributed in secure pre-mission comms.
+6.3 Link-16 Management.
+  a. J-Series Updates: Link-16 J-TURN and J-REKEY windows are scheduled in ATO. All participating platforms must confirm NPG (Network Participation Group) assignments prior to launch.
+  b. MIDS Decking: MIDS initialization and Net Entry shall use Net ID assigned in ATO. Link-16 deconfliction will avoid over-saturation by limiting PPLI update rates to mission-appropriate intervals.
+  c. EMCON Considerations: Link-16 emissions controlled in EMCON RED. Platforms must be prepared to operate with Link-16 degraded and revert to SATCOM and voice C2.
+
+7. WEATHER MINIMUMS
+7.1 Strike (Fixed-Wing, High-Altitude).
+  a. Takeoff/Recovery: Minimum published by home base/forward operating base. Minimum ceiling 2000 ft AGL for planned visual recovery; instrument approaches authorized per publication.
+  b. Ingress/Weapons Delivery: Minimum cloud ceiling 3000 ft AGL or 3 km visibility for unguided munitions. PGMs: Cat I shown to be viable down to 1000 ft AGL ceilings if crews/sensors qualified.
+7.2 CAS / BAI (Close Air Support, Battlefield Air Interdiction).
+  a. Minimums: CAS run-in minimum ceiling 1500 ft AGL and 2 km visibility for day ops. Night CAS requires NVG-qualified aircrew and minimum MDA as per platform NATOPS.
+  b. Abort Criteria: If visibility less than 0.5 km or target obscured by dust/smoke preventing PID, abort unless no alternative and commander authorizes further measures.
+7.3 ISR (Manned and Unmanned).
+  a. Persistent ISR: No minimum for high-altitude ISR unless sensor performance degraded. Low-level UAS: minimum ceiling 500 ft AGL for safe ops.
+7.4 Rotary Wing / CSAR.
+  a. VFR Night: NVG-qualified nights require minima of 100 ft ceiling and 0.5 nm vis in uncongested maritime ops; overland minima as published by host nation base.
+  b. Marginal Weather CSAR: If weather below minima, rescue may proceed only with explicit rescue command waiver.
+7.5 Maritime Operations.
+  a. Shipboard Recoveries: Shipboard landing minima per host-nation/ship sea state limits. Aircraft will confirm deck status and direction prior to final approach.
+
+8. WEAPONS EMPLOYMENT
+8.1 Authorized Munitions by Target Type (Simulation).
+  a. Maritime Surface Combatants: Anti-ship munitions simulated (AGM-XX/Harpoon-equivalent (SIM)); PGMs for deck and mast structures only. No automated salvo release within RMZ unless overflight clearances granted.
+  b. Land Military Targets (fielded formations, fixed artillery, air defenses): Authorized munitions include precision-guided air-to-surface missiles, guided bombs (GBU-series (SIM)), and anti-radiation missiles for SEAD targets. Minimum ordnance size to achieve effect to be determined in target brief.
+  c. Critical Infrastructure: Strikes on dual-use or critical infrastructure require Tier-1 legal and political concurrence. Simulated strikes allowed for exercise with red force approval and CAOC targeting cell coordination.
+8.2 Weapon Release Procedures and Minimum Release Altitudes.
+  a. Air-to-Surface Release: Minimum release altitude for laser-guided munitions (simulation) — 3,000 ft AGL for safety in medium-threat environments unless specific tactics require lower release with approval. GPS-guided munitions minimum 500 ft AGL for terminal phase effectiveness (simulation).
+  b. Air-to-Air Engagements: Minimum safe altitude for BVR intercepts is FL150. Within visual engagements permitted down to low altitude as tactical situation dictates.
+  c. Low-Altitude Attack Runs: Not authorized below 500 ft AGL over populated areas except with specific CAOC authorization.
+8.3 SEAD/DEAD Constraints.
+  a. HVT/SAM Engagement: SEAD packages will coordinate EW effects windows with CAOC EW cell. Minimum collateral constraints apply where EW effects may impact civilian GNSS services.
+  b. Pre-planned Suppression: For pre-identified AD weapon systems, authorization for anti-radiation missiles issued per ATO. Dynamic targeting requires two-source PID and CAT I/II CDE sign-off.
+8.4 Weapons Safety and Hot Weapons Procedures.
+  a. Hot Weapons State: Weapons may be carried hot on ingress in permissive environment only as per strike brief. Rehearsal/verification of safe arm and arming logic to be conducted pre-launch.
+  b. Jettison Procedures: Standard jettison areas (JSAFE) published in ATO. In event of in-flight emergency, jettison over designated range only and under CAOC approval when possible.
+
+9. TARGETING / TACAN / FOLLOWS
+9.1 Targeting Coordination.
+  a. Time Sensitive Targets (TST): TST nomination and approval flowchart included in ATO Annex — immediate coordination with CAOC targeting cell required. Self-defense TSTs must be reported immediately post-engagement.
+  b. No-Strike and Protected Sites: Hospitals, schools, and critical civilian nodes listed in NSL Annex. Any deviation requires theater legal counsel approval.
+9.2 TACAN and Offset Procedures.
+  a. TACAN channels assigned per ATO. All aircrew must cross-check TACAN bearing and DME with IP and LZ coordinates to confirm approach geometry.
+9.3 Forward Operating Locations (FOL).
+  a. FOL Use: Gateways and FOLs published in ATO with base codes. Rotating squadrons must coordinate munitions load-out and refueling requirements through CAOC logistics cell.
+
+10. REPORTING / DEBRIEF
+10.1 Post-mission Reporting.
+  a. BDA / BDA-2: Battle Damage Assessment (BDA) initial report due within 30 minutes of strike. Detailed BDA due in 12 hours.
+  b. ATO Deviations: Any deviation from ATO or SPINS must be reported immediately to CAOC and logged in sortie reports.
+10.2 Incident Reporting.
+  a. Air safety incidents, weapons release outside ROE, or civilian casualty events: Immediate 5-line emergency report to CAOC and JOA HQ with follow-on detailed report within 4 hours.
+10.3 Exercise Red Force Interaction.
+  a. All contacts with "red force" units must be simulated and reported with red-force ID tags and casualty attribution in SITREP.
+
+ANNEXES
+A. Communications Plan (detailed list of exercise-designator frequencies and call signs)
+B. Authentication Matrix (Voice/visual codes — distributed via secure exercise channel)
+C. ROZ/RMZ Coordinates and Boundaries (exercise coordinates)
+D. Tanker/AAR Profiles and Pre-contact Checklists
+E. CSAR Tasking and Rescue Package Rosters
+F. Space Support and OPIR Tasking Procedures
+
+Authority: JFACC/CAOC Simulation Cell
+Distribution: All participating air components, coalition partners, theater support units, CAOC staff, ATO planners, and exercise safety officers.
+
+End of SPINS document.
+Note: For live or production operations, replace all (SIM) placeholders with actual coordinates, frequencies, and codes published in the certified ATO and SPINS by the CAOC. Unauthorized dissemination of operational SPINS is prohibited.

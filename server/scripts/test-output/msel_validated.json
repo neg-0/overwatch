@@ -1,0 +1,332 @@
+{
+  "injects": [
+    {
+      "triggerDay": 1,
+      "triggerHour": 10,
+      "injectType": "INTEL",
+      "title": "HUMINT: Fishing Vessel Reports Unusual Ship Movements",
+      "description": "Local fishing vessel near an island reports multiple gray-hull vessels conducting nighttime small-boat transfers. Vessel provided GPS tracks and photos to local authorities.",
+      "impact": "Suggests possible covert logistics/resupply to hostile outpost; requires ISR allocation and potential diversion of maritime patrol assets."
+    },
+    {
+      "triggerDay": 1,
+      "triggerHour": 15,
+      "injectType": "FRICTION",
+      "title": "Port Congestion at Forward Logistics Hub",
+      "description": "Main allied forward logistics port reports berth congestion following surge in pre-positioned equipment receipts; offload times projected to increase by 36 hours for several sealift loads.",
+      "impact": "Delays receipt of spare parts and vehicle packages; impacts maintenance cycles and unit readiness for next 72 hours unless surface distribution reprioritized."
+    },
+    {
+      "triggerDay": 2,
+      "triggerHour": 6,
+      "injectType": "SPACE",
+      "title": "SBIRS Transient Glitch — Elevated False Positive Thermal Events",
+      "description": "SBIRS constellation reporting transient false-positive missile/rocket plume detections from a sector over the East China Sea due to sensor anomaly. Engineering teams investigating.",
+      "impact": "Temporary uncertainty in missile warning/launch detection in affected sector; commanders must cross-cue with regional sensors and withhold launch attribution pending confirmation."
+    },
+    {
+      "triggerDay": 2,
+      "triggerHour": 14,
+      "injectType": "FRICTION",
+      "title": "F-35A Flight Control Software Fault",
+      "description": "388 FW reports 4 aircraft grounded due to flight control software fault requiring TCTO patch. Expected 8-hour repair window.",
+      "impact": "Reduces available DCA sorties by 16% for Day 2 afternoon cycle."
+    },
+    {
+      "triggerDay": 2,
+      "triggerHour": 18,
+      "injectType": "INTEL",
+      "title": "SIGINT: Increased PRC Naval Radio Traffic West of First Island Chain",
+      "description": "Signals intercept indicates heightened encrypted voice/data comms among PLA surface units operating west of the First Island Chain, including increased frequency hopping patterns.",
+      "impact": "Indicates possible coordinated operations or task force assembly; recommends elevating maritime surveillance posture and EMCON review."
+    },
+    {
+      "triggerDay": 3,
+      "triggerHour": 3,
+      "injectType": "FRICTION",
+      "title": "Aegis Ship Powerplant Fault During Night Transit",
+      "description": "Aegis destroyer experiences reduced electrical generation due to a GTG (gas turbine generator) fault. Propulsion available but power management degraded; diagnostic underway.",
+      "impact": "Temporarily reduces ship's margin for high-energy sensors/weapons and limits continuous high-speed transit capability until repairs completed (12–24 hours)."
+    },
+    {
+      "triggerDay": 3,
+      "triggerHour": 11,
+      "injectType": "CRISIS",
+      "title": "Civilian Airliner Diverts Near Exercise Area",
+      "description": "Commercial airline requests emergency diversion to island airport due to onboard medical emergency. Aircraft entered restricted exercise airspace during diversion.",
+      "impact": "Immediate cease-fire corridor required; air operations must deconflict; ROE consideration for noncombatant evacuation and temporary hold on certain strikes."
+    },
+    {
+      "triggerDay": 3,
+      "triggerHour": 16,
+      "injectType": "INTEL",
+      "title": "ISR Imagery: Shore Installations Emplaced New Radar Arrays",
+      "description": "High-resolution SAR and EO imagery reveals emplacement of three new phased-array radar sites on previously unreported coastal ridgelines.",
+      "impact": "Potentially increases enemy early-warning/targeting capability; affects strike planning and electromagnetic mission planning."
+    },
+    {
+      "triggerDay": 4,
+      "triggerHour": 1,
+      "injectType": "SPACE",
+      "title": "GPS III Signal Degradation Reported in Sector",
+      "description": "Reports from regional forces indicate intermittent GPS timing and positioning anomalies starting just after midnight in a 600 km swath of the theater. GPS III control reports investigating potential localized interference.",
+      "impact": "Affects precision navigation for air and maritime assets, weapon guidance, and comms timing; forces use of alternate navigation aids and issuance of cautions for weapon employment."
+    },
+    {
+      "triggerDay": 4,
+      "triggerHour": 9,
+      "injectType": "FRICTION",
+      "title": "Intelligence Unit Network Outage",
+      "description": "Main theater analysis node reports network outage tied to local power fault at the datacenter hosting fused intel products. Estimated restoration 6–10 hours.",
+      "impact": "Delays tactical intel dissemination and fused briefings; commanders must rely on cached products and lower-fidelity feeds until restored."
+    },
+    {
+      "triggerDay": 4,
+      "triggerHour": 13,
+      "injectType": "INTEL",
+      "title": "HUMINT: Peninsula Militia Mobilization Observed",
+      "description": "Multiple HUMINT sources report organized militia/paramilitary recruitment and localized mobilization in a coastal province, including transport of light arms to island positions.",
+      "impact": "Increases risk of irregular warfare and escalatory incidents near contested islands; requires force protection adjustments and rules-of-engagement review for patrols."
+    },
+    {
+      "triggerDay": 4,
+      "triggerHour": 18,
+      "injectType": "CRISIS",
+      "title": "Diplomatic Protest — Host Nation Restricts Airspace",
+      "description": "Host nation government issues immediate restriction on the overflight of certain maritime zones citing civilian safety, closing two transit corridors used by coalition air assets.",
+      "impact": "Air routing altered; increased transit times and fuel planning impacts for sorties and airlift; diplomatic engagement required to negotiate corridor access."
+    },
+    {
+      "triggerDay": 5,
+      "triggerHour": 4,
+      "injectType": "FRICTION",
+      "title": "Medevac Helicopter Maintenance Delay",
+      "description": "Forward deployed MEDEVAC rotary-wing reports critical hydraulic actuator contamination identified during pre-flight; parts not on-site, estimated 48-hour repair/replacement lead time.",
+      "impact": "Reduces organic casualty evacuation capability in forward area; contingency plans needed with naval/partner assets and medical staging adjustments."
+    },
+    {
+      "triggerDay": 5,
+      "triggerHour": 10,
+      "injectType": "INTEL",
+      "title": "SIGINT: Possible Aerial Refuel Track Identified",
+      "description": "Signals indicate tanker-to-fighter datalink comms consistent with aerial refueling operations among hostile air assets transiting toward southern sector.",
+      "impact": "Extends potential time-on-station for adversary fighters; increases threat window to allied air and maritime forces; ISR tasked to validate."
+    },
+    {
+      "triggerDay": 5,
+      "triggerHour": 15,
+      "injectType": "SPACE",
+      "title": "Commercial SATCOM Congestion/Interference Affecting WGS Gateways",
+      "description": "Commercial satellite operator reports coordinated interference on multiple uplink frequencies near WGS gateway sites; users report degraded SATCOM QoS for non-priority traffic.",
+      "impact": "Degrades throughput for logistics, non-tiered comms, and some ISR feeds; high-priority mission comms retained but bandwidth constrained. Reprioritization required."
+    },
+    {
+      "triggerDay": 5,
+      "triggerHour": 21,
+      "injectType": "CRISIS",
+      "title": "Coastal Civilian Protest Escalates Near Base",
+      "description": "Large-scale civilian protest near a forward logistics base escalates into confrontations with security personnel; videos trending on social media creating pressure on host-nation authorities.",
+      "impact": "Force protection posture elevated; restricts base access and complicates logistics flow; public affairs and diplomatic coordination required to de-escalate."
+    },
+    {
+      "triggerDay": 6,
+      "triggerHour": 7,
+      "injectType": "FRICTION",
+      "title": "Surface-to-Air Missile Maintenance Parts Shortage",
+      "description": "Shelf-life expiry discovered on critical spare components for a shore-based SAM battery during routine inspection; resupply ETAs 72 hours due to port congestion.",
+      "impact": "Reduces readiness of air defense coverage in assigned sector; requires redistributing air defense assets or accepting coverage gaps."
+    },
+    {
+      "triggerDay": 6,
+      "triggerHour": 12,
+      "injectType": "INTEL",
+      "title": "Recon Drone Tracks Show New Logistics Landing Sites",
+      "description": "Persistent UAS surveillance tracks indicate establishment of improvised logistics landing zones on small islands with frequent deliveries at night.",
+      "impact": "Indicates expanded adversary sustainment network; recommends interdiction targeting and maritime/blockade consideration."
+    },
+    {
+      "triggerDay": 6,
+      "triggerHour": 19,
+      "injectType": "CRISIS",
+      "title": "Unidentified Submersible Incident Reported by Commercial Vessel",
+      "description": "Commercial tanker reports near-collision with unidentified submerged object (USO) in transit lane; minor hull scrape reported and crew spooked. Maritime authorities request naval investigation.",
+      "impact": "Requires allocation of ASW/escort assets to investigate and secure shipping lanes; potential diplomatic friction if asset traced to another state actor."
+    },
+    {
+      "triggerDay": 7,
+      "triggerHour": 2,
+      "injectType": "SPACE",
+      "title": "Threat of Space Debris Conjunction with Recon Satellite",
+      "description": "Space situational awareness team issues warning of a high-probability conjunction between a fragmented debris object and a theater ISR satellite in low Earth orbit within 8 hours.",
+      "impact": "May require temporary satellite safe-mode maneuvering, disrupting ISR collection windows and delaying planned imagery collection for target prosecution."
+    },
+    {
+      "triggerDay": 7,
+      "triggerHour": 9,
+      "injectType": "FRICTION",
+      "title": "Fuel Contamination at Forward Aviation Facility",
+      "description": "Fuel quality checks detect microbial contamination in jet A-1 at a forward airfield. Grounding of refuel operations pending fuel source isolation and clean-up (expected 24–48 hours).",
+      "impact": "Limits sortie generation rates from that field; aircraft redeployment/alternate basing or limited sortie profiles required, increasing transit times."
+    },
+    {
+      "triggerDay": 7,
+      "triggerHour": 16,
+      "injectType": "INTEL",
+      "title": "Open-Source Reporting: PRC Conducts Coastal Martial Law Exercises",
+      "description": "Open-source and HUMINT confirms large-scale 'civil defense' drills along the coast, including mobilization of logistics and enforcement units near contested islands.",
+      "impact": "May be cover for real operations or preparation for escalation; prompts readiness checks and potential force posture adjustments."
+    },
+    {
+      "triggerDay": 8,
+      "triggerHour": 5,
+      "injectType": "CRISIS",
+      "title": "Small-Island Missile Launch Reported",
+      "description": "Multiple forward observers and commercial AIS report a short-range ballistic missile launch from a friendly-but-autonomous island chain (not previously militarized). No attribution yet.",
+      "impact": "Immediate escalation risk; requires rapid verification, potential recall of patrolling aircraft, and high-level political consultation on proportional response."
+    },
+    {
+      "triggerDay": 8,
+      "triggerHour": 13,
+      "injectType": "FRICTION",
+      "title": "Ammunition Shortage at Coastal Artillery Battery",
+      "description": "Inventory audit reveals extended shortfall in specific mortar and naval gun munitions after sustained operations. Resupply estimates hampered by port delays and contested waters.",
+      "impact": "Limits sustained fire missions; planners must prioritize targets and coordinate for emergency resupply or ammunition redistribution."
+    },
+    {
+      "triggerDay": 8,
+      "triggerHour": 20,
+      "injectType": "INTEL",
+      "title": "COMINT: PRC Merchant Shipping Re-Routed to Obscure Movements",
+      "description": "Communications intercepts show PRC shipping being re-routed via smaller coastal ports with increased night movements and use of commercial tugs to move white hulls.",
+      "impact": "Indicates attempts to mask logistics; complicates maritime domain awareness and plots for interdiction or surveillance."
+    },
+    {
+      "triggerDay": 9,
+      "triggerHour": 8,
+      "injectType": "SPACE",
+      "title": "Tactical Link Degradation Between WGS and Theater SATCOM Terminals",
+      "description": "WGS gateway anomalies causing packet loss on tactical SATCOM.",
+      "impact": "Degrades real-time C2 and ISR feeds; forces fallback to HF/line-of-sight and prioritization of critical links; delays decision cycles."
+    },
+    {
+      "triggerDay": 9,
+      "triggerHour": 14,
+      "injectType": "FRICTION",
+      "title": "Heavy Weather Disrupts Amphibious Movement",
+      "description": "Tropical low pressure intensifies unexpectedly producing high seas and winds, resulting in cancellation of scheduled amphibious lifts and delayed ship-to-shore operations.",
+      "impact": "Disrupts timetable for follow-on forces and logistics; requires replanning, redistribution of landing craft and adjustment of fire support windows."
+    },
+    {
+      "triggerDay": 9,
+      "triggerHour": 19,
+      "injectType": "INTEL",
+      "title": "EMCON Violation: Unidentified Active Radar Illuminators Detected",
+      "description": "Multiple coalition aircraft report being painted by unknown ground-based active radar illuminators in disputed areas; some signals correlate with mobile emitter signatures.",
+      "impact": "Increases risk to air operations and indicates targeting attempts; requires immediate EW suppression consideration and adjustment of flight routes."
+    },
+    {
+      "triggerDay": 10,
+      "triggerHour": 6,
+      "injectType": "CRISIS",
+      "title": "Political Restriction on Offensive Operations Issued",
+      "description": "National leadership issues temporary political constraint limiting offensive strikes within 50 nautical miles of a contested archipelago pending diplomatic talks.",
+      "impact": "Operational constraints on strike planners and maritime interdiction; forces must adjust targeting priorities, rely on defensive postures, and expedite diplomatic channels."
+    },
+    {
+      "triggerDay": 10,
+      "triggerHour": 12,
+      "injectType": "FRICTION",
+      "title": "Critical Spare Parts Delayed — Airborne Early Warning Radars",
+      "description": "Replacement AESA modules for AWACS-type aircraft delayed when vendor logistics center closed due to local outbreak of disease among staff. ETAs shifted by 5 days.",
+      "impact": "Reduces availability of AEW coverage as aircraft cycle through reduced-capability maintenance; requires redistribution of AEW assets and prioritization of mission sets."
+    },
+    {
+      "triggerDay": 10,
+      "triggerHour": 18,
+      "injectType": "INTEL",
+      "title": "Satellite Imagery: Anti-Ship Cruise Missile Batteries Camouflaged",
+      "description": "Recent EO/IR satellite imagery shows deployment and concealment of coastal anti-ship cruise missile launchers in dense vegetation along a major choke point.",
+      "impact": "Elevates threat to transiting shipping and amphibious forces; targeting and SEAD planning must be updated and prioritized."
+    },
+    {
+      "triggerDay": 11,
+      "triggerHour": 3,
+      "injectType": "CRISIS",
+      "title": "Accidental Engagement of Fishing Boat",
+      "description": "A coalition patrol mistakenly engaged a small fishing craft after misidentification; local media releases imagery showing casualties and property damage.",
+      "impact": "Severe political/diplomatic fallout; immediate pause on certain operations, investigation required, and PSYOP/public affairs consequences to manage."
+    },
+    {
+      "triggerDay": 11,
+      "triggerHour": 11,
+      "injectType": "FRICTION",
+      "title": "Hospital Surge — Medical Capacity Strained",
+      "description": "Regional military medical facilities report a sudden influx of combat and non-combat casualties due to concurrent incidents; blood and ICU capacity reaching critical levels.",
+      "impact": "Forces triage priorities, influences medevac decisions, and may limit acceptance of further casualties without external medical support or evacuation to rear."
+    },
+    {
+      "triggerDay": 11,
+      "triggerHour": 17,
+      "injectType": "INTEL",
+      "title": "PRC Electronic Warfare Ship Now Operating in Proximity",
+      "description": "Signals and ES confirm a PRC specialized EW vessel has moved within 120 nm of key straits and is emitting high-power jamming in C-band frequencies.",
+      "impact": "Degrades navcomm and certain radar bands for allied forces in the area; requires EW mitigation, route alteration, and potential engagement consideration."
+    },
+    {
+      "triggerDay": 12,
+      "triggerHour": 2,
+      "injectType": "SPACE",
+      "title": "Cyber Intrusion Attempt on GPS Ground System",
+      "description": "Cybersecurity monitors detect probing and attempted credentialed access against a regional GPS III uplink/control node. Intrusion blocked, forensics ongoing.",
+      "impact": "Raises risk to continuity of GPS signal integrity and control; elevates cyber defensive posture and may necessitate contingency ops for timing/positioning alternatives."
+    },
+    {
+      "triggerDay": 12,
+      "triggerHour": 9,
+      "injectType": "FRICTION",
+      "title": "Engine Failures in Maritime Patrol Squadron",
+      "description": "Two P-8 aircraft report engine nozzle anomalies identified during post-sortie inspections; fleet safety stand-down invoked pending inspections across squadron.",
+      "impact": "Reduces maritime patrol ISR coverage for 24–48 hours, forcing reprioritization of patrol tracks and reliance on space/ship-based sensors."
+    },
+    {
+      "triggerDay": 12,
+      "triggerHour": 14,
+      "injectType": "CRISIS",
+      "title": "Host-Nation Government Requests Extended Withdrawal of Some Forces",
+      "description": "Host-nation leadership, under domestic political pressure, requests temporary withdrawal of certain allied forward-deployed units from a base for 72 hours.",
+      "impact": "Complicates basing and sustainment plans, requires redistribution of force posture, and may reduce footprint in critical sectors for short duration."
+    },
+    {
+      "triggerDay": 13,
+      "triggerHour": 7,
+      "injectType": "INTEL",
+      "title": "Intercepted Orders Indicate Possible Strike Window",
+      "description": "High-confidence SIGINT intercept captures orders referencing a narrow window of opportunity to disable allied ISR assets; timing corresponds with predicted low-sun-angle passes.",
+      "impact": "Indicates potential pre-planned hostile action; recommends hardening ISR assets, repositioning vulnerable platforms, and preemptive countermeasures in that window."
+    },
+    {
+      "triggerDay": 13,
+      "triggerHour": 16,
+      "injectType": "FRICTION",
+      "title": "Supply Convoy Attacked — Route Closure",
+      "description": "A forward supply convoy came under indirect fire while transiting an island route; no loss of materiel but route declared unsafe until further clearance operations are conducted.",
+      "impact": "Logistics throughput reduced, resupply timelines extended, and convoys must reroute under escort increasing resource expenditure."
+    },
+    {
+      "triggerDay": 14,
+      "triggerHour": 10,
+      "injectType": "CRISIS",
+      "title": "Temporary Ceasefire Proposal from Third-Party Mediator",
+      "description": "A regional mediator offers a proposed 48-hour ceasefire with monitoring conditions that would pause kinetic operations in certain sectors to open humanitarian corridors.",
+      "impact": "Commanders must evaluate operational and political implications, potentially halt planned offensive actions, and coordinate monitoring/verification mechanisms."
+    },
+    {
+      "triggerDay": 14,
+      "triggerHour": 18,
+      "injectType": "FRICTION",
+      "title": "After-Action: Theater-wide Equipment Maintenance Backlog",
+      "description": "End-of-exercise assessment reveals maintenance backlog across air, maritime, and ground fleets due to high-sortie tempo and supply chain delays; critical systems flagged for extended depot maintenance.",
+      "impact": "Impacts redeployment timelines and readiness for follow-on operations; requires surge depot planning and prioritization of assets for repair and return to service."
+    }
+  ]
+}

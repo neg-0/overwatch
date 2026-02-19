@@ -6,6 +6,7 @@ import { DecisionPanel } from './pages/DecisionPanel';
 import { DocumentIntake } from './pages/DocumentIntake';
 import { GanttView } from './pages/GanttView';
 import { HierarchyView } from './pages/HierarchyView';
+import { KnowledgeGraph } from './pages/KnowledgeGraph';
 import { MapView } from './pages/MapView';
 import { OrdersView } from './pages/OrdersView';
 import { ScenarioSetup } from './pages/ScenarioSetup';
@@ -146,6 +147,17 @@ export default function App() {
               </svg>
               Hierarchy
             </NavLink>
+            <NavLink to="/graph" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <svg className="nav-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="6" cy="6" r="3" />
+                <circle cx="18" cy="6" r="3" />
+                <circle cx="12" cy="18" r="3" />
+                <line x1="8.5" y1="7.5" x2="10.5" y2="16" />
+                <line x1="15.5" y1="7.5" x2="13.5" y2="16" />
+                <line x1="9" y1="6" x2="15" y2="6" />
+              </svg>
+              Knowledge Graph
+            </NavLink>
           </div>
 
           <div className="nav-section">
@@ -230,6 +242,7 @@ export default function App() {
           <Route path="/decisions" element={<DecisionPanel />} />
           <Route path="/intake" element={<DocumentIntake />} />
           <Route path="/hierarchy" element={<HierarchyView />} />
+          <Route path="/graph" element={<KnowledgeGraph />} />
         </Routes>
       </main>
 
