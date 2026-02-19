@@ -401,6 +401,11 @@ export async function createTestApp(): Promise<TestApp> {
   const { createDecisionRoutes } = await import('../../api/decisions.js');
   const { createAdvisorRoutes } = await import('../../api/advisor.js');
   const { createIngestRoutes } = await import('../../api/ingest.js');
+  const { orderRoutes } = await import('../../api/orders.js');
+  const { injectRoutes } = await import('../../api/injects.js');
+  const eventsModule = await import('../../api/events.js');
+  const { knowledgeGraphRoutes } = await import('../../api/knowledge-graph.js');
+  const { createGameMasterRoutes } = await import('../../api/game-master.js');
   const { setupWebSocket } = await import('../../websocket/ws-server.js');
 
   const app = express();
@@ -428,10 +433,15 @@ export async function createTestApp(): Promise<TestApp> {
 
   app.use('/api/scenarios', scenarioRoutes);
   app.use('/api/missions', missionRoutes);
+  app.use('/api/orders', orderRoutes);
   app.use('/api/simulation', createSimulationRoutes(io));
   app.use('/api/decisions', createDecisionRoutes(io));
   app.use('/api/advisor', createAdvisorRoutes(io));
   app.use('/api/ingest', createIngestRoutes(io));
+  app.use('/api/injects', injectRoutes);
+  app.use('/api/events', eventsModule.default);
+  app.use('/api/knowledge-graph', knowledgeGraphRoutes);
+  app.use('/api/game-master', createGameMasterRoutes(io));
 
   return new Promise((resolve) => {
     httpServer.listen(0, () => {

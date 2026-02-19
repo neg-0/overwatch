@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // ─── Mock dependencies BEFORE importing the module ───────────────────────────
 
 // vi.hoisted ensures mock refs are available inside vi.mock factories
-const { mockCreate, mockPrisma, mockBroadcastProgress, mockBroadcastArtifact, mockIngest } = vi.hoisted(() => ({
+const { mockCreate, mockPrisma, mockBroadcastProgress, mockBroadcastArtifact } = vi.hoisted(() => ({
   mockCreate: vi.fn(),
   mockPrisma: {
     scenario: {
@@ -66,7 +66,6 @@ const { mockCreate, mockPrisma, mockBroadcastProgress, mockBroadcastArtifact, mo
   },
   mockBroadcastProgress: vi.fn(),
   mockBroadcastArtifact: vi.fn(),
-  mockIngest: vi.fn().mockResolvedValue({ id: 'ingested-001' }),
 }));
 
 vi.mock('openai', () => ({
@@ -99,33 +98,28 @@ vi.mock('../../websocket/ws-server.js', () => ({
   broadcastArtifactResult: mockBroadcastArtifact,
 }));
 
-vi.mock('../doc-ingest.js', () => ({
-  ingestDocument: mockIngest,
-}));
+// POC #1: ingestDocument is no longer called during generation
+// vi.mock('../doc-ingest.js') removed
 
-vi.mock('../generation-logger.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../services/generation-logger.js')>();
-  return {
-    ...actual,
-    logGenerationAttempt: vi.fn().mockResolvedValue(undefined),
-    callLLMWithRetry: vi.fn().mockImplementation(async (params) => {
-      // Call through to the real OpenAI mock
-      const response = await params.openai.chat.completions.create({
-        model: params.model,
-        messages: params.messages,
-        max_completion_tokens: params.maxTokens,
-      });
-      const content = response.choices[0]?.message?.content || '';
-      return {
-        content,
-        promptTokens: 100,
-        outputTokens: 500,
-        durationMs: 1000,
-        retries: 0,
-      };
-    }),
-  };
-});
+vi.mock('../generation-logger.js', () => ({
+  logGenerationAttempt: vi.fn().mockResolvedValue(undefined),
+  callLLMWithRetry: vi.fn().mockImplementation(async (params: any) => {
+    // Delegate to mockCreate for per-test response control — no real retry/backoff
+    const response = await mockCreate({
+      model: params.model,
+      messages: params.messages,
+      max_completion_tokens: params.maxTokens,
+    });
+    const content = response?.choices?.[0]?.message?.content || '';
+    return {
+      content,
+      promptTokens: 100,
+      outputTokens: 500,
+      durationMs: 1000,
+      retries: 0,
+    };
+  }),
+}));
 
 vi.mock('uuid', () => ({
   v4: vi.fn().mockReturnValue('mock-uuid-001'),
@@ -189,17 +183,23 @@ SUBJECT: CONPLAN 5027 — Western Pacific Contingency Plan
 
 4. FORCE REQUIREMENTS. 2x CSG, 3x Fighter Wings, 1x Bomber TF.`;
 
-/** OPLAN content with FORCE_SIZING_TABLE */
+/** OPLAN content (prose-only, no force sizing table — POC #1) */
 const OPLAN_DOC_CONTENT = `${CAMPAIGN_DOC_CONTENT}
 
-<!-- FORCE_SIZING_TABLE -->
-{
-  "units": [
-    { "designation": "388 FW", "unitName": "388th Fighter Wing", "platform": "F-35A", "count": 24, "base": "Kadena AB", "serviceBranch": "USAF", "domain": "AIR", "role": "DCA/OCA" },
-    { "designation": "CVW-5", "unitName": "Carrier Air Wing Five", "platform": "F/A-18E", "count": 44, "base": "AT_SEA", "serviceBranch": "USN", "domain": "AIR", "role": "Strike/DCA" }
-  ]
-}
-<!-- /FORCE_SIZING_TABLE -->`;
+5. FORCE SIZING.
+
+The 388th Fighter Wing (388 FW) will deploy 24x F-35A Lightning II aircraft from Kadena AB, 
+Okinawa to provide Defensive Counter-Air and Offensive Counter-Air coverage across the 
+First Island Chain. The 35th Fighter Wing (35 FW) with 18x F-16C Fighting Falcon aircraft 
+will operate from Misawa AB, Japan conducting SEAD/Strike missions against adversary 
+integrated air defense networks.
+
+Carrier Air Wing Five (CVW-5) embarked aboard USS Ronald Reagan (CVN-76) will contribute 
+44x F/A-18E/F Super Hornets operating in waters east of Taiwan. The carrier strike group 
+will maintain station within the Philippine Sea to provide responsive strike capability.
+
+Destroyer Squadron 15 (DESRON-15) with 5x Arleigh Burke-class DDGs will operate from 
+Yokosuka, Japan providing integrated air and missile defense across the northern approaches.`;
 
 /** MSEL injects as bare JSON array */
 const MSEL_BARE_ARRAY = JSON.stringify([
@@ -419,46 +419,22 @@ describe('Scenario Generator', () => {
     });
   });
 
-  // ─── FORCE_SIZING_TABLE Extraction Tests ───────────────────────────────────
+  // ─── FORCE_SIZING_TABLE Regression Guard ─────────────────────────────────
 
-  describe('FORCE_SIZING_TABLE Extraction', () => {
-    it('extracts force sizing JSON from OPLAN content', () => {
-      const match = OPLAN_DOC_CONTENT.match(/<!-- FORCE_SIZING_TABLE -->\s*([\s\S]*?)\s*<!-- \/FORCE_SIZING_TABLE -->/);
-      expect(match).not.toBeNull();
-
-      const forceTable = JSON.parse(match![1]);
-      expect(forceTable.units).toHaveLength(2);
-      expect(forceTable.units[0]).toMatchObject({
-        designation: '388 FW',
-        platform: 'F-35A',
-        count: 24,
-        base: 'Kadena AB',
-        domain: 'AIR',
-      });
+  describe('FORCE_SIZING_TABLE Regression Guard (POC #1)', () => {
+    it('OPLAN content should NOT contain FORCE_SIZING_TABLE markers', () => {
+      // POC #1: The generator no longer embeds structured JSON in OPLAN.
+      // ORBAT is described in prose and extracted by the AI ingest engine.
+      expect(OPLAN_DOC_CONTENT).not.toContain('<!-- FORCE_SIZING_TABLE -->');
+      expect(OPLAN_DOC_CONTENT).not.toContain('<!-- /FORCE_SIZING_TABLE -->');
     });
 
-    it('returns null when no force sizing table present', () => {
-      const noTable = CAMPAIGN_DOC_CONTENT;
-      const match = noTable.match(/<!-- FORCE_SIZING_TABLE -->\s*([\s\S]*?)\s*<!-- \/FORCE_SIZING_TABLE -->/);
-      expect(match).toBeNull();
-    });
-
-    it('validates unit schema in force sizing table', () => {
-      const match = OPLAN_DOC_CONTENT.match(/<!-- FORCE_SIZING_TABLE -->\s*([\s\S]*?)\s*<!-- \/FORCE_SIZING_TABLE -->/);
-      const forceTable = JSON.parse(match![1]);
-
-      for (const unit of forceTable.units) {
-        expect(unit).toHaveProperty('designation');
-        expect(unit).toHaveProperty('unitName');
-        expect(unit).toHaveProperty('platform');
-        expect(unit).toHaveProperty('count');
-        expect(unit).toHaveProperty('base');
-        expect(unit).toHaveProperty('serviceBranch');
-        expect(unit).toHaveProperty('domain');
-        expect(unit).toHaveProperty('role');
-        expect(typeof unit.count).toBe('number');
-        expect(['AIR', 'MARITIME', 'LAND', 'SPACE', 'CYBER']).toContain(unit.domain);
-      }
+    it('OPLAN should describe forces in prose', () => {
+      // Verify the prose contains unit designations and platforms
+      expect(OPLAN_DOC_CONTENT).toContain('388th Fighter Wing');
+      expect(OPLAN_DOC_CONTENT).toContain('F-35A');
+      expect(OPLAN_DOC_CONTENT).toContain('Kadena AB');
+      expect(OPLAN_DOC_CONTENT).toContain('Carrier Air Wing');
     });
   });
 
