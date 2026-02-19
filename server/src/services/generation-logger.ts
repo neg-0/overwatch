@@ -49,9 +49,13 @@ export async function logGenerationAttempt(entry: GenerationLogEntry): Promise<v
         durationMs: entry.durationMs,
       },
     });
-  } catch (err) {
-    // Never let logging failures crash the generation pipeline
-    console.error(`  [LOG] Failed to write generation log for ${entry.artifact}:`, err);
+  } catch (err: any) {
+    // Scenario may have been deleted while generation was in progress — log quietly
+    if (err?.code === 'P2003') {
+      console.warn(`  [LOG] Scenario deleted — skipping log for ${entry.artifact}`);
+    } else {
+      console.error(`  [LOG] Failed to write generation log for ${entry.artifact}:`, err);
+    }
   }
 
   // Broadcast to frontend (non-retry statuses only)

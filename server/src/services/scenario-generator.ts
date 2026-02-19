@@ -4,8 +4,15 @@ import { v4 as uuid } from 'uuid';
 import { config } from '../config.js';
 import prisma from '../db/prisma-client.js';
 import { broadcastGenerationProgress } from '../websocket/ws-server.js';
-import { ingestDocument } from './doc-ingest.js';
+// NOTE: ingestDocument is no longer called during generation (POC #1 decoupling).
+// The ingest pipeline runs separately — generator produces text only.
 import { callLLMWithRetry, logGenerationAttempt } from './generation-logger.js';
+import {
+  seedBasesForScenario,
+  seedORBATForScenario,
+  seedPlatformCatalog,
+  seedSpaceAssetsForScenario,
+} from './reference-data.js';
 
 // ─── OpenAI Client ───────────────────────────────────────────────────────────
 
@@ -176,13 +183,8 @@ Do NOT include operational details — this is national-level guidance.`,
 
       console.log(`  [STRATEGY] Created ${doc.type} (tier ${doc.tier}, ${memoText.length} chars) → parent: ${parentDocId ? 'linked' : 'root'}`);
 
-      // Self-ingest through the pipeline for priority extraction
-      try {
-        const ingestResult = await ingestDocument(scenarioId, memoText, 'MEMORANDUM');
-        console.log(`  [STRATEGY] Ingested ${doc.type}: ${(ingestResult.confidence * 100).toFixed(0)}% confidence, ${ingestResult.extracted.priorityCount || 0} priorities`);
-      } catch (ingestErr) {
-        console.warn(`  [STRATEGY] Self-ingest for ${doc.type} failed (non-fatal):`, ingestErr);
-      }
+      // POC #1: No self-ingest — generator produces text only.
+      // Documents will be ingested separately through the AI ingest pipeline.
 
       // Feed forward: next tier gets full text of this tier
       parentDocId = created.id;
@@ -241,7 +243,7 @@ Return ONLY the memorandum text, no markdown fences.`;
 
 // ─── Campaign Plan Generator (JSCP → CONPLAN → OPLAN) ───────────────────────
 // Extends the cascade: generates CONPLAN and OPLAN from the JSCP tasking.
-// The OPLAN includes an embedded FORCE_SIZING_TABLE that drives AI ORBAT.
+// The OPLAN includes prose-based force descriptions for AI ORBAT extraction (POC #1).
 
 async function generateCampaignPlan(
   scenarioId: string,
@@ -295,8 +297,7 @@ Include sections:
       tier: 5,
       docTypeSpecific: `Generate an OPERATIONS PLAN (OPLAN) that refines the CONPLAN into executable detail.
 
-CRITICAL: You MUST include a FORCE SIZING TABLE as a structured JSON block at the end of the document.
-The available real-world bases are: ${baseList}
+The available real-world bases in theater are: ${baseList}
 
 Include sections:
 1. SITUATION (refined from CONPLAN)
@@ -306,25 +307,16 @@ Include sections:
    b. Scheme of Maneuver
    c. Tasks to Subordinate Commands
 4. FIRES (targeting priorities, ROE constraints)
-5. FORCE SIZING (narrative description of forces needed by domain)
-
-After paragraph 5, include the following structured data block between markers.
-Generate realistic unit designations with correct asset counts for each platform type.
-Assign units to real bases listed above. Naval units operating at sea should use "AT_SEA" as base.
-
-<!-- FORCE_SIZING_TABLE -->
-{
-  "units": [
-    { "designation": "388 FW", "unitName": "388th Fighter Wing", "platform": "F-35A", "count": 24, "base": "Kadena AB", "serviceBranch": "USAF", "domain": "AIR", "role": "DCA/OCA" },
-    { "designation": "35 FW", "unitName": "35th Fighter Wing", "platform": "F-16C", "count": 18, "base": "Misawa AB", "serviceBranch": "USAF", "domain": "AIR", "role": "SEAD/Strike" }
-  ]
-}
-<!-- /FORCE_SIZING_TABLE -->
-
-Use realistic force sizes: fighter wings (18-24 aircraft), carrier air wings (40-50 aircraft),
-destroyer squadrons (4-6 ships), submarine squadrons (3-4 boats).
-Include both AIR and MARITIME domain units. Do NOT include LAND domain.
-
+5. FORCE SIZING — Describe in narrative prose the forces required by domain. For each unit:
+   - State the unit designation and name (e.g., "388th Fighter Wing")
+   - State the platform type and approximate quantity (e.g., "24x F-35A")
+   - State where they would deploy from (reference the available bases above)
+   - State their primary role/mission (e.g., "DCA/OCA")
+   - For naval units, describe their operating area rather than a fixed base
+   Write this as a staff officer would — in prose paragraphs, not tables or structured data.
+   Include both air and maritime domain forces. Use realistic force sizes:
+   fighter wings (18-24 aircraft), carrier air wings (40-50 aircraft),
+   destroyer squadrons (4-6 ships), submarine squadrons (3-4 boats).
 6. LOGISTICS
 7. COMMAND AND CONTROL`,
     },
@@ -388,14 +380,8 @@ Include both AIR and MARITIME domain units. Do NOT include LAND domain.
         },
       });
 
-      // Self-ingest through doc pipeline (non-fatal — for structured data extraction)
-      console.log(`  [CAMPAIGN] Self-ingesting ${doc.type} (${docText.length} chars)...`);
-      try {
-        const ingestResult = await ingestDocument(scenarioId, docText, 'MEMORANDUM');
-        console.log(`  [CAMPAIGN] Ingested ${doc.type}: ${ingestResult.createdId} (${(ingestResult.confidence * 100).toFixed(0)}% confidence)`);
-      } catch (ingestErr) {
-        console.warn(`  [CAMPAIGN] Self-ingest for ${doc.type} failed (non-fatal):`, ingestErr);
-      }
+      // POC #1: No self-ingest — generator produces text only.
+      console.log(`  [CAMPAIGN] Created ${doc.type} (${docText.length} chars)`);
 
       parentDocId = created.id;
       parentText = docText;
@@ -627,16 +613,24 @@ async function updateGenerationStatus(
   progress?: number,
   error?: string,
 ) {
-  await prisma.scenario.update({
-    where: { id: scenarioId },
-    data: {
-      generationStatus: status,
-      ...(step !== undefined && { generationStep: step }),
-      ...(progress !== undefined && { generationProgress: progress }),
-      ...(error !== undefined && { generationError: error }),
-      ...(status === GenerationStatus.COMPLETE && { generationError: null }),
-    },
-  });
+  try {
+    await prisma.scenario.update({
+      where: { id: scenarioId },
+      data: {
+        generationStatus: status,
+        ...(step !== undefined && { generationStep: step }),
+        ...(progress !== undefined && { generationProgress: progress }),
+        ...(error !== undefined && { generationError: error }),
+        ...(status === GenerationStatus.COMPLETE && { generationError: null }),
+      },
+    });
+  } catch (err: any) {
+    if (err?.code === 'P2025') {
+      console.warn(`[SCENARIO] Scenario ${scenarioId} was deleted — skipping status update`);
+      return;
+    }
+    throw err;
+  }
   broadcastGenerationProgress(scenarioId, {
     step: step || '',
     progress: progress || 0,
@@ -688,12 +682,24 @@ export async function generateFullScenario(options: GenerateScenarioOptions): Pr
   }));
 
   for (let i = startIndex; i < steps.length; i++) {
+    // Guard: check if the scenario still exists (user may have deleted it)
+    const exists = await prisma.scenario.findUnique({ where: { id: scenarioId }, select: { id: true } });
+    if (!exists) {
+      console.warn(`[SCENARIO] Scenario ${scenarioId} was deleted — aborting generation`);
+      return scenarioId;
+    }
+
     const step = steps[i];
     try {
       console.log(`[SCENARIO] Step ${i + 1}/${steps.length}: ${step.name}...`);
       await updateGenerationStatus(scenarioId, GenerationStatus.GENERATING, step.name, step.progress);
       await step.fn();
-    } catch (err) {
+    } catch (err: any) {
+      // If the scenario was deleted mid-step, abort gracefully
+      if (err?.code === 'P2003' || err?.code === 'P2025') {
+        console.warn(`[SCENARIO] Scenario ${scenarioId} was deleted during step "${step.name}" — aborting`);
+        return scenarioId;
+      }
       const errorMsg = err instanceof Error ? err.message : String(err);
       console.error(`[SCENARIO] FAILED at step "${step.name}":`, errorMsg);
       await updateGenerationStatus(scenarioId, GenerationStatus.FAILED, step.name, step.progress, errorMsg);
@@ -706,368 +712,23 @@ export async function generateFullScenario(options: GenerateScenarioOptions): Pr
   return scenarioId;
 }
 
-async function generateJointForce(scenarioId: string, theater: string, adversary: string, modelOverride?: string) {
-  // ─── Platform Comms Catalog (grounded truth — NOT AI-generated) ────────────
-  const assetTypes = [
-    {
-      name: 'F-35A', domain: 'AIR' as const, category: 'Fighter', milsymbolCode: 'SFAPMF----*****',
-      commsSystems: [{ band: 'UHF', system: 'MUOS', role: 'backup' }],
-      gpsType: 'M-CODE', dataLinks: ['LINK16', 'MADL'],
-    },
-    {
-      name: 'F-16C', domain: 'AIR' as const, category: 'Fighter', milsymbolCode: 'SFAPMF----*****',
-      commsSystems: [{ band: 'UHF', system: 'MUOS', role: 'primary' }],
-      gpsType: 'SAASM', dataLinks: ['LINK16'],
-    },
-    {
-      name: 'F/A-18E', domain: 'AIR' as const, category: 'Fighter', milsymbolCode: 'SFAPMF----*****',
-      commsSystems: [{ band: 'UHF', system: 'MUOS', role: 'primary' }],
-      gpsType: 'SAASM', dataLinks: ['LINK16', 'LINK4A'],
-    },
-    {
-      name: 'B-2A', domain: 'AIR' as const, category: 'Bomber', milsymbolCode: 'SFAPMB----*****',
-      commsSystems: [{ band: 'EHF', system: 'AEHF', role: 'primary' }, { band: 'SHF', system: 'WGS', role: 'backup' }],
-      gpsType: 'M-CODE', dataLinks: ['LINK16'],
-    },
-    {
-      name: 'KC-135R', domain: 'AIR' as const, category: 'Tanker', milsymbolCode: 'SFAPMKR---*****',
-      commsSystems: [{ band: 'UHF', system: 'LEGACY_UHF', role: 'primary' }],
-      gpsType: 'STANDARD', dataLinks: ['LINK16'],
-    },
-    {
-      name: 'E-3G', domain: 'AIR' as const, category: 'AWACS', milsymbolCode: 'SFAPME----*****',
-      commsSystems: [{ band: 'SHF', system: 'WGS', role: 'primary' }, { band: 'UHF', system: 'LEGACY_UHF', role: 'backup' }],
-      gpsType: 'STANDARD', dataLinks: ['LINK16', 'JTIDS'],
-    },
-    {
-      name: 'RC-135V', domain: 'AIR' as const, category: 'ISR', milsymbolCode: 'SFAPMR----*****',
-      commsSystems: [{ band: 'SHF', system: 'WGS', role: 'primary' }, { band: 'EHF', system: 'AEHF', role: 'backup' }],
-      gpsType: 'STANDARD', dataLinks: ['LINK16'],
-    },
-    {
-      name: 'EA-18G', domain: 'AIR' as const, category: 'Electronic Attack', milsymbolCode: 'SFAPMF----*****',
-      commsSystems: [{ band: 'UHF', system: 'MUOS', role: 'primary' }],
-      gpsType: 'STANDARD', dataLinks: ['LINK16'],
-    },
-    {
-      name: 'DDG (Arleigh Burke)', domain: 'MARITIME' as const, category: 'Destroyer', milsymbolCode: 'SFSPCLDD--*****',
-      commsSystems: [
-        { band: 'SHF', system: 'WGS', role: 'primary' },
-        { band: 'UHF', system: 'MUOS', role: 'secondary' },
-        { band: 'EHF', system: 'AEHF', role: 'protected' },
-      ],
-      gpsType: 'SAASM', dataLinks: ['LINK16'],
-    },
-    {
-      name: 'CG (Ticonderoga)', domain: 'MARITIME' as const, category: 'Cruiser', milsymbolCode: 'SFSPCLCC--*****',
-      commsSystems: [
-        { band: 'SHF', system: 'WGS', role: 'primary' },
-        { band: 'UHF', system: 'MUOS', role: 'secondary' },
-        { band: 'EHF', system: 'AEHF', role: 'protected' },
-      ],
-      gpsType: 'SAASM', dataLinks: ['LINK16'],
-    },
-    {
-      name: 'CVN (Nimitz)', domain: 'MARITIME' as const, category: 'Carrier', milsymbolCode: 'SFSPCLCV--*****',
-      commsSystems: [
-        { band: 'SHF', system: 'WGS', role: 'primary' },
-        { band: 'UHF', system: 'MUOS', role: 'secondary' },
-        { band: 'EHF', system: 'AEHF', role: 'protected' },
-      ],
-      gpsType: 'SAASM', dataLinks: ['LINK16'],
-    },
-    {
-      name: 'SSN (Virginia)', domain: 'MARITIME' as const, category: 'Submarine', milsymbolCode: 'SFUPSN----*****',
-      commsSystems: [{ band: 'EHF', system: 'AEHF', role: 'primary' }, { band: 'UHF', system: 'LEGACY_UHF', role: 'backup' }],
-      gpsType: 'STANDARD', dataLinks: [],
-    },
-    {
-      name: 'P-8A', domain: 'AIR' as const, category: 'Maritime Patrol', milsymbolCode: 'SFAPMP----*****',
-      commsSystems: [{ band: 'SHF', system: 'WGS', role: 'primary' }, { band: 'UHF', system: 'LEGACY_UHF', role: 'backup' }],
-      gpsType: 'STANDARD', dataLinks: ['LINK16'],
-    },
-    {
-      name: 'MQ-9A', domain: 'AIR' as const, category: 'RPAS/ISR', milsymbolCode: 'SFAPMR----*****',
-      commsSystems: [{ band: 'Ku', system: 'WGS', role: 'primary' }, { band: 'UHF', system: 'LEGACY_UHF', role: 'backup' }],
-      gpsType: 'STANDARD', dataLinks: ['LINK16'],
-    },
-  ];
+async function generateJointForce(scenarioId: string, _theater: string, _adversary: string, _modelOverride?: string) {
+  // Platform catalog is global (not scenario-scoped) — upsert from reference data
+  await seedPlatformCatalog();
 
-  // Upsert asset types with comms catalog
-  for (const at of assetTypes) {
-    await prisma.assetType.upsert({
-      where: { name: at.name },
-      create: at,
-      update: { commsSystems: at.commsSystems, gpsType: at.gpsType, dataLinks: at.dataLinks },
-    });
-  }
-
-  // ─── Parse OPLAN Force Sizing Table ──────────────────────────────────────────
-  const bases = await prisma.base.findMany({ where: { scenarioId } });
-  const findBaseByName = (baseName: string) =>
-    bases.find(b => b.name.toLowerCase().includes(baseName.toLowerCase()))?.id ?? null;
-  const findBaseByCoords = (lat: number, lon: number) =>
-    bases.find(b => Math.abs(b.latitude - lat) < 0.5 && Math.abs(b.longitude - lon) < 0.5)?.id ?? null;
-
-  // Try to get force sizing from the OPLAN
-  const oplan = await prisma.strategyDocument.findFirst({
-    where: { scenarioId, docType: 'OPLAN', tier: 5 },
-    orderBy: { createdAt: 'desc' },
-  });
-
-  interface ForceSizingEntry {
-    designation: string;
-    unitName: string;
-    platform: string;
-    count: number;
-    base: string;
-    serviceBranch: string;
-    domain: string;
-    role: string;
-  }
-
-  let forceSizing: ForceSizingEntry[] | null = null;
-
-  if (oplan) {
-    const tableMatch = oplan.content.match(/<!-- FORCE_SIZING_TABLE -->\s*([\s\S]*?)\s*<!-- \/FORCE_SIZING_TABLE -->/);
-    if (tableMatch) {
-      try {
-        const parsed = JSON.parse(tableMatch[1]);
-        if (parsed.units && Array.isArray(parsed.units) && parsed.units.length > 0) {
-          forceSizing = parsed.units;
-          console.log(`  [ORBAT] Parsed OPLAN force sizing: ${forceSizing!.length} units`);
-        }
-      } catch (e) {
-        console.warn('  [ORBAT] Failed to parse FORCE_SIZING_TABLE JSON, using fallback');
-      }
-    } else {
-      console.warn('  [ORBAT] No FORCE_SIZING_TABLE found in OPLAN, using fallback');
-    }
-  }
-
-  // ─── Build Blue Force Units ──────────────────────────────────────────────────
-  type BlueUnit = {
-    unitName: string; unitDesignation: string; serviceBranch: string;
-    domain: 'AIR' | 'MARITIME'; baseLocation: string;
-    baseLat: number; baseLon: number; platformName: string; assetCount: number;
-  };
-
-  let blueUnits: BlueUnit[];
-
-  if (forceSizing) {
-    // AI-driven ORBAT from OPLAN
-    blueUnits = forceSizing.map(entry => {
-      const matchedBase = bases.find(b => b.name.toLowerCase().includes(entry.base.toLowerCase()));
-      return {
-        unitName: entry.unitName || entry.designation,
-        unitDesignation: entry.designation,
-        serviceBranch: entry.serviceBranch || 'USAF',
-        domain: (entry.domain === 'MARITIME' ? 'MARITIME' : 'AIR') as 'AIR' | 'MARITIME',
-        baseLocation: matchedBase?.name || entry.base,
-        baseLat: matchedBase?.latitude || 26.35,
-        baseLon: matchedBase?.longitude || 127.77,
-        platformName: entry.platform,
-        assetCount: entry.count || 12,
-      };
-    });
-    console.log(`  [ORBAT] Using AI ORBAT: ${blueUnits.length} units from OPLAN`);
-  } else {
-    // Fallback: hardcoded INDOPACOM defaults
-    console.log('  [ORBAT] Using fallback hardcoded ORBAT');
-    blueUnits = [
-      { unitName: '388th Fighter Wing', unitDesignation: '388 FW', serviceBranch: 'USAF', domain: 'AIR', baseLocation: 'Kadena AB, Okinawa', baseLat: 26.3516, baseLon: 127.7692, platformName: 'F-35A', assetCount: 24 },
-      { unitName: '35th Fighter Wing', unitDesignation: '35 FW', serviceBranch: 'USAF', domain: 'AIR', baseLocation: 'Misawa AB, Japan', baseLat: 40.7032, baseLon: 141.3686, platformName: 'F-16C', assetCount: 18 },
-      { unitName: 'Carrier Air Wing 5', unitDesignation: 'CVW-5', serviceBranch: 'USN', domain: 'AIR', baseLocation: 'USS Ronald Reagan (CVN-76)', baseLat: 22.0, baseLon: 131.0, platformName: 'F/A-18E', assetCount: 36 },
-      { unitName: '55th Wing', unitDesignation: '55 WG', serviceBranch: 'USAF', domain: 'AIR', baseLocation: 'Kadena AB (deployed)', baseLat: 26.3, baseLon: 127.8, platformName: 'RC-135V', assetCount: 4 },
-      { unitName: 'Carrier Strike Group 5', unitDesignation: 'CSG-5', serviceBranch: 'USN', domain: 'MARITIME', baseLocation: 'Yokosuka, Japan', baseLat: 35.2833, baseLon: 139.6500, platformName: 'CVN (Nimitz)', assetCount: 1 },
-      { unitName: 'Destroyer Squadron 15', unitDesignation: 'DESRON-15', serviceBranch: 'USN', domain: 'MARITIME', baseLocation: 'Yokosuka, Japan', baseLat: 35.2833, baseLon: 139.6500, platformName: 'DDG (Arleigh Burke)', assetCount: 5 },
-      { unitName: 'Submarine Squadron 15', unitDesignation: 'SUBRON-15', serviceBranch: 'USN', domain: 'MARITIME', baseLocation: 'Guam', baseLat: 13.4443, baseLon: 144.7937, platformName: 'SSN (Virginia)', assetCount: 3 },
-    ];
-  }
-
-  // Red Force units (adversary — always hardcoded)
-  const redUnits = [
-    { unitName: 'Adversary Fighter Division', unitDesignation: 'RED-FTR-1', serviceBranch: 'OPFOR', domain: 'AIR' as const, baseLocation: 'Mainland Airbase Alpha', baseLat: 25.0, baseLon: 121.5 },
-    { unitName: 'Adversary SAM Brigade', unitDesignation: 'RED-AD-1', serviceBranch: 'OPFOR', domain: 'LAND' as const, baseLocation: 'Coastal Defense Zone', baseLat: 24.5, baseLon: 118.0 },
-    { unitName: 'Adversary Naval Task Force', unitDesignation: 'RED-NAVTF-1', serviceBranch: 'OPFOR', domain: 'MARITIME' as const, baseLocation: 'Naval Base Bravo', baseLat: 24.0, baseLon: 118.5 },
-  ];
-
-  // Create blue units with assets matched to specific platform types
-  for (const unit of blueUnits) {
-    const baseId = findBaseByName(unit.baseLocation) || findBaseByCoords(unit.baseLat, unit.baseLon);
-    const dbType = await prisma.assetType.findUnique({ where: { name: unit.platformName } });
-
-    const created = await prisma.unit.create({
-      data: {
-        scenarioId,
-        unitName: unit.unitName,
-        unitDesignation: unit.unitDesignation,
-        serviceBranch: unit.serviceBranch,
-        domain: unit.domain,
-        baseLocation: unit.baseLocation,
-        baseLat: unit.baseLat,
-        baseLon: unit.baseLon,
-        affiliation: 'FRIENDLY',
-        baseId,
-      },
-    });
-
-    if (dbType) {
-      for (let i = 0; i < unit.assetCount; i++) {
-        await prisma.asset.create({
-          data: {
-            unitId: created.id,
-            assetTypeId: dbType.id,
-            tailNumber: unit.domain === 'AIR'
-              ? `${unit.unitDesignation.replace(/\s/g, '')}-${String(i + 1).padStart(3, '0')}`
-              : undefined,
-            name: unit.domain === 'MARITIME'
-              ? `${unit.platformName} Hull ${i + 1}`
-              : undefined,
-            status: 'OPERATIONAL',
-          },
-        });
-      }
-    }
-  }
-
-  // Create red force units (no base linkage)
-  for (const unit of redUnits) {
-    const created = await prisma.unit.create({
-      data: { ...unit, scenarioId, affiliation: 'HOSTILE' },
-    });
-
-    const opforTypes = assetTypes.filter(at => at.domain === unit.domain);
-    if (opforTypes.length > 0) {
-      const dbType = await prisma.assetType.findUnique({ where: { name: opforTypes[0].name } });
-      if (dbType) {
-        const count = unit.domain === 'AIR' ? 12 : 3;
-        for (let i = 0; i < count; i++) {
-          await prisma.asset.create({
-            data: {
-              unitId: created.id, assetTypeId: dbType.id,
-              name: `OPFOR ${opforTypes[0].name} ${i + 1}`,
-              status: 'OPERATIONAL',
-            },
-          });
-        }
-      }
-    }
-  }
-
-  const totalUnits = blueUnits.length + redUnits.length;
-  console.log(`  [ORBAT] Created ${totalUnits} units (${blueUnits.length} blue, ${redUnits.length} red) — source: ${forceSizing ? 'OPLAN' : 'fallback'}`);
+  // ORBAT creates mutable scenario-scoped units + assets from reference catalog
+  // Phase 3 will replace this with AI-based extraction from OPLAN prose
+  await seedORBATForScenario(scenarioId);
 }
 
 // ─── Generate Bases (real INDOPACOM installations) ───────────────────────────
 
 async function generateBases(scenarioId: string) {
-  const indopacomBases = [
-    { name: 'Kadena AB', baseType: 'AIRBASE', latitude: 26.3516, longitude: 127.7692, country: 'Japan', icaoCode: 'RODN' },
-    { name: 'Andersen AFB', baseType: 'AIRBASE', latitude: 13.5839, longitude: 144.9248, country: 'Guam (US)', icaoCode: 'PGUA' },
-    { name: 'Misawa AB', baseType: 'JOINT_BASE', latitude: 40.7032, longitude: 141.3686, country: 'Japan', icaoCode: 'RJSM' },
-    { name: 'Yokota AB', baseType: 'AIRBASE', latitude: 35.7485, longitude: 139.3487, country: 'Japan', icaoCode: 'RJTY' },
-    { name: 'MCAS Iwakuni', baseType: 'AIRBASE', latitude: 34.1439, longitude: 132.2361, country: 'Japan', icaoCode: 'RJOI' },
-    { name: 'CFAY Yokosuka', baseType: 'NAVAL_BASE', latitude: 35.2833, longitude: 139.6500, country: 'Japan', icaoCode: null },
-    { name: 'CFAS Sasebo', baseType: 'NAVAL_BASE', latitude: 33.1600, longitude: 129.7200, country: 'Japan', icaoCode: null },
-    { name: 'Naval Base Guam', baseType: 'NAVAL_BASE', latitude: 13.4443, longitude: 144.6537, country: 'Guam (US)', icaoCode: null },
-  ];
-
-  for (const base of indopacomBases) {
-    await prisma.base.create({
-      data: { scenarioId, ...base },
-    });
-  }
-
-  console.log(`  [BASES] Created ${indopacomBases.length} INDOPACOM installations`);
+  await seedBasesForScenario(scenarioId);
 }
 
 async function generateSpaceConstellation(scenarioId: string) {
-  const spaceAssets = [
-    // GPS III constellation
-    ...Array.from({ length: 6 }, (_, i) => ({
-      name: `GPS III SV${String(i + 1).padStart(2, '0')} `,
-      constellation: 'GPS III',
-      capabilities: ['GPS' as const, 'PNT' as const],
-      status: 'OPERATIONAL',
-      inclination: 55.0,
-      eccentricity: 0.001,
-      periodMin: 717.97,
-      apogeeKm: 20200,
-      perigeeKm: 20200,
-    })),
-    // WGS SATCOM (Wideband — high-bandwidth ISR/C2)
-    ...Array.from({ length: 3 }, (_, i) => ({
-      name: `WGS - ${i + 7} `,
-      constellation: 'WGS',
-      capabilities: ['SATCOM_WIDEBAND' as const],
-      status: i === 2 ? 'DEGRADED' : 'OPERATIONAL',
-      inclination: 0.0,
-      eccentricity: 0.0001,
-      periodMin: 1436.1,
-      apogeeKm: 35786,
-      perigeeKm: 35786,
-    })),
-    // SBIRS OPIR
-    ...Array.from({ length: 4 }, (_, i) => ({
-      name: `SBIRS GEO - ${i + 1} `,
-      constellation: 'SBIRS',
-      capabilities: ['OPIR' as const],
-      status: 'OPERATIONAL',
-      inclination: i < 2 ? 0.0 : 63.4, // GEO and HEO
-      eccentricity: i < 2 ? 0.0001 : 0.7,
-      periodMin: i < 2 ? 1436.1 : 717.97,
-      apogeeKm: i < 2 ? 35786 : 39000,
-      perigeeKm: i < 2 ? 35786 : 600,
-    })),
-    // DMSP Weather
-    ...Array.from({ length: 2 }, (_, i) => ({
-      name: `DMSP - 5D3 F${19 + i} `,
-      constellation: 'DMSP',
-      capabilities: ['WEATHER' as const],
-      status: 'OPERATIONAL',
-      inclination: 98.8,
-      eccentricity: 0.001,
-      periodMin: 101.6,
-      apogeeKm: 840,
-      perigeeKm: 840,
-    })),
-    // MUOS Tactical SATCOM (UHF mobile users)
-    ...Array.from({ length: 2 }, (_, i) => ({
-      name: `MUOS - ${i + 4} `,
-      constellation: 'MUOS',
-      capabilities: ['SATCOM_TACTICAL' as const],
-      status: 'OPERATIONAL',
-      inclination: 0.0,
-      eccentricity: 0.0001,
-      periodMin: 1436.1,
-      apogeeKm: 35786,
-      perigeeKm: 35786,
-    })),
-    // AEHF Protected SATCOM (jam-resistant, strategic)
-    ...Array.from({ length: 3 }, (_, i) => ({
-      name: `AEHF - ${i + 4} `,
-      constellation: 'AEHF',
-      capabilities: ['SATCOM_PROTECTED' as const],
-      status: 'OPERATIONAL',
-      inclination: 0.0,
-      eccentricity: 0.0001,
-      periodMin: 1436.1,
-      apogeeKm: 35786,
-      perigeeKm: 35786,
-    })),
-  ];
-
-  for (const asset of spaceAssets) {
-    await prisma.spaceAsset.create({
-      data: {
-        scenarioId,
-        ...asset,
-      },
-    });
-  }
-
-  console.log(`  [SPACE] Created ${spaceAssets.length} space assets across 6 constellations`);
+  await seedSpaceAssetsForScenario(scenarioId);
 }
 
 async function generatePlanningDocuments(scenarioId: string, theater: string, adversary: string, modelOverride?: string) {
@@ -1154,10 +815,18 @@ Format with sections covering:
         continue;
       }
 
-      // Self-ingest the LLM-generated staff document
-      console.log(`  [PLANNING] Self - ingesting ${doc.docType} (${docText.length} chars)...`);
-      const ingestResult = await ingestDocument(scenarioId, docText, doc.sourceHint);
-      console.log(`  [PLANNING] Ingested ${doc.docType}: ${ingestResult.createdId} (${(ingestResult.confidence * 100).toFixed(0)}% confidence, ${ingestResult.extracted.priorityCount || 0} priorities)`);
+      // POC #1: Persist directly — no self-ingest. Documents will be ingested
+      // separately through the AI ingest pipeline.
+      await prisma.planningDocument.create({
+        data: {
+          scenarioId,
+          title: doc.docType,
+          docType: doc.docType,
+          content: docText,
+          effectiveDate: new Date('2026-03-01T00:00:00Z'),
+        },
+      });
+      console.log(`  [PLANNING] Created ${doc.docType} (${docText.length} chars)`);
     } catch (error) {
       console.error(`  [PLANNING] Failed to generate / ingest ${doc.docType}: `, error);
       await logGenerationAttempt({
@@ -1300,15 +969,16 @@ async function generateMAAP(scenarioId: string, theater: string, adversary: stri
       return;
     }
 
-    // Self-ingest MAAP through doc pipeline
-    console.log(`  [MAAP] Self-ingesting MAAP (${maapText.length} chars)...`);
-    const ingestResult = await ingestDocument(scenarioId, maapText, 'STAFF_DOC');
-    console.log(`  [MAAP] Ingested MAAP: ${ingestResult.createdId} (${(ingestResult.confidence * 100).toFixed(0)}% confidence)`);
-
-    // Update with MAAP-specific metadata
-    await prisma.planningDocument.update({
-      where: { id: ingestResult.createdId },
-      data: { docType: 'MAAP', docTier: 4, title: 'Master Air Attack Plan (MAAP)' },
+    // POC #1: Persist directly — no self-ingest.
+    await prisma.planningDocument.create({
+      data: {
+        scenarioId,
+        title: 'Master Air Attack Plan (MAAP)',
+        docType: 'MAAP',
+        docTier: 4,
+        content: maapText,
+        effectiveDate: new Date(),
+      },
     });
 
     console.log('  [MAAP] MAAP generation complete');
