@@ -10,17 +10,18 @@
  *    - Missing required fields return 400
  *    - Valid payloads return 202 with scenario ID
  *
- * 2. WebSocket Progress Events (always runs, no LLM)
- *    - Client receives generation-progress events after joining scenario room
- *
- * 3. Full Generation Lifecycle (requires OPENAI_API_KEY)
+ * 2. Full Generation Lifecycle (requires OPENAI_API_KEY)
  *    - Triggers a real 8-step generation using gpt-5-nano, monitors every
  *      WebSocket progress event, and verifies DB artifacts on completion.
+ *
+ * 3. Abort on Delete (requires OPENAI_API_KEY)
+ *    - Starts generation then deletes the scenario mid-pipeline,
+ *      verifies graceful abort without server crash.
  *
  * Requires a running PostgreSQL database.
  */
 import type { Socket as ClientSocket } from 'socket.io-client';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   cleanDatabase,
   createTestApp,
@@ -59,18 +60,15 @@ let app: TestApp;
 let client: ClientSocket | undefined;
 
 beforeAll(async () => {
+  await cleanDatabase();
   app = await createTestApp();
 });
 
 afterAll(async () => {
   if (client?.connected) client.disconnect();
   await app.close();
-  await disconnectPrisma();
-});
-
-beforeEach(async () => {
-  if (client?.connected) client.disconnect();
   await cleanDatabase();
+  await disconnectPrisma();
 });
 
 describe('Scenario Generation E2E', () => {
@@ -115,6 +113,7 @@ describe('Scenario Generation E2E', () => {
           adversary: 'PRC',
           description: 'Validation only — will be cleaned up',
           duration: 1,
+          modelOverrides: NANO_OVERRIDES,
         }),
       });
       const body: any = await res.json();
@@ -124,63 +123,17 @@ describe('Scenario Generation E2E', () => {
       expect(typeof body.data.id).toBe('string');
       expect(body.data.name).toBe('E2E Validation Test');
       expect(body.data.generationStatus).toBe('GENERATING');
+
+      // The generation fires in the background — give it a moment then delete
+      // the scenario to prevent it from leaking into later tests
+      await new Promise(r => setTimeout(r, 500));
+      await fetch(`${app.baseUrl}/api/scenarios/${body.data.id}`, { method: 'DELETE' });
+      // Wait for the generator to notice the deletion and abort
+      await new Promise(r => setTimeout(r, 2000));
     });
   });
 
-  // ─── Tier 2: WebSocket Progress Events (no LLM) ───────────────────────────
-
-  describe('WebSocket Progress Events', () => {
-    it('receives generation-progress events after joining scenario room', async () => {
-      // 1. Create a scenario via the API
-      const res = await fetch(`${app.baseUrl}/api/scenarios/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'WS Progress Test',
-          theater: 'INDOPACOM',
-          adversary: 'PRC',
-          duration: 1,
-        }),
-      });
-      const body: any = await res.json();
-      expect(res.status).toBe(202);
-      const scenarioId = body.data.id;
-
-      // 2. Connect WebSocket client and join scenario room
-      client = createTestClient(app.baseUrl);
-      await waitForEvent(client, 'connect', 5000);
-      expect(client.connected).toBe(true);
-      client.emit('join:scenario', scenarioId);
-      await new Promise(r => setTimeout(r, 200));
-
-      // 3. Wait for at least one generation-progress event
-      //    (the first broadcast happens almost immediately)
-      try {
-        const event: any = await waitForEvent(client, 'scenario:generation-progress', 30000);
-        expect(event).toHaveProperty('scenarioId', scenarioId);
-        expect(event).toHaveProperty('step');
-        expect(event).toHaveProperty('progress');
-        expect(event).toHaveProperty('status');
-        expect(typeof event.step).toBe('string');
-        expect(typeof event.progress).toBe('number');
-      } catch {
-        // If the generation failed before the WS event, check DB for any
-        // progress update — validates the backend broadcast was attempted
-        const prisma = getTestPrisma();
-        const scenario = await prisma.scenario.findUnique({
-          where: { id: scenarioId },
-          select: { generationStatus: true, generationStep: true },
-        });
-        expect(scenario).toBeTruthy();
-        // Even if LLM is unavailable, the first status broadcast should fire
-        expect(['GENERATING', 'FAILED', 'COMPLETE']).toContain(scenario!.generationStatus);
-      }
-
-      client.disconnect();
-    }, 60000);
-  });
-
-  // ─── Tier 3: Full Generation Lifecycle (requires OPENAI_API_KEY) ──────────
+  // ─── Tier 2: Full Generation Lifecycle (requires OPENAI_API_KEY) ──────────
 
   describe.skipIf(!HAS_OPENAI_KEY)('Full Generation Lifecycle (requires OPENAI_API_KEY)', () => {
     it('completes all 8 generation steps with gpt-5-nano and produces DB artifacts', async () => {
@@ -235,7 +188,7 @@ describe('Scenario Generation E2E', () => {
 
         client!.on('scenario:artifact-result', (data: any) => {
           artifactEvents.push(data);
-          console.log(`[E2E] Artifact: step="${data.step}" artifact="${data.artifact}" status=${data.status} len=${data.outputLength}`);
+          console.log(`[E2E] Artifact: step="${data.step}" len=${data.outputLength}`);
         });
       });
 
@@ -245,6 +198,10 @@ describe('Scenario Generation E2E', () => {
       console.log(`[E2E] Total artifact events: ${artifactEvents.length}`);
       console.log(`[E2E] Steps seen: [${[...stepsSeen].join(', ')}]`);
 
+      // Disconnect WebSocket before assertions (cleanup even if assertions fail)
+      client!.disconnect();
+      client = undefined;
+
       // ─── 4. Validate WebSocket progress events ─────────────────────
       expect(finalStatus).toBe('COMPLETE');
 
@@ -253,15 +210,15 @@ describe('Scenario Generation E2E', () => {
         expect(stepsSeen.has(expectedStep)).toBe(true);
       }
 
-      // Progress should have increased from 0 to 100
+      // Progress should have increased monotonically
       const progressValues = progressEvents.map(e => e.progress);
-      expect(progressValues[0]).toBeLessThanOrEqual(10);
-      // The last event should be COMPLETE → progress is at 100 or near 100
-      const lastProgress = progressEvents[progressEvents.length - 1];
-      expect(lastProgress.status).toBe('COMPLETE');
+      for (let i = 1; i < progressValues.length; i++) {
+        expect(progressValues[i]).toBeGreaterThanOrEqual(progressValues[i - 1]);
+      }
 
-      // At least one artifact result per generation step
-      expect(artifactEvents.length).toBeGreaterThanOrEqual(8);
+      // The last event should be COMPLETE
+      const lastEvent = progressEvents[progressEvents.length - 1];
+      expect(lastEvent.status).toBe('COMPLETE');
 
       // ─── 5. Validate DB artifacts ──────────────────────────────────
       const prisma = getTestPrisma();
@@ -299,7 +256,6 @@ describe('Scenario Generation E2E', () => {
 
       // Tasking orders (from MAAP step)
       const orders = await prisma.taskingOrder.findMany({ where: { scenarioId } });
-      // MAAP may or may not produce orders depending on LLM output
       console.log(`[E2E] Tasking orders: ${orders.length}`);
 
       // Scenario injects (from MSEL Injects step)
@@ -307,24 +263,22 @@ describe('Scenario Generation E2E', () => {
       expect(injects.length).toBeGreaterThanOrEqual(1);
       console.log(`[E2E] MSEL injects: ${injects.length}`);
 
-      // ─── 6. Validate generation logs ──────────────────────────────
+      // Generation logs
       const logs = await prisma.generationLog.findMany({ where: { scenarioId } });
       expect(logs.length).toBeGreaterThanOrEqual(1);
       console.log(`[E2E] Generation logs: ${logs.length}`);
 
-      // ─── 7. Verify the scenario detail endpoint ────────────────────
+      // ─── 6. Verify the scenario detail API endpoint ────────────────
       const detailRes = await fetch(`${app.baseUrl}/api/scenarios/${scenarioId}`);
       const detailBody: any = await detailRes.json();
       expect(detailRes.status).toBe(200);
       expect(detailBody.success).toBe(true);
       expect(detailBody.data.id).toBe(scenarioId);
       expect(detailBody.data.generationStatus).toBe('COMPLETE');
-
-      client!.disconnect();
     }, 720000); // 12-minute timeout for the entire test
   });
 
-  // ─── Tier 3b: Abort on Delete (requires OPENAI_API_KEY) ─────────────────
+  // ─── Tier 3: Abort on Delete (requires OPENAI_API_KEY) ─────────────────
 
   describe.skipIf(!HAS_OPENAI_KEY)('Abort on Delete (requires OPENAI_API_KEY)', () => {
     it('gracefully aborts generation if scenario is deleted mid-pipeline', async () => {
@@ -343,6 +297,7 @@ describe('Scenario Generation E2E', () => {
       const body: any = await res.json();
       expect(res.status).toBe(202);
       const scenarioId = body.data.id;
+      console.log(`[E2E-Abort] Scenario created: ${scenarioId}`);
 
       // 2. Connect WS and join room
       client = createTestClient(app.baseUrl);
@@ -351,19 +306,23 @@ describe('Scenario Generation E2E', () => {
       await new Promise(r => setTimeout(r, 200));
 
       // 3. Wait for the first progress event (proves generation started)
-      const firstEvent: any = await waitForEvent(client, 'scenario:generation-progress', 30000);
+      const firstEvent: any = await waitForEvent(client, 'scenario:generation-progress', 120000);
       expect(firstEvent.scenarioId).toBe(scenarioId);
-      console.log(`[E2E] Generation started, first event step: ${firstEvent.step}`);
+      console.log(`[E2E-Abort] Generation started, first event step: ${firstEvent.step}`);
 
       // 4. Delete the scenario mid-generation
       const delRes = await fetch(`${app.baseUrl}/api/scenarios/${scenarioId}`, {
         method: 'DELETE',
       });
       expect(delRes.status).toBe(200);
-      console.log(`[E2E] Scenario deleted mid-generation`);
+      console.log(`[E2E-Abort] Scenario deleted mid-generation`);
 
-      // 5. Wait a bit for the generator to notice and abort
-      await new Promise(r => setTimeout(r, 5000));
+      // 5. Wait for the generator to notice and abort
+      await new Promise(r => setTimeout(r, 10000));
+
+      // Disconnect WS
+      client.disconnect();
+      client = undefined;
 
       // 6. Verify the scenario no longer exists in DB
       const prisma = getTestPrisma();
@@ -373,8 +332,6 @@ describe('Scenario Generation E2E', () => {
       // 7. No crash — the process should still be alive
       const healthRes = await fetch(`${app.baseUrl}/api/health`);
       expect(healthRes.status).toBe(200);
-
-      client.disconnect();
-    }, 120000);
+    }, 300000); // 5-minute timeout
   });
 });

@@ -45,6 +45,9 @@ const { mockPrisma, mockIo } = vi.hoisted(() => ({
       findMany: vi.fn().mockResolvedValue([]),
       update: vi.fn(),
     },
+    taskingOrder: {
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
   },
   mockIo: {
     to: vi.fn().mockReturnThis(),

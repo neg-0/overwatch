@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { DocumentReaderModal } from '../components/DocumentReaderModal';
 import { GenerationProgressModal } from '../components/GenerationProgressModal';
 import { useOverwatchStore } from '../store/overwatch-store';
 
@@ -57,6 +58,7 @@ export function ScenarioSetup() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showModelPanel, setShowModelPanel] = useState(false);
   const [showProgressModal, setShowProgressModal] = useState(false);
+  const [selectedDoc, setSelectedDoc] = useState<{ title: string; docType: string; content: string; effectiveDate?: string } | null>(null);
 
   const [config, setConfig] = useState<ScenarioConfig>({
     name: 'PACIFIC DEFENDER 2026',
@@ -67,6 +69,7 @@ export function ScenarioSetup() {
   });
 
   const [modelOverrides, setModelOverrides] = useState<ModelOverrides>({});
+  const [regeneratingSteps, setRegeneratingSteps] = useState<Record<string, boolean>>({});
 
   const update = (key: keyof ScenarioConfig, value: string | number) =>
     setConfig(prev => ({ ...prev, [key]: value }));
@@ -91,6 +94,10 @@ export function ScenarioSetup() {
     if (generationProgress?.status === 'COMPLETE' && (result?.data?.id || activeScenarioId)) {
       const id = result?.data?.id || activeScenarioId;
       loadScenarioDetail(id);
+      setRegeneratingSteps({});
+    }
+    if (generationProgress?.status === 'FAILED') {
+      setRegeneratingSteps({});
     }
   }, [generationProgress, result, activeScenarioId, loadScenarioDetail]);
 
@@ -136,6 +143,26 @@ export function ScenarioSetup() {
       setResult({ success: false, error: String(err) });
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const handleRegenerateStep = async (stepName: string) => {
+    const scenarioId = result?.data?.id || activeScenarioId;
+    if (!scenarioId) return;
+
+    try {
+      setRegeneratingSteps(prev => ({ ...prev, [stepName]: true }));
+      const encoded = encodeURIComponent(stepName);
+      const res = await fetch(`http://localhost:3001/api/scenarios/${scenarioId}/steps/${encoded}/regenerate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modelOverrides })
+      });
+      if (!res.ok) throw new Error('Failed to regenerate step');
+      // The websocket will automatically refresh the scenario detail when generation completes
+    } catch (err) {
+      console.error(err);
+      setRegeneratingSteps(prev => ({ ...prev, [stepName]: false }));
     }
   };
 
@@ -355,13 +382,21 @@ export function ScenarioSetup() {
                     onToggle={() => toggleExpand('strategies')}
                   >
                     {scenarioDetail.strategies?.map((s: any, i: number) => (
-                      <div key={i} style={artifactDetailStyle}>
-                        <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '4px' }}>{s.title}</div>
-                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px' }}>
-                          Effective: {new Date(s.effectiveDate).toLocaleDateString()}
-                        </div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', maxHeight: '200px', overflowY: 'auto' }}>
-                          {s.content || 'Content loading...'}
+                      <div
+                        key={i}
+                        style={{ ...artifactDetailStyle, cursor: 'pointer', transition: 'background 0.2s ease' }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-tertiary)'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = 'var(--bg-secondary)'}
+                        onClick={() => setSelectedDoc(s)}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <span style={{ fontSize: '20px' }}>📄</span>
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '2px' }}>{s.title}</div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                              Effective: {new Date(s.effectiveDate).toLocaleDateString()}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -374,19 +409,35 @@ export function ScenarioSetup() {
                     onToggle={() => toggleExpand('planning')}
                   >
                     {scenarioDetail.planningDocs?.map((doc: any, i: number) => (
-                      <div key={i} style={artifactDetailStyle}>
-                        <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '4px' }}>{doc.title}</div>
-                        {doc.priorities?.length > 0 && (
-                          <div style={{ marginTop: '6px' }}>
-                            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)' }}>PRIORITIES:</span>
-                            {doc.priorities.map((p: any, j: number) => (
-                              <div key={j} style={{ display: 'flex', gap: '8px', alignItems: 'baseline', fontSize: '12px', marginTop: '4px', paddingLeft: '8px' }}>
-                                <span style={{ fontWeight: 700, color: 'var(--accent-warning)', fontFamily: 'var(--font-mono)', minWidth: '20px' }}>#{p.rank}</span>
-                                <span style={{ color: 'var(--text-secondary)' }}>{p.targetName} — {p.targetType}</span>
+                      <div
+                        key={i}
+                        style={{ ...artifactDetailStyle, cursor: 'pointer', transition: 'background 0.2s ease' }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-tertiary)'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = 'var(--bg-secondary)'}
+                        onClick={() => setSelectedDoc(doc)}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <span style={{ fontSize: '20px' }}>📄</span>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '4px' }}>{doc.title}</div>
+                            {doc.priorities?.length > 0 && (
+                              <div style={{ marginTop: '4px' }}>
+                                <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)' }}>PRIORITIES:</span>
+                                {doc.priorities.slice(0, 3).map((p: any, j: number) => (
+                                  <div key={j} style={{ display: 'flex', gap: '8px', alignItems: 'baseline', fontSize: '11px', marginTop: '4px', paddingLeft: '8px' }}>
+                                    <span style={{ fontWeight: 700, color: 'var(--accent-warning)', fontFamily: 'var(--font-mono)', minWidth: '16px' }}>#{p.rank}</span>
+                                    <span style={{ color: 'var(--text-secondary)' }}>{p.targetName}</span>
+                                  </div>
+                                ))}
+                                {doc.priorities.length > 3 && (
+                                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px', paddingLeft: '8px' }}>
+                                    + {doc.priorities.length - 3} more
+                                  </div>
+                                )}
                               </div>
-                            ))}
+                            )}
                           </div>
-                        )}
+                        </div>
                       </div>
                     ))}
                   </ArtifactSection>
@@ -434,6 +485,8 @@ export function ScenarioSetup() {
                       count={scenarioDetail.scenarioInjects?.length || 0}
                       expanded={expanded === 'injects'}
                       onToggle={() => toggleExpand('injects')}
+                      onRegenerate={() => handleRegenerateStep('MSEL Injects')}
+                      isRegenerating={regeneratingSteps['MSEL Injects']}
                     >
                       {scenarioDetail.scenarioInjects?.slice(0, 20).map((inj: any, i: number) => (
                         <div key={i} style={{ ...artifactDetailStyle, display: 'flex', justifyContent: 'space-between' }}>
@@ -543,7 +596,7 @@ export function ScenarioSetup() {
       </div>
 
       <GenerationProgressModal
-        open={showProgressModal}
+        isOpen={showProgressModal}
         onClose={() => {
           setShowProgressModal(false);
           // Refresh scenario detail when modal closes after completion
@@ -551,6 +604,17 @@ export function ScenarioSetup() {
           if (scenarioId) loadScenarioDetail(scenarioId);
         }}
       />
+
+      {selectedDoc && (
+        <DocumentReaderModal
+          isOpen={!!selectedDoc}
+          onClose={() => setSelectedDoc(null)}
+          title={selectedDoc.title}
+          docType={selectedDoc.docType}
+          content={selectedDoc.content}
+          effectiveDate={selectedDoc.effectiveDate}
+        />
+      )}
     </>
   );
 }
@@ -598,45 +662,67 @@ function GenerationItem({ icon, title, desc, model }: { icon: string; title: str
 }
 
 function ArtifactSection({
-  icon, title, count, expanded, onToggle, children,
+  icon, title, count, expanded, onToggle, onRegenerate, isRegenerating, children,
 }: {
-  icon: string; title: string; count: number; expanded: boolean; onToggle: () => void; children: React.ReactNode;
+  icon: string; title: string; count: number; expanded: boolean; onToggle: () => void;
+  onRegenerate?: () => void; isRegenerating?: boolean; children: React.ReactNode;
 }) {
   return (
     <div style={{ border: '1px solid var(--border-subtle)', borderRadius: '8px', overflow: 'hidden' }}>
       <div
-        onClick={onToggle}
         style={{
           display: 'flex',
           gap: '10px',
           padding: '10px 12px',
           background: expanded ? 'rgba(0, 212, 255, 0.06)' : 'var(--bg-tertiary)',
-          cursor: 'pointer',
           alignItems: 'center',
           transition: 'background 0.15s ease',
         }}
       >
-        <span style={{ fontSize: '18px' }}>{icon}</span>
-        <span style={{ flex: 1, fontWeight: 600, fontSize: '13px' }}>{title}</span>
-        <span style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: '11px',
-          padding: '2px 8px',
-          borderRadius: '4px',
-          background: count > 0 ? 'rgba(0, 200, 83, 0.15)' : 'rgba(255, 255, 255, 0.05)',
-          color: count > 0 ? 'var(--accent-success)' : 'var(--text-muted)',
-          fontWeight: 600,
-        }}>
-          {count}
-        </span>
-        <span style={{
-          fontSize: '12px',
-          color: 'var(--text-muted)',
-          transition: 'transform 0.15s ease',
-          transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
-        }}>▾</span>
-      </div>
-      {expanded && count > 0 && (
+        <div style={{ display: 'flex', gap: '10px', flex: 1, cursor: 'pointer', alignItems: 'center' }} onClick={onToggle}>
+          <span style={{ fontSize: '18px' }}>{icon}</span>
+          <span style={{ fontWeight: 600, fontSize: '13px' }}>{title}</span>
+          <span style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: '11px',
+            padding: '2px 8px',
+            borderRadius: '4px',
+            background: count > 0 ? 'rgba(0, 200, 83, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+            color: count > 0 ? 'var(--accent-success)' : 'var(--text-muted)',
+            fontWeight: 600,
+          }}>
+            {count}
+          </span>
+          <span style={{
+            fontSize: '12px',
+            color: 'var(--text-muted)',
+            transition: 'transform 0.15s ease',
+            transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+          }}>▾</span>
+        </div>
+
+        {onRegenerate && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onRegenerate(); }}
+            disabled={isRegenerating}
+            style={{
+              padding: '6px 12px', fontSize: '11px', fontWeight: 600, borderRadius: '4px',
+              background: isRegenerating ? 'rgba(255,255,255,0.05)' : 'rgba(0, 212, 255, 0.15)',
+              color: isRegenerating ? 'var(--text-muted)' : 'var(--accent-primary)',
+              border: '1px solid ' + (isRegenerating ? 'transparent' : 'rgba(0, 212, 255, 0.3)'),
+              cursor: isRegenerating ? 'default' : 'pointer',
+              display: 'flex', alignItems: 'center', gap: '6px',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            {isRegenerating ? (
+              <><span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>⟳</span> Regenerating...</>
+            ) : (
+              <><span style={{ fontSize: '14px' }}>↺</span> Regenerate</>
+            )}
+          </button>
+        )}
+      </div>{expanded && count > 0 && (
         <div style={{ padding: '8px', background: 'var(--bg-primary)', maxHeight: '300px', overflowY: 'auto' }}>
           {children}
         </div>

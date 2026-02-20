@@ -70,6 +70,9 @@ async function generateStrategicContext(
   endDate: Date,
   modelOverride?: string,
 ) {
+  // Clear existing strategy docs for this step
+  await prisma.strategyDocument.deleteMany({ where: { scenarioId, docType: { in: ['NDS', 'NMS', 'JSCP'] } } });
+
   const cascade = [
     {
       type: 'NDS',
@@ -254,6 +257,9 @@ async function generateCampaignPlan(
   endDate: Date,
   modelOverride?: string,
 ) {
+  // Clear existing campaign plans for this step
+  await prisma.strategyDocument.deleteMany({ where: { scenarioId, docType: { in: ['CONPLAN', 'OPLAN'] } } });
+
   // Get the JSCP (tier 3) to feed into campaign planning
   const jscp = await prisma.strategyDocument.findFirst({
     where: { scenarioId, docType: 'JSCP', tier: 3 },
@@ -639,17 +645,17 @@ async function updateGenerationStatus(
   });
 }
 
-export async function generateFullScenario(options: GenerateScenarioOptions): Promise<string> {
-  const {
-    scenarioId,
-    theater,
-    adversary,
-    description,
-    duration,
-    modelOverrides = {},
-    resumeFromStep,
-  } = options;
-
+export async function generateFullScenario({
+  scenarioId,
+  name,
+  theater,
+  adversary,
+  description,
+  duration,
+  compressionRatio,
+  modelOverrides = {},
+  resumeFromStep = undefined,
+}: GenerateScenarioOptions): Promise<string> {
   const startDate = new Date('2026-03-01T00:00:00Z');
   const endDate = new Date(startDate.getTime() + duration * 24 * 3600000);
 
@@ -732,6 +738,9 @@ async function generateSpaceConstellation(scenarioId: string) {
 }
 
 async function generatePlanningDocuments(scenarioId: string, theater: string, adversary: string, modelOverride?: string) {
+  // Clear existing planning docs for this step
+  await prisma.planningDocument.deleteMany({ where: { scenarioId, docType: { in: ['JIPTL', 'SPINS', 'ACO'] } } });
+
   // Fetch strategy documents to feed context into planning doc generation
   const strategyDocs = await prisma.strategyDocument.findMany({
     where: { scenarioId },
@@ -903,6 +912,9 @@ The MAAP should be 2500-3500 words. Include detailed sortie numbers, platform as
 Return ONLY the document text, no JSON, no markdown fences.`;
 
 async function generateMAAP(scenarioId: string, theater: string, adversary: string, modelOverride?: string) {
+  // Clear existing MAAP for this step
+  await prisma.planningDocument.deleteMany({ where: { scenarioId, docType: 'MAAP' } });
+
   // Pull OPLAN content
   const oplan = await prisma.strategyDocument.findFirst({
     where: { scenarioId, docType: 'OPLAN', tier: 5 },
@@ -1057,6 +1069,9 @@ async function generateMSELInjects(
   totalDays: number,
   modelOverride?: string,
 ) {
+  // Clear any existing injects for this scenario (ensures idempotency during regenerations)
+  await prisma.scenarioInject.deleteMany({ where: { scenarioId } });
+
   // Build context summaries
   const units = await prisma.unit.findMany({
     where: { scenarioId, affiliation: 'FRIENDLY' },
@@ -1098,8 +1113,14 @@ async function generateMSELInjects(
 
     const rawText = result.content;
 
-    // Parse JSON — strip markdown fences if present
-    const jsonText = rawText.replace(/```json?\s*/g, '').replace(/```\s*/g, '').trim();
+    // Parse JSON — reliably extract the JSON block even if conversational text surrounds it
+    let jsonText = rawText.replace(/```json?\s*/g, '').replace(/```\s*/g, '').trim();
+    const startIdx = jsonText.indexOf('{');
+    const endIdx = jsonText.lastIndexOf('}');
+    if (startIdx !== -1 && endIdx !== -1 && endIdx >= startIdx) {
+      jsonText = jsonText.substring(startIdx, endIdx + 1);
+    }
+
     let injects: {
       triggerDay: number;
       triggerHour: number;
@@ -1115,8 +1136,10 @@ async function generateMSELInjects(
       injects = Array.isArray(parsed) ? parsed : (parsed.injects || parsed.data || Object.values(parsed).find(Array.isArray) || []);
       if (!Array.isArray(injects) || injects.length === 0) throw new Error('No inject array found in parsed JSON');
       console.log(`  [MSEL] Parsed ${injects.length} injects from JSON`);
-    } catch {
+    } catch (err: any) {
       console.warn('  [MSEL] Failed to parse MSEL JSON, creating fallback injects');
+      console.error(`  [MSEL] Error details: ${err.message}`);
+      console.error(`  [MSEL] Raw text snippet: ${jsonText.substring(0, 200)}...`);
       await logGenerationAttempt({
         scenarioId,
         step: 'MSEL Injects',
@@ -1178,6 +1201,9 @@ async function generateMSELInjects(
 // ─── Order Generation (called per sim day) ───────────────────────────────────
 
 export async function generateDayOrders(scenarioId: string, atoDay: number, modelOverride?: string): Promise<void> {
+  // Clear existing orders for THIS DAY to ensure idempotency when a specific day is regenerated
+  await prisma.taskingOrder.deleteMany({ where: { scenarioId, atoDayNumber: atoDay } });
+
   const scenario = await prisma.scenario.findUnique({
     where: { id: scenarioId },
     include: {

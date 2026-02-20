@@ -227,6 +227,70 @@ scenarioRoutes.post('/:id/resume', async (req, res) => {
   }
 });
 
+// Regenerate a single step of a scenario
+scenarioRoutes.post('/:id/steps/:step/regenerate', async (req, res) => {
+  try {
+    const { id, step } = req.params;
+
+    // Validate step name against known steps
+    const validSteps = [
+      'Strategic Context',
+      'Campaign Plan',
+      'Theater Bases',
+      'Joint Force ORBAT',
+      'Space Constellation',
+      'Planning Documents',
+      'MAAP',
+      'MSEL Injects',
+    ];
+
+    // Handle URL encoded names like 'MSEL%20Injects' or 'MSEL Injects'
+    const decodedStep = decodeURIComponent(step);
+
+    if (!validSteps.includes(decodedStep)) {
+      return res.status(400).json({ success: false, error: `Invalid step: ${decodedStep}`, timestamp: new Date().toISOString() });
+    }
+
+    const scenario = await prisma.scenario.findUnique({ where: { id } });
+    if (!scenario) {
+      return res.status(404).json({ success: false, error: 'Scenario not found', timestamp: new Date().toISOString() });
+    }
+
+    if (scenario.generationStatus === GenerationStatus.GENERATING) {
+      return res.status(400).json({ success: false, error: 'Scenario is currently generating', timestamp: new Date().toISOString() });
+    }
+
+    const { modelOverrides } = req.body || {};
+    const duration = Math.ceil((scenario.endDate.getTime() - scenario.startDate.getTime()) / (24 * 3600000));
+
+    res.status(202).json({
+      success: true,
+      data: { id: scenario.id, step: decodedStep },
+      message: `Regenerating step: ${decodedStep}`,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Fire-and-forget step regeneration
+    generateFullScenario({
+      scenarioId: scenario.id,
+      name: scenario.name,
+      theater: scenario.theater,
+      adversary: scenario.adversary,
+      description: scenario.description,
+      duration,
+      compressionRatio: scenario.compressionRatio,
+      modelOverrides,
+      resumeFromStep: decodedStep,
+    }).then(() => {
+      console.log(`[SCENARIO] Step regeneration complete: ${scenario.id} / ${decodedStep}`);
+    }).catch(err => {
+      console.error(`[SCENARIO] Step regeneration failed: ${scenario.id} / ${decodedStep}`, err);
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+  }
+});
+
 // ─── Document Hierarchy (full traceability tree) ────────────────────────────
 scenarioRoutes.get('/:id/hierarchy', async (req, res) => {
   try {
