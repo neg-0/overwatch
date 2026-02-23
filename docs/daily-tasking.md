@@ -129,13 +129,15 @@ This ensures space dependency tracking reflects actual platform capabilities, no
 
 ## MSEL Injects
 
-`ScenarioInject` records are pre-generated during scenario creation (Step 9 of the pipeline). During simulation, injects fire at their scheduled `triggerDay` + `triggerHour`, creating operational friction:
+The MSEL is generated as a text document (per CJCSM 3500.03F) during scenario creation (Step 9) and stored as a `PlanningDocument` with docType `MSEL`. When ingested through the doc intake pipeline, `ScenarioInject` records are extracted with full doctrine fields (serial number, DTG, MSEL level, event type, inject mode, from/to entities, expected response, objective tested).
+
+During simulation, injects fire at their scheduled `triggerDay` + `triggerHour`, creating operational friction:
 
 | Type | Examples |
 |---|---|
-| FRICTION | Equipment failure, tanker divert, weather delay |
-| INTEL | SIGINT intercept, adversary repositioning |
-| CRISIS | Civilian incident, ROE change, escalation |
-| SPACE | GPS jamming, SATCOM degradation, debris event |
+| INFORMATION | SIGINT intercept, ISR imagery, adversary repositioning |
+| ACTION | Equipment failure, tanker divert, weather delay, logistics |
+| DECISION_POINT | Escalation events requiring commander decision |
+| CONTINGENCY | Civilian incident, ROE change, political constraint |
 
 Injects influence subsequent day planning through the previous-day context chain — if a GPS jamming inject fires on Day 3, Day 4's ATO should reference the degraded GPS environment.

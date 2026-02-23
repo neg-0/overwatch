@@ -90,8 +90,8 @@ function printResult(stage: string, result: { content: string; finishReason: str
 const CLASSIFY_PROMPT = `You are a military document classifier. Analyze the document below and categorize it.
 
 Return JSON with these fields:
-1. **hierarchyLevel**: "STRATEGY" (NDS, NMS, JSCP, theater guidance), "PLANNING" (CONPLAN, OPLAN, JIPTL, SPINS, ACO, MAAP), or "ORDER" (ATO, MTO, OPORD, FRAGORD)
-2. **documentType**: Specific type (e.g., "NDS", "NMS", "JSCP", "CONPLAN", "OPLAN", "JIPTL", "SPINS", "ACO", "ATO", "MAAP")
+1. **hierarchyLevel**: "STRATEGY" (NDS, NMS, JSCP, theater guidance), "PLANNING" (CONPLAN, OPLAN, JIPTL, SPINS, ACO, MAAP), "ORDER" (ATO, MTO, OPORD, FRAGORD), or "EVENT_LIST" (MSEL, exercise event schedules, scenario inject lists)
+2. **documentType**: Specific type (e.g., "NDS", "NMS", "JSCP", "CONPLAN", "OPLAN", "JIPTL", "SPINS", "ACO", "ATO", "MAAP", "MSEL")
 3. **sourceFormat**: "MEMORANDUM", "USMTF", "OTH_GOLD", "XML", "STAFF_DOC", "PLAIN_TEXT", "ABBREVIATED"
 4. **confidence**: 0.0-1.0
 5. **title**: Best title for this document
@@ -449,44 +449,81 @@ Return ONLY the document text, no JSON, no markdown fences.`;
 }
 
 function buildMselPrompt(orbatSummary: string, spaceSummary: string) {
-  return `You are generating MSEL (Master Scenario Event List) injects for a military simulation exercise.
+  return `You are a senior Exercise Control Group (EXCON) planner creating a Master Scenario Events List (MSEL) per CJCSM 3500.03F for a joint military exercise.
 
 CONTEXT:
 - Theater: "${SCENARIO.theater}"
 - Adversary: "${SCENARIO.adversary}"
-- Duration: 14 days
+- Exercise duration: 14 days (${SCENARIO.startDate} to ${SCENARIO.endDate})
+- Campaign phases: Phase 0 (Day 1), Phase 1 (Days 2-3), Phase 2 (Days 4-7), Phase 3 (Days 8-11), Phase 4 (Days 12-14)
 
 ORBAT:
-${orbatSummary || 'Standard INDOPACOM force package'}
+${orbatSummary || 'Standard INDOPACOM force package: 2x fighter wings (F-35A, F-16C), 1x carrier strike group, 1x destroyer squadron, 1x submarine squadron'}
 
 SPACE ASSETS:
-${spaceSummary || 'GPS III, WGS, SBIRS constellation'}
+${spaceSummary || 'GPS III (6 SVs), WGS (3 SVs), AEHF (2 SVs), MUOS (2 SVs), SBIRS GEO (2 SVs)'}
 
-Generate 30 MSEL injects spread across the scenario timeline.
-Each inject should be realistic friction that tests decision-making.
+Generate a complete MSEL document in official EXCON format.
 
-Categories:
-- FRICTION: equipment failures, weather delays, logistics problems, maintenance issues
-- INTEL: new intelligence reports, adversary repositioning, SIGINT intercepts, HUMINT tips
-- CRISIS: escalation events, civilian incidents, political constraints, ROE changes
-- SPACE: GPS degradation/jamming, SATCOM interference, debris threats, cyber attacks on space systems
+FORMAT REQUIREMENTS (per CJCSM 3500.03F):
 
-Distribute injects across days with higher density in Phase 2-3 (the most intense period).
+1. Start with a HEADER BLOCK:
+   - Document title: "MASTER SCENARIO EVENTS LIST (MSEL)"
+   - Exercise/Operation name
+   - EXCON issuing authority
+   - Classification
+   - Effective period
+   - References (CJCSM 3500.03F, JP 3-0, JP 5-0)
 
-Return as JSON array:
-[
-  {
-    "triggerDay": 2,
-    "triggerHour": 14,
-    "injectType": "FRICTION",
-    "title": "F-35A Flight Control Software Fault",
-    "description": "388 FW reports 4 aircraft grounded due to flight control software fault requiring TCTO patch. Expected 8-hour repair window.",
-    "impact": "Reduces available DCA sorties by 16% for Day 2 afternoon cycle"
-  }
-]
+2. Then a PIPE-DELIMITED TABLE with these exact column headers:
+SERIAL | DTG | LEVEL | TYPE | MODE | FROM | TO | MESSAGE | EXPECTED RESPONSE | OBJECTIVE | NOTES
 
-Generate diverse, realistic injects. Include at least 2 SPACE injects.
-Return ONLY valid JSON array, no markdown fences, no explanation text.`;
+Column definitions:
+- SERIAL: Sequential number (001, 002, 003...)
+- DTG: Date-Time Group in military format (DDHHMMz MON YY, e.g., "011000Z MAR 26")
+- LEVEL: MSEL level per CJCSM 3500.03F:
+    STR-N = Strategic National
+    STR-T = Strategic Theater
+    OPR = Operational
+    TAC = Tactical
+- TYPE: Event type:
+    INFORMATION = Intel/SIGINT/HUMINT reports, situational updates
+    ACTION = Equipment failures, weather events, logistics friction
+    DECISION_POINT = Escalation events requiring commander decision
+    CONTINGENCY = Political constraints, ROE changes, civilian incidents
+- MODE: How the inject is delivered to the training audience:
+    MSG_TRAFFIC = Message traffic / operational reporting
+    RADIO = Radio call / voice comms
+    EMAIL = Email / digital message
+    VERBAL = In-person verbal briefing
+    HANDOUT = Written handout / hard copy
+    CHAT = Chat / instant messaging
+- FROM: Originator entity (e.g., "EXCON SimCell", "INDOPACOM J2", "613 AOC", "CSG-5 OPS")
+- TO: Recipient entity (e.g., "JFACC", "JFLCC", "JSpOC", "CFMCC", "JIATF CDR")
+- MESSAGE: The actual inject message as it would be delivered (realistic operational language)
+- EXPECTED RESPONSE: What the training audience should do in response
+- OBJECTIVE: Exercise objective or UJTL task being tested (e.g., "OP 5.1 - Air Superiority", "ST 3.2 - C2")
+- NOTES: Controller guidance, timing flexibility, evaluation criteria
+
+3. Generate 30 injects distributed across the 14-day timeline:
+   - Phase 0 (Day 1): 2-3 injects (shape/posture)
+   - Phase 1 (Days 2-3): 4-5 injects (deterrence)
+   - Phase 2 (Days 4-7): 10-12 injects (highest intensity)
+   - Phase 3 (Days 8-11): 8-10 injects (dominate)
+   - Phase 4 (Days 12-14): 3-5 injects (stabilize)
+
+4. Include these inject categories with roughly this distribution:
+   - INFORMATION: ~30% (SIGINT, HUMINT, ISR imagery, open-source intel)
+   - ACTION: ~30% (equipment failures, weather, logistics, maintenance)
+   - DECISION_POINT: ~20% (escalation events requiring commander decision)
+   - CONTINGENCY: ~20% (political constraints, ROE changes, civilian incidents)
+   - At least 4 must involve space systems (GPS, SATCOM, OPIR, space debris, cyber)
+
+5. Include multiple MSEL levels (STR-T, OPR, TAC).
+
+6. Use realistic military terminology, unit designations, frequency references, and grid coordinates.
+
+Return ONLY the MSEL document text. No JSON. No markdown fences. No explanation text before or after.`;
 }
 
 // ─── Pipeline Runner ──────────────────────────────────────────────────────────
@@ -590,13 +627,12 @@ async function runStage(stage: string) {
       reasoningEffort = 'medium';
       break;
 
-    // ── MSEL ──
+    // ── MSEL (doctrinal text document, NOT JSON) ──
     case 'msel':
       prompt = buildMselPrompt('', '');
       model = MODELS.midRange;
-      maxTokens = 12000;
-      reasoningEffort = 'low';
-      jsonMode = true;
+      maxTokens = 16000;
+      reasoningEffort = 'medium';
       break;
 
     default:
@@ -629,39 +665,75 @@ async function runStage(stage: string) {
     await normalizeDoc(genResult.content, classification, stage);
   }
 
-  // For MSEL, also try JSON parse
+  // For MSEL, run doctrinal format verification
   if (stage === 'msel') {
-    console.log(`\n  [MSEL] Validating JSON...`);
-    try {
-      const jsonText = genResult.content.replace(/```json?\s*/g, '').replace(/```\s*/g, '').trim();
-      const parsed = JSON.parse(jsonText);
-      // Handle both bare arrays and wrapped objects like { "injects": [...] }
-      const injects: any[] = Array.isArray(parsed)
-        ? parsed
-        : (parsed.injects || parsed.data || Object.values(parsed).find(Array.isArray) || []);
-      console.log(`  ✅ Valid JSON: ${injects.length} injects`);
-      saveJSON(stage, injects, 'validated');
+    console.log(`\n  [MSEL] Doctrinal Format Verification (CJCSM 3500.03F)...`);
+    const content = genResult.content;
+    const lines = content.split('\n');
+    const checks: { name: string; pass: boolean; detail: string }[] = [];
 
-      // Check distribution
-      const byCat: Record<string, number> = {};
-      for (const i of injects) {
-        byCat[i.injectType] = (byCat[i.injectType] || 0) + 1;
-      }
-      console.log(`     Distribution: ${Object.entries(byCat).map(([k, v]) => `${k}: ${v}`).join(', ')}`);
-    } catch (e) {
-      console.error(`  ❌ JSON parse failed: ${e}`);
-      // Try to find JSON array in the content
-      const match = genResult.content.match(/\[[\s\S]*\]/);
-      if (match) {
-        try {
-          const injects = JSON.parse(match[0]);
-          console.log(`  ✅ Extracted JSON array: ${injects.length} injects (after stripping wrapper text)`);
-          saveJSON(stage, injects, 'extracted');
-        } catch {
-          console.error(`  ❌ Even extracted JSON failed to parse`);
-        }
-      }
+    // Check 1: Header block
+    const hasHeader = /MASTER SCENARIO EVENTS? LIST/i.test(content) || /MSEL/i.test(content.substring(0, 500));
+    checks.push({ name: 'Header block', pass: hasHeader, detail: hasHeader ? 'Found MSEL header' : 'Missing MSEL header block' });
+
+    // Check 2: Column headers present
+    const hasColumns = /SERIAL.*DTG.*LEVEL.*TYPE.*MODE.*FROM.*TO.*MESSAGE/i.test(content);
+    checks.push({ name: 'Column headers', pass: hasColumns, detail: hasColumns ? 'All 10+ columns present' : 'Missing column headers' });
+
+    // Check 3: Pipe-delimited rows (serial numbers like 001, 002, etc.)
+    const dataRows = lines.filter(l => /^\s*0\d{2}\s*\|/.test(l));
+    checks.push({ name: 'Inject rows', pass: dataRows.length >= 20, detail: `${dataRows.length} pipe-delimited inject rows found (target: ≥20)` });
+
+    // Check 4: DTG format (DDHHMMz MON YY)
+    const dtgPattern = /\d{2}\d{4}Z\s+[A-Z]{3}\s+\d{2}/;
+    const rowsWithDtg = dataRows.filter(r => dtgPattern.test(r));
+    checks.push({ name: 'DTG format', pass: rowsWithDtg.length > dataRows.length * 0.8, detail: `${rowsWithDtg.length}/${dataRows.length} rows have valid DTG format` });
+
+    // Check 5: Sequential serial numbers
+    const serials = dataRows.map(r => {
+      const match = r.match(/^\s*(\d{3})/);
+      return match ? parseInt(match[1]) : -1;
+    }).filter(n => n >= 0);
+    const isSequential = serials.every((s, i) => i === 0 || s > serials[i - 1]);
+    checks.push({ name: 'Sequential serials', pass: isSequential && serials.length > 0, detail: `Serials: ${serials[0]}–${serials[serials.length - 1]}` });
+
+    // Check 6: MSEL levels present
+    const levels = new Set<string>();
+    for (const row of dataRows) {
+      if (/STR-N/i.test(row)) levels.add('STR-N');
+      if (/STR-T/i.test(row)) levels.add('STR-T');
+      if (/OPR/i.test(row)) levels.add('OPR');
+      if (/TAC/i.test(row)) levels.add('TAC');
     }
+    checks.push({ name: 'MSEL levels', pass: levels.size >= 2, detail: `Levels found: ${[...levels].join(', ')}` });
+
+    // Check 7: Space-related injects
+    const spaceRows = dataRows.filter(r => /GPS|SATCOM|SBIRS|OPIR|debris|space|WGS|AEHF|MUOS|cyber.*space/i.test(r));
+    checks.push({ name: 'Space injects', pass: spaceRows.length >= 2, detail: `${spaceRows.length} space-related injects found (target: ≥2)` });
+
+    // Check 8: Event types present
+    const types = new Set<string>();
+    for (const row of dataRows) {
+      if (/INFORMATION/i.test(row)) types.add('INFORMATION');
+      if (/ACTION/i.test(row)) types.add('ACTION');
+      if (/DECISION.?POINT/i.test(row)) types.add('DECISION_POINT');
+      if (/CONTINGENCY/i.test(row)) types.add('CONTINGENCY');
+    }
+    checks.push({ name: 'Event types', pass: types.size >= 3, detail: `Types found: ${[...types].join(', ')}` });
+
+    // Print results
+    console.log('');
+    let allPass = true;
+    for (const c of checks) {
+      const icon = c.pass ? '✅' : '❌';
+      console.log(`  ${icon} ${c.name}: ${c.detail}`);
+      if (!c.pass) allPass = false;
+    }
+
+    console.log(allPass
+      ? `\n  ✅ ALL CHECKS PASSED — MSEL meets CJCSM 3500.03F format`
+      : `\n  ⚠️  SOME CHECKS FAILED — review msel_raw.txt`
+    );
   }
 }
 

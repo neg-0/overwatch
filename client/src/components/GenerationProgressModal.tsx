@@ -4,14 +4,14 @@ import { useOverwatchStore, type ArtifactResult } from '../store/overwatch-store
 // ─── Generation Steps (mirrors backend GENERATION_STEPS) ─────────────────────
 
 const GENERATION_STEPS = [
-  { name: 'Strategic Context', icon: '📄', desc: 'NDS, NMS, JSCP', progress: 10 },
-  { name: 'Campaign Plan', icon: '🗺', desc: 'CONPLAN, OPLAN', progress: 25 },
-  { name: 'Theater Bases', icon: '🏗', desc: 'Operating locations', progress: 35 },
-  { name: 'Joint Force ORBAT', icon: '⚔️', desc: 'Units, platforms, assets', progress: 50 },
-  { name: 'Space Constellation', icon: '🛰', desc: 'Satellites, ground stations', progress: 60 },
-  { name: 'Planning Documents', icon: '🎯', desc: 'JIPTL, SPINS, ACO', progress: 75 },
-  { name: 'MAAP', icon: '✈️', desc: 'Master Air Attack Plan', progress: 85 },
-  { name: 'MSEL Injects', icon: '💥', desc: 'Friction events', progress: 95 },
+  { name: 'Strategic Context', icon: '📄', desc: 'NDS, NMS, JSCP', progress: 10, expectedArtifacts: 3 },
+  { name: 'Campaign Plan', icon: '🗺', desc: 'CONPLAN, OPLAN', progress: 25, expectedArtifacts: 2 },
+  { name: 'Theater Bases', icon: '🏗', desc: 'Operating locations', progress: 35, expectedArtifacts: 1 },
+  { name: 'Joint Force ORBAT', icon: '⚔️', desc: 'Units, platforms, assets', progress: 50, expectedArtifacts: 1 },
+  { name: 'Space Constellation', icon: '🛰', desc: 'Satellites, ground stations', progress: 60, expectedArtifacts: 1 },
+  { name: 'Planning Documents', icon: '🎯', desc: 'JIPTL, SPINS, ACO', progress: 75, expectedArtifacts: 3 },
+  { name: 'MAAP', icon: '✈️', desc: 'Master Air Attack Plan', progress: 85, expectedArtifacts: 1 },
+  { name: 'MSEL Injects', icon: '💥', desc: 'Friction events', progress: 95, expectedArtifacts: 1 },
 ] as const;
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -19,9 +19,10 @@ const GENERATION_STEPS = [
 interface Props {
   open: boolean;
   onClose: () => void;
+  resumeFromStep?: string; // If set, steps before this one are pre-marked as complete
 }
 
-export function GenerationProgressModal({ open, onClose }: Props) {
+export function GenerationProgressModal({ open, onClose, resumeFromStep }: Props) {
   const generationProgress = useOverwatchStore(s => s.generationProgress);
   const artifactResults = useOverwatchStore(s => s.artifactResults);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -51,14 +52,24 @@ export function GenerationProgressModal({ open, onClose }: Props) {
   }, {});
 
   // Determine step status
+  const resumeIdx = resumeFromStep
+    ? GENERATION_STEPS.findIndex(s => s.name === resumeFromStep)
+    : -1;
+
   const getStepStatus = (stepName: string, stepIdx: number): 'pending' | 'active' | 'complete' | 'error' => {
     const activeIdx = GENERATION_STEPS.findIndex(s => s.name === currentStep);
+
+    // Pre-completed steps (before the resume point)
+    if (resumeIdx > 0 && stepIdx < resumeIdx) {
+      return 'complete';
+    }
 
     if (isFailed && stepName === currentStep) return 'error';
     if (isComplete) return 'complete';
 
-    // Step has results → complete
-    if (resultsByStep[stepName]?.length) return 'complete';
+    // Step has ALL expected results → complete
+    const expected = GENERATION_STEPS[stepIdx].expectedArtifacts;
+    if (resultsByStep[stepName]?.length >= expected) return 'complete';
 
     // Current active step
     if (stepName === currentStep) return 'active';

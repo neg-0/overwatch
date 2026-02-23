@@ -145,22 +145,28 @@ The Master Air Attack Plan bridges OPLAN + JIPTL to daily ATO generation:
 
 ---
 
-### Step 9: MSEL Injects
+### Step 9: MSEL Document
 
 **Function**: `generateMSELInjects()`  
 **Model**: `midRange`  
-**Creates**: `ScenarioInject` records (8–30 per scenario)
+**Creates**: `PlanningDocument` (docType: `MSEL`)
 
-Generates Master Scenario Events List friction events distributed across all scenario days:
+Generates a realistic Master Scenario Events List per CJCSM 3500.03F in pipe-delimited tabular format. The document includes:
 
-| Category | Examples |
+| Column | Description |
 |---|---|
-| FRICTION | Equipment failure, weather, tanker divert, logistics |
-| INTEL | SIGINT intercept, adversary repositioning, HUMINT tip |
-| CRISIS | Civilian incident, escalation, ROE change, political constraint |
-| SPACE | GPS jamming, SATCOM interference, debris threat, cyber attack |
+| SERIAL | Sequential number (001, 002...) |
+| DTG | Date-Time Group (DDHHMMz MON YY) |
+| LEVEL | MSEL level (STR-N, STR-T, OPR, TAC) |
+| TYPE | INFORMATION, ACTION, DECISION_POINT, CONTINGENCY |
+| MODE | MSG_TRAFFIC, RADIO, EMAIL, VERBAL, HANDOUT, CHAT |
+| FROM/TO | Originator and recipient entities |
+| MESSAGE | Inject content in realistic operational language |
+| EXPECTED RESPONSE | Training audience expected action |
+| OBJECTIVE | Exercise objective or UJTL task tested |
+| NOTES | Controller guidance and evaluation criteria |
 
-Higher density in Phase 2–3 (most intense combat operations). Falls back to 4 hardcoded injects if LLM parsing fails.
+Stored as a text document — `ScenarioInject` records are extracted when the MSEL is ingested through the doc intake pipeline.
 
 ---
 

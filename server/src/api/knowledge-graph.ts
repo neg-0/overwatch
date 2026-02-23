@@ -171,7 +171,14 @@ export async function buildKnowledgeGraph(scenarioId: string): Promise<Knowledge
 
   // ─── Space Assets ──────────────────────────────────────────────────────────
 
-  const spaceAssets = await prisma.spaceAsset.findMany({ where: { scenarioId } });
+  const spaceAssets = await prisma.spaceAsset.findMany({
+    where: { scenarioId },
+    include: {
+      allocations: {
+        include: { spaceNeed: true }
+      }
+    }
+  });
 
   for (const sa of spaceAssets) {
     addNode({
@@ -181,6 +188,13 @@ export async function buildKnowledgeGraph(scenarioId: string): Promise<Knowledge
       sublabel: sa.constellation,
       meta: { capabilities: sa.capabilities, status: sa.status },
     });
+
+    // Sub-loop: Connect Space Asset to the Missions it is allocated to
+    for (const alloc of sa.allocations) {
+      if (alloc.spaceNeed?.missionId) {
+        addEdge({ source: sa.id, target: alloc.spaceNeed.missionId, relationship: 'SUPPORTS' });
+      }
+    }
   }
 
   // ─── Tasking Orders → Missions → Targets ────────────────────────────────

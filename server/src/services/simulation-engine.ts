@@ -1067,7 +1067,7 @@ async function recordBDA(io: Server): Promise<void> {
   }
 }
 
-// ─── Cleanup ─────────────────────────────────────────────────────────────────
+// ─── Utility ─────────────────────────────────────────────────────────────────
 
 function clearIntervals() {
   if (currentSim?.tickInterval) {
@@ -1079,3 +1079,18 @@ function clearIntervals() {
     currentSim.positionInterval = null;
   }
 }
+
+// ─── Graceful Shutdown ───────────────────────────────────────────────────────
+
+/**
+ * Handle process termination gracefully. Without this, development runners 
+ * like TSX or Nodemon will hang forever trying to kill the node process 
+ * because the setIntervals prevent the event loop from naturally emptying.
+ */
+function handleShutdown() {
+  console.log('[SIM] Shutting down simulation engine cleanly...');
+  clearIntervals();
+}
+
+process.on('SIGINT', handleShutdown);
+process.on('SIGTERM', handleShutdown);

@@ -1020,15 +1020,15 @@ async function generateMAAP(scenarioId: string, theater: string, adversary: stri
   }
 }
 
-// ─── MSEL Inject Generator ───────────────────────────────────────────────────
+// ─── MSEL Document Generator (CJCSM 3500.03F) ─────────────────────────────
 
-const MSEL_PROMPT = `You are a senior exercise planner creating a Master Scenario Events List (MSEL) for a military scenario.
+const MSEL_PROMPT = `You are a senior Exercise Control Group (EXCON) planner creating a Master Scenario Events List (MSEL) per CJCSM 3500.03F for a joint military exercise.
 
 CONTEXT:
 - Theater: "{theater}"
 - Adversary: "{adversary}"
-- Scenario duration: {totalDays} days
-- Campaign phases: Phase 0 (Day 1), Phase 1 (Days 2-3), Phase 2 (Days 4-5), Phase 3 (Days 6-8), Phase 4 (Days 9+)
+- Exercise duration: {totalDays} days ({startDate} to {endDate})
+- Campaign phases: Phase 0 (Day 1), Phase 1 (Days 2-3), Phase 2 (Days 4-7), Phase 3 (Days 8-11), Phase 4 (Days 12+)
 
 AVAILABLE UNITS:
 {orbatSummary}
@@ -1036,31 +1036,40 @@ AVAILABLE UNITS:
 SPACE ASSETS:
 {spaceSummary}
 
-Generate {injectCount} MSEL injects spread across the scenario timeline.
-Each inject should be realistic friction that tests decision-making.
+Generate a complete MSEL document in official EXCON format.
 
-Categories:
-- FRICTION: equipment failures, weather delays, logistics problems, maintenance issues
-- INTEL: new intelligence reports, adversary repositioning, SIGINT intercepts, HUMINT tips
-- CRISIS: escalation events, civilian incidents, political constraints, ROE changes
-- SPACE: GPS degradation/jamming, SATCOM interference, debris threats, cyber attacks on space systems
+FORMAT REQUIREMENTS (per CJCSM 3500.03F):
 
-Distribute injects across days with higher density in Phase 2-3 (the most intense period).
+1. Start with a HEADER BLOCK:
+   - Document title: "MASTER SCENARIO EVENTS LIST (MSEL)"
+   - Exercise/Operation name
+   - EXCON issuing authority
+   - Classification: UNCLASSIFIED // FOUO
+   - Effective period
+   - References (CJCSM 3500.03F, JP 3-0, JP 5-0)
 
-Return as JSON array:
-[
-  {
-    "triggerDay": 2,
-    "triggerHour": 14,
-    "injectType": "FRICTION",
-    "title": "F-35A Flight Control Software Fault",
-    "description": "388 FW reports 4 aircraft grounded due to flight control software fault requiring TCTO patch. Expected 8-hour repair window.",
-    "impact": "Reduces available DCA sorties by 16% for Day 2 afternoon cycle"
-  }
-]
+2. Then a PIPE-DELIMITED TABLE with these exact column headers:
+SERIAL | DTG | LEVEL | TYPE | MODE | FROM | TO | MESSAGE | EXPECTED RESPONSE | OBJECTIVE | NOTES
 
-Generate diverse, realistic injects. Include at least 2 SPACE injects.
-Return ONLY valid JSON array, no markdown fences.`;
+Column definitions:
+- SERIAL: Sequential number (001, 002, 003...)
+- DTG: Date-Time Group in military format (DDHHMMz MON YY)
+- LEVEL: MSEL level — STR-N (Strategic National), STR-T (Strategic Theater), OPR (Operational), TAC (Tactical)
+- TYPE: INFORMATION, ACTION, DECISION_POINT, or CONTINGENCY
+- MODE: MSG_TRAFFIC, RADIO, EMAIL, VERBAL, HANDOUT, or CHAT
+- FROM: Originator entity
+- TO: Recipient entity
+- MESSAGE: The actual inject message (realistic operational language)
+- EXPECTED RESPONSE: What the training audience should do
+- OBJECTIVE: Exercise objective or UJTL task being tested
+- NOTES: Controller guidance, timing flexibility, evaluation criteria
+
+3. Generate {injectCount} injects distributed across the timeline with higher density in Phase 2-3.
+4. Include at least 4 space-related injects (GPS, SATCOM, OPIR, debris, cyber).
+5. Include multiple MSEL levels (STR-T, OPR, TAC).
+6. Use realistic military terminology, unit designations, and coordinates.
+
+Return ONLY the MSEL document text. No JSON. No markdown fences.`;
 
 async function generateMSELInjects(
   scenarioId: string,
@@ -1069,9 +1078,6 @@ async function generateMSELInjects(
   totalDays: number,
   modelOverride?: string,
 ) {
-  // Clear any existing injects for this scenario (ensures idempotency during regenerations)
-  await prisma.scenarioInject.deleteMany({ where: { scenarioId } });
-
   // Build context summaries
   const units = await prisma.unit.findMany({
     where: { scenarioId, affiliation: 'FRIENDLY' },
@@ -1088,7 +1094,15 @@ async function generateMSELInjects(
     .join('\n');
 
   // Scale inject count with scenario duration
-  const injectCount = Math.min(Math.max(totalDays * 3, 8), 30);
+  const injectCount = Math.min(Math.max(totalDays * 3, 8), 40);
+
+  // Get scenario dates for the prompt
+  const scenario = await prisma.scenario.findUnique({
+    where: { id: scenarioId },
+    select: { startDate: true, endDate: true },
+  });
+  const startDate = scenario?.startDate?.toISOString().split('T')[0] || 'TBD';
+  const endDate = scenario?.endDate?.toISOString().split('T')[0] || 'TBD';
 
   const prompt = MSEL_PROMPT
     .replace(/\{theater\}/g, theater)
@@ -1096,16 +1110,18 @@ async function generateMSELInjects(
     .replace(/\{totalDays\}/g, String(totalDays))
     .replace(/\{injectCount\}/g, String(injectCount))
     .replace(/\{orbatSummary\}/g, orbatSummary || 'No ORBAT available')
-    .replace(/\{spaceSummary\}/g, spaceSummary || 'No space assets available');
+    .replace(/\{spaceSummary\}/g, spaceSummary || 'No space assets available')
+    .replace(/\{startDate\}/g, startDate)
+    .replace(/\{endDate\}/g, endDate);
 
   try {
     const result = await callLLMWithRetry({
       openai,
       model: getModel('midRange', modelOverride),
       messages: [{ role: 'user', content: prompt }],
-      maxTokens: 12000,
-      reasoningEffort: 'low',
-      minOutputLength: 100,
+      maxTokens: 16000,
+      reasoningEffort: 'medium',
+      minOutputLength: 500,
       scenarioId,
       step: 'MSEL Injects',
       artifact: 'MSEL',
@@ -1113,77 +1129,23 @@ async function generateMSELInjects(
 
     const rawText = result.content;
 
-    // Parse JSON — reliably extract the JSON block even if conversational text surrounds it
-    let jsonText = rawText.replace(/```json?\s*/g, '').replace(/```\s*/g, '').trim();
-    const startIdx = jsonText.indexOf('{');
-    const endIdx = jsonText.lastIndexOf('}');
-    if (startIdx !== -1 && endIdx !== -1 && endIdx >= startIdx) {
-      jsonText = jsonText.substring(startIdx, endIdx + 1);
-    }
-
-    let injects: {
-      triggerDay: number;
-      triggerHour: number;
-      injectType: string;
-      title: string;
-      description: string;
-      impact: string;
-    }[];
-
-    try {
-      const parsed = JSON.parse(jsonText);
-      // Handle both bare arrays and wrapped objects like { "injects": [...] }
-      injects = Array.isArray(parsed) ? parsed : (parsed.injects || parsed.data || Object.values(parsed).find(Array.isArray) || []);
-      if (!Array.isArray(injects) || injects.length === 0) throw new Error('No inject array found in parsed JSON');
-      console.log(`  [MSEL] Parsed ${injects.length} injects from JSON`);
-    } catch (err: any) {
-      console.warn('  [MSEL] Failed to parse MSEL JSON, creating fallback injects');
-      console.error(`  [MSEL] Error details: ${err.message}`);
-      console.error(`  [MSEL] Raw text snippet: ${jsonText.substring(0, 200)}...`);
-      await logGenerationAttempt({
+    // Store as PlanningDocument — the ingest pipeline will extract ScenarioInjects later
+    await prisma.planningDocument.create({
+      data: {
         scenarioId,
-        step: 'MSEL Injects',
-        artifact: 'MSEL_PARSE',
-        model: getModel('midRange', modelOverride),
-        rawOutput: rawText,
-        outputLength: rawText.length,
-        status: 'error',
-        errorMessage: 'JSON parse failed — using hardcoded fallback injects',
-        durationMs: 0,
-      });
-      injects = [
-        { triggerDay: 2, triggerHour: 6, injectType: 'FRICTION', title: 'Tanker Unavailable', description: 'KC-135 tanker diverted for higher-priority mission. AR Track BRAVO unavailable 0600-1200Z.', impact: 'Strike packages must use alternate AR track or reduce range' },
-        { triggerDay: 3, triggerHour: 14, injectType: 'INTEL', title: 'Adversary SAM Repositioning', description: 'SIGINT detects adversary mobile SAM battery relocating. Previous target coordinates no longer valid.', impact: 'SEAD mission planning must be updated with new coordinates' },
-        { triggerDay: 5, triggerHour: 8, injectType: 'SPACE', title: 'GPS Degradation — Sector 7', description: 'GPS constellation coverage degraded over target area due to adversary jamming. M-CODE GPS still functional.', impact: 'Non-M-CODE platforms must rely on INS backup for precision munitions' },
-        { triggerDay: 7, triggerHour: 18, injectType: 'CRISIS', title: 'Civilian Vessel in Strike Zone', description: 'Maritime ISR reports civilian merchant vessel transiting through planned strike corridor.', impact: 'Maritime strike package must delay or re-route to avoid civilian casualties' },
-      ];
-    }
+        title: `Master Scenario Events List (MSEL) — ${theater}`,
+        docType: 'MSEL',
+        docTier: 6,
+        content: rawText,
+        effectiveDate: scenario?.startDate || new Date(),
+      },
+    });
 
-    // Validate and clamp inject days to scenario duration
-    let created = 0;
-    for (const inject of injects) {
-      const day = Math.max(1, Math.min(inject.triggerDay || 1, totalDays));
-      const hour = Math.max(0, Math.min(inject.triggerHour || 12, 23));
-      const validTypes = ['FRICTION', 'INTEL', 'CRISIS', 'SPACE'];
-      const injectType = validTypes.includes(inject.injectType) ? inject.injectType : 'FRICTION';
+    console.log(`  [MSEL] Generated doctrinal MSEL document (${rawText.length} chars) — stored as PlanningDocument`);
+    console.log(`  [MSEL] Injects will be extracted when the document is ingested through the doc intake pipeline`);
 
-      await prisma.scenarioInject.create({
-        data: {
-          scenarioId,
-          triggerDay: day,
-          triggerHour: hour,
-          injectType,
-          title: inject.title || `MSEL Inject Day ${day}`,
-          description: inject.description || 'No description',
-          impact: inject.impact || 'Impact TBD',
-        },
-      });
-      created++;
-    }
-
-    console.log(`  [MSEL] Created ${created} scenario injects across ${totalDays} days`);
   } catch (error) {
-    console.error('  [MSEL] Failed to generate MSEL injects:', error);
+    console.error('  [MSEL] Failed to generate MSEL document:', error);
     await logGenerationAttempt({
       scenarioId,
       step: 'MSEL Injects',
@@ -1194,6 +1156,17 @@ async function generateMSELInjects(
       status: 'error',
       errorMessage: error instanceof Error ? error.message : String(error),
       durationMs: 0,
+    });
+    // Create a placeholder MSEL document
+    await prisma.planningDocument.create({
+      data: {
+        scenarioId,
+        title: 'Master Scenario Events List (MSEL)',
+        docType: 'MSEL',
+        docTier: 6,
+        content: '[PLACEHOLDER] MSEL generation failed. Re-run scenario generation or manually create a MSEL document.',
+        effectiveDate: new Date(),
+      },
     });
   }
 }

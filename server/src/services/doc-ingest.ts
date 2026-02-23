@@ -14,7 +14,7 @@ function getModel(tier: 'flagship' | 'midRange' | 'fast'): string {
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export type HierarchyLevel = 'STRATEGY' | 'PLANNING' | 'ORDER';
+export type HierarchyLevel = 'STRATEGY' | 'PLANNING' | 'ORDER' | 'EVENT_LIST';
 
 export interface ClassifyResult {
   hierarchyLevel: HierarchyLevel;
@@ -121,6 +121,26 @@ export interface NormalizedOrder {
   }>;
 }
 
+export interface NormalizedMSEL {
+  exerciseName: string;
+  classification: string;
+  effectivePeriod: string;
+  issuingAuthority: string;
+  injects: Array<{
+    serialNumber: string;
+    dtg: string;           // e.g., "011000Z MAR 26"
+    mselLevel: string;     // STR-N, STR-T, OPR, TAC
+    eventType: string;     // INFORMATION, ACTION, DECISION_POINT, CONTINGENCY
+    injectMode: string;    // MSG_TRAFFIC, RADIO, EMAIL, VERBAL, HANDOUT, CHAT
+    fromEntity: string;
+    toEntity: string;
+    message: string;
+    expectedResponse: string;
+    objectiveTested: string;
+    notes: string;
+  }>;
+}
+
 export interface IngestResult {
   success: boolean;
   hierarchyLevel: HierarchyLevel;
@@ -139,6 +159,7 @@ export interface IngestResult {
     waypointCount?: number;
     targetCount?: number;
     spaceNeedCount?: number;
+    injectCount?: number;
   };
   reviewFlags: ReviewFlag[];
   parseTimeMs: number;
@@ -150,10 +171,11 @@ const CLASSIFY_PROMPT = `You are a military document classifier. Analyze the fol
 
 1. **hierarchyLevel**: One of:
    - "STRATEGY" — High-level directives from general officers (NMS, Campaign Plans, JFC Guidance, Component Directives)
-   - "PLANNING" — Staff-level documents (JIPTL, JPEL, SPINS, ACO, Component Priority Lists)
+   - "PLANNING" — Staff-level documents (JIPTL, JPEL, SPINS, ACO, MAAP, Component Priority Lists)
    - "ORDER" — Tactical-level orders (ATO, MTO, STO, OPORD, EXORD, FRAGORD)
+   - "EVENT_LIST" — Exercise event lists (MSEL, scenario inject lists, exercise event schedules)
 
-2. **documentType**: Specific type (NMS, CAMPAIGN_PLAN, JFC_GUIDANCE, COMPONENT_GUIDANCE, JIPTL, JPEL, SPINS, ACO, ATO, MTO, STO, OPORD, EXORD, FRAGORD)
+2. **documentType**: Specific type (NMS, CAMPAIGN_PLAN, JFC_GUIDANCE, COMPONENT_GUIDANCE, JIPTL, JPEL, SPINS, ACO, MAAP, ATO, MTO, STO, OPORD, EXORD, FRAGORD, MSEL)
 
 3. **sourceFormat**: The format the document is written in:
    - "USMTF" — Slash-delimited USMTF message (MSGID/ATO/...)
@@ -208,7 +230,7 @@ export async function classifyDocument(rawText: string, sourceHint?: string): Pr
   const result = JSON.parse(content) as ClassifyResult;
 
   // Validate hierarchy level
-  if (!['STRATEGY', 'PLANNING', 'ORDER'].includes(result.hierarchyLevel)) {
+  if (!['STRATEGY', 'PLANNING', 'ORDER', 'EVENT_LIST'].includes(result.hierarchyLevel)) {
     throw new Error(`Invalid hierarchy level: ${result.hierarchyLevel}`);
   }
 
@@ -371,10 +393,55 @@ Return ONLY valid JSON.
 DOCUMENT:
 `;
 
+const MSEL_NORMALIZE_PROMPT = `You are a military exercise analyst extracting structured event data from a Master Scenario Events List (MSEL).
+
+The MSEL may be in ANY format: pipe-delimited table, tab-separated, free-text list, or abbreviated notes.
+Extract ALL injects/events into this JSON structure:
+
+{
+  "exerciseName": "Exercise or operation name",
+  "classification": "UNCLASSIFIED|CUI|CONFIDENTIAL|SECRET|TOP_SECRET",
+  "effectivePeriod": "Start to end date range",
+  "issuingAuthority": "EXCON or issuing command",
+  "injects": [
+    {
+      "serialNumber": "001",
+      "dtg": "011000Z MAR 26",
+      "mselLevel": "STR-N|STR-T|OPR|TAC",
+      "eventType": "INFORMATION|ACTION|DECISION_POINT|CONTINGENCY",
+      "injectMode": "MSG_TRAFFIC|RADIO|EMAIL|VERBAL|HANDOUT|CHAT",
+      "fromEntity": "Originator entity",
+      "toEntity": "Recipient entity",
+      "message": "Full inject message text",
+      "expectedResponse": "What the training audience should do",
+      "objectiveTested": "Exercise objective or UJTL task",
+      "notes": "Controller guidance or evaluation criteria"
+    }
+  ],
+  "reviewFlags": [
+    { "field": "fieldName", "rawValue": "original text", "confidence": 0.5, "reason": "Why this needs review" }
+  ]
+}
+
+CRITICAL INSTRUCTIONS:
+- Extract EVERY inject/event from the document — do not skip any
+- Parse DTGs from any format (military DTG, ISO 8601, plain language) into DTG format (DDHHMMz MON YY)
+- If the MSEL uses non-standard event types (FRICTION, INTEL, CRISIS, SPACE), map them:
+    FRICTION/ACTION items → ACTION
+    INTEL/SIGINT/HUMINT → INFORMATION
+    CRISIS/ESCALATION → DECISION_POINT
+    Political/ROE/civilian → CONTINGENCY
+- If a field is missing, provide a reasonable default and add to reviewFlags
+- Preserve the original message text as faithfully as possible
+Return ONLY valid JSON.
+
+DOCUMENT:
+`;
+
 export async function normalizeDocument(
   rawText: string,
   classification: ClassifyResult,
-): Promise<{ data: NormalizedStrategy | NormalizedPlanning | NormalizedOrder; reviewFlags: ReviewFlag[] }> {
+): Promise<{ data: NormalizedStrategy | NormalizedPlanning | NormalizedOrder | NormalizedMSEL; reviewFlags: ReviewFlag[] }> {
   let prompt: string;
 
   switch (classification.hierarchyLevel) {
@@ -386,6 +453,9 @@ export async function normalizeDocument(
       break;
     case 'ORDER':
       prompt = ORDER_NORMALIZE_PROMPT;
+      break;
+    case 'EVENT_LIST':
+      prompt = MSEL_NORMALIZE_PROMPT;
       break;
   }
 
@@ -407,7 +477,7 @@ export async function normalizeDocument(
 
   const parsed = JSON.parse(content);
 
-  // Extract review flags from the response (order-level includes them inline)
+  // Extract review flags from the response (order-level and event-list include them inline)
   const reviewFlags: ReviewFlag[] = parsed.reviewFlags || [];
   delete parsed.reviewFlags;
 
@@ -789,6 +859,109 @@ async function persistOrder(
   };
 }
 
+// ─── Persist MSEL ───────────────────────────────────────────────────────────
+
+async function persistMSEL(
+  scenarioId: string,
+  data: NormalizedMSEL,
+  rawText: string,
+  classification: ClassifyResult,
+): Promise<{ createdId: string; extracted: IngestResult['extracted'] }> {
+  // First, store the MSEL as a PlanningDocument (docType: 'MSEL')
+  const effectiveDate = new Date(classification.effectiveDateStr || new Date().toISOString());
+
+  const planningDoc = await prisma.planningDocument.create({
+    data: {
+      scenarioId,
+      title: `MSEL — ${data.exerciseName || classification.title || 'Exercise'}`,
+      docType: 'MSEL',
+      content: rawText,
+      docTier: 6, // MSEL tier (above SPINS/ACO)
+      effectiveDate,
+      sourceFormat: classification.sourceFormat,
+      confidence: classification.confidence,
+      ingestedAt: new Date(),
+    },
+  });
+
+  // Get scenario dates for DTG parsing
+  const scenario = await prisma.scenario.findUnique({
+    where: { id: scenarioId },
+    select: { startDate: true },
+  });
+  const scenarioStart = scenario?.startDate || effectiveDate;
+
+  // Create ScenarioInject records from normalized injects
+  let injectCount = 0;
+  for (const inject of data.injects || []) {
+    // Parse DTG to extract triggerDay and triggerHour
+    const { day, hour } = parseDTG(inject.dtg, scenarioStart);
+
+    await prisma.scenarioInject.create({
+      data: {
+        scenarioId,
+        planningDocId: planningDoc.id,
+        triggerDay: day,
+        triggerHour: hour,
+        injectType: inject.eventType || 'INFORMATION',
+        title: inject.message?.substring(0, 120) || `Inject ${inject.serialNumber}`,
+        description: inject.message || '',
+        impact: inject.notes || '',
+        // CJCSM 3500.03F doctrine fields
+        serialNumber: inject.serialNumber,
+        mselLevel: inject.mselLevel,
+        injectMode: inject.injectMode,
+        fromEntity: inject.fromEntity,
+        toEntity: inject.toEntity,
+        expectedResponse: inject.expectedResponse,
+        objectiveTested: inject.objectiveTested,
+      },
+    });
+    injectCount++;
+  }
+
+  console.log(`  [INGEST] MSEL created: ${planningDoc.title} — ${injectCount} injects extracted`);
+
+  return {
+    createdId: planningDoc.id,
+    extracted: { injectCount },
+  };
+}
+
+/**
+ * Parse a military DTG (Date-Time Group) like "041400Z MAR 26" into triggerDay/triggerHour
+ * relative to the scenario start date.
+ */
+function parseDTG(dtg: string, scenarioStart: Date): { day: number; hour: number } {
+  try {
+    // Pattern: DDHHMMz MON YY (e.g., "041400Z MAR 26")
+    const match = dtg.match(/(\d{2})(\d{2})\d{2}Z?\s+([A-Z]{3})\s+(\d{2,4})/i);
+    if (!match) return { day: 1, hour: 0 };
+
+    const dayOfMonth = parseInt(match[1]);
+    const hour = parseInt(match[2]);
+    const monthStr = match[3].toUpperCase();
+    let year = parseInt(match[4]);
+    if (year < 100) year += 2000;
+
+    const months: Record<string, number> = {
+      JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
+      JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
+    };
+
+    const dtgDate = new Date(Date.UTC(year, months[monthStr] ?? 0, dayOfMonth, hour));
+    const diffMs = dtgDate.getTime() - scenarioStart.getTime();
+    const diffDays = Math.floor(diffMs / (24 * 60 * 60 * 1000));
+
+    return {
+      day: Math.max(1, diffDays + 1), // ATO day is 1-indexed
+      hour: Math.max(0, Math.min(23, hour)),
+    };
+  } catch {
+    return { day: 1, hour: 0 };
+  }
+}
+
 // ─── Main Ingest Function ───────────────────────────────────────────────────
 
 export async function ingestDocument(
@@ -850,6 +1023,9 @@ export async function ingestDocument(
       previewCounts.missionPackages = orderData.missionPackages?.length || 0;
       previewCounts.missions = msnCount;
       previewCounts.waypoints = wpCount;
+    } else if (classification.hierarchyLevel === 'EVENT_LIST') {
+      const mselData = normalized as NormalizedMSEL;
+      previewCounts.injects = mselData.injects?.length || 0;
     } else {
       const planData = normalized as NormalizedPlanning;
       previewCounts.priorities = planData.priorities?.length || 0;
@@ -895,6 +1071,12 @@ export async function ingestDocument(
       createdId = result.createdId;
       parentLinkId = result.parentLinkId;
       matchedPriorities = result.matchedPriorities;
+      extracted = result.extracted;
+      break;
+    }
+    case 'EVENT_LIST': {
+      const result = await persistMSEL(scenarioId, normalized as NormalizedMSEL, rawText, classification);
+      createdId = result.createdId;
       extracted = result.extracted;
       break;
     }

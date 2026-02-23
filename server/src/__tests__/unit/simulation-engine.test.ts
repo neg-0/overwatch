@@ -76,22 +76,22 @@ vi.mock('../../websocket/ws-server.js', () => ({
   broadcastArtifactResult: vi.fn(),
 }));
 
-vi.mock('../coverage-calculator.js', () => ({
+vi.mock('../../services/coverage-calculator.js', () => ({
   checkCoverage: vi.fn(),
   checkFulfillment: vi.fn().mockReturnValue([]),
   detectGaps: vi.fn().mockReturnValue([]),
 }));
 
-vi.mock('../scenario-generator.js', () => ({
+vi.mock('../../services/scenario-generator.js', () => ({
   generateDayOrders: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('../space-propagator.js', () => ({
+vi.mock('../../services/space-propagator.js', () => ({
   propagateFromTLE: vi.fn(),
   approximateGeoPosition: vi.fn(),
 }));
 
-vi.mock('../udl-client.js', () => ({
+vi.mock('../../services/udl-client.js', () => ({
   refreshTLEsForScenario: vi.fn().mockResolvedValue(undefined),
 }));
 

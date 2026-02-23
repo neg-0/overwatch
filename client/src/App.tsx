@@ -19,7 +19,7 @@ const STEP_MS = 3600000; // 1 hour in ms
 export default function App() {
   const {
     connect, connected, simulation,
-    pauseSimulation, resumeSimulation, seekTo, setSpeed,
+    startSimulation, pauseSimulation, resumeSimulation, stopSimulation, seekTo, setSpeed,
   } = useOverwatchStore();
 
   // Connect WebSocket on mount
@@ -189,44 +189,68 @@ export default function App() {
             <span className="playback-controls__clock">{timeDisplay}</span>
           </div>
 
-          {/* Shuttle buttons */}
+          {/* Unified sim controls */}
           <div className="playback-controls__shuttle">
-            <button
-              className="shuttle-btn"
-              onClick={handleStepBack}
-              disabled={!isActive}
-              title="Step back 1 hour"
-            >⏮</button>
-            <button
-              className="shuttle-btn shuttle-btn--primary"
-              onClick={handlePlayPause}
-              disabled={!isActive}
-              title={simulation.status === 'RUNNING' ? 'Pause' : 'Play'}
-            >
-              {simulation.status === 'RUNNING' ? '⏸' : '▶'}
-            </button>
-            <button
-              className="shuttle-btn"
-              onClick={handleStepForward}
-              disabled={!isActive}
-              title="Step forward 1 hour"
-            >⏭</button>
+            {(simulation.status === 'IDLE' || simulation.status === 'STOPPED') ? (
+              <button
+                className="shuttle-btn shuttle-btn--primary"
+                onClick={() => {
+                  const scenId = useOverwatchStore.getState().activeScenarioId;
+                  if (scenId) startSimulation(scenId);
+                }}
+                disabled={!useOverwatchStore.getState().activeScenarioId}
+                title="Start Simulation"
+                style={{ flex: 1 }}
+              >
+                ▶ Start
+              </button>
+            ) : (
+              <>
+                <button
+                  className="shuttle-btn"
+                  onClick={handleStepBack}
+                  disabled={!isActive}
+                  title="Step back 1 hour"
+                >⏮</button>
+                <button
+                  className="shuttle-btn shuttle-btn--primary"
+                  onClick={handlePlayPause}
+                  disabled={!isActive}
+                  title={simulation.status === 'RUNNING' ? 'Pause' : 'Resume'}
+                >
+                  {simulation.status === 'RUNNING' ? '⏸' : '▶'}
+                </button>
+                <button
+                  className="shuttle-btn"
+                  onClick={handleStepForward}
+                  disabled={!isActive}
+                  title="Step forward 1 hour"
+                >⏭</button>
+                <button
+                  className="shuttle-btn"
+                  onClick={() => stopSimulation()}
+                  title="Stop Simulation"
+                  style={{ color: 'var(--accent-danger)' }}
+                >⏹</button>
+              </>
+            )}
           </div>
 
-          {/* Speed selector */}
-          <div className="playback-controls__speed">
-            <label className="playback-controls__speed-label">Speed</label>
-            <select
-              className="playback-controls__speed-select"
-              value={simulation.compressionRatio}
-              onChange={handleSpeedChange}
-              disabled={!isActive}
-            >
-              {SPEED_PRESETS.map(s => (
-                <option key={s} value={s}>{s}×</option>
-              ))}
-            </select>
-          </div>
+          {/* Speed selector — only when active */}
+          {isActive && (
+            <div className="playback-controls__speed">
+              <label className="playback-controls__speed-label">Speed</label>
+              <select
+                className="playback-controls__speed-select"
+                value={simulation.compressionRatio}
+                onChange={handleSpeedChange}
+              >
+                {SPEED_PRESETS.map(s => (
+                  <option key={s} value={s}>{s}×</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       </aside>
 

@@ -108,6 +108,7 @@ interface OverwatchStore {
   // Connection
   socket: Socket | null;
   connected: boolean;
+  dbConnected: boolean | null;
 
   // Scenario
   activeScenarioId: string | null;
@@ -166,12 +167,17 @@ interface OverwatchStore {
   // Hierarchy + Allocation
   fetchHierarchy: (scenarioId: string) => Promise<void>;
   fetchAllocations: (scenarioId: string, day: number) => Promise<void>;
+
+  // Health and Import
+  fetchHealth: () => Promise<void>;
+  importScenario: (file: File) => Promise<{ success: boolean; data?: { id: string }; error?: string }>;
 }
 
 export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
   // ─── Initial State ───────────────────────────────────────────────────────
   socket: null,
   connected: false,
+  dbConnected: null,
   activeScenarioId: null,
   scenarios: [],
   scenarioTimeRange: null,
@@ -330,6 +336,39 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
       }
     } catch (err) {
       console.error('[STORE] Failed to fetch scenarios:', err);
+    }
+  },
+
+  fetchHealth: async () => {
+    try {
+      const res = await fetch('/api/health');
+      const data = await res.json();
+      if (data.success && data.data) {
+        set({ dbConnected: data.data.dbConnected });
+      }
+    } catch (err) {
+      set({ dbConnected: false });
+      console.error('[STORE] Failed to fetch health:', err);
+    }
+  },
+
+  importScenario: async (file: File) => {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch('/api/scenarios/import', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (data.success) {
+        get().fetchScenarios();
+      }
+      return data;
+    } catch (err) {
+      console.error('[STORE] Failed to import scenario:', err);
+      return { success: false, error: String(err) };
     }
   },
 

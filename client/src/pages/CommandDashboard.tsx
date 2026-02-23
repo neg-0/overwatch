@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useOverwatchStore } from '../store/overwatch-store';
 
 export function CommandDashboard() {
@@ -11,15 +12,10 @@ export function CommandDashboard() {
     spaceGaps,
     alerts,
     fetchScenarios,
-    startSimulation,
-    pauseSimulation,
-    resumeSimulation,
-    stopSimulation,
-    deleteScenario,
   } = useOverwatchStore();
 
+  const navigate = useNavigate();
   const [scenarioStats, setScenarioStats] = useState<any>(null);
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   // Load scenarios on mount
   useEffect(() => {
@@ -37,6 +33,45 @@ export function CommandDashboard() {
     }
   }, [activeScenarioId]);
 
+  const isSimActive = simulation.status === 'RUNNING' || simulation.status === 'PAUSED';
+
+  // ─── No Scenario Guard ────────────────────────────────────────────────────
+
+  if (!activeScenarioId || scenarios.length === 0) {
+    return (
+      <>
+        <div className="content-header">
+          <h1>Command Dashboard</h1>
+          <span className="classification-banner">UNCLASSIFIED // EXERCISE</span>
+        </div>
+        <div className="content-body">
+          <div style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+            justifyContent: 'center', minHeight: '60vh', gap: '24px',
+          }}>
+            <div style={{ fontSize: '64px', opacity: 0.5 }}>🎯</div>
+            <h2 style={{ color: 'var(--text-bright)', margin: 0, fontSize: '24px' }}>
+              No Active Scenario
+            </h2>
+            <p style={{ color: 'var(--text-muted)', maxWidth: '420px', textAlign: 'center', lineHeight: 1.6 }}>
+              Generate a scenario to populate the operational picture. The scenario generator
+              creates doctrine documents, ORBAT, space assets, and an MSEL.
+            </p>
+            <button
+              className="btn btn-primary"
+              style={{ fontSize: '16px', padding: '12px 32px' }}
+              onClick={() => navigate('/scenario')}
+            >
+              ⚙️ Generate Scenario
+            </button>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  // ─── Operational COP ──────────────────────────────────────────────────────
+
   const activeMissions = positions.size;
   const missionsByDomain = {
     air: [...positions.values()].filter(p => p.domain === 'AIR').length,
@@ -44,19 +79,18 @@ export function CommandDashboard() {
     space: [...positions.values()].filter(p => p.domain === 'SPACE').length,
   };
 
-  const criticalGaps = spaceGaps.filter(g => g.severity === 'CRITICAL').length;
+  const criticalGaps = isSimActive
+    ? spaceGaps.filter(g => g.severity === 'CRITICAL').length
+    : 0;
 
-  const handleDelete = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (confirmDelete === id) {
-      await deleteScenario(id);
-      setConfirmDelete(null);
-    } else {
-      setConfirmDelete(id);
-      // Auto-reset after 3s
-      setTimeout(() => setConfirmDelete(prev => prev === id ? null : prev), 3000);
-    }
-  };
+  const scenName = scenarioStats?.name || scenarios.find((s: any) => s.id === activeScenarioId)?.name || 'Scenario';
+  const scenTheater = scenarioStats?.theater || '';
+  const unitCount = scenarioStats?._count?.units || 0;
+  const orderCount = scenarioStats?._count?.taskingOrders || 0;
+  const planDocCount = scenarioStats?._count?.planningDocs || 0;
+
+  // Has the user ingested any docs yet?
+  const hasIngestedDocs = planDocCount > 0 && orderCount > 0;
 
   return (
     <>
@@ -68,107 +102,128 @@ export function CommandDashboard() {
       </div>
 
       <div className="content-body">
-        {/* ─── Simulation Controls ─────────────────────────────────── */}
-        <div className="card" style={{ marginBottom: '20px' }}>
-          <div className="card-header">
-            <h3 className="card-title">Simulation Control</h3>
-            <span className={`badge badge-${simulation.status === 'RUNNING' ? 'operational' : simulation.status === 'PAUSED' ? 'degraded' : 'inactive'}`}>
-              {simulation.status}
-            </span>
-          </div>
-          <div className="card-body" style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-            {activeScenarioId ? (
-              <>
-                {simulation.status === 'IDLE' || simulation.status === 'STOPPED' ? (
-                  <button className="btn btn-primary" onClick={() => startSimulation(activeScenarioId)}>
-                    ▶ Start Simulation
-                  </button>
-                ) : simulation.status === 'RUNNING' ? (
-                  <button className="btn btn-secondary" onClick={() => pauseSimulation()}>
-                    ⏸ Pause
-                  </button>
-                ) : (
-                  <button className="btn btn-primary" onClick={() => resumeSimulation()}>
-                    ▶ Resume
-                  </button>
-                )}
-                {(simulation.status === 'RUNNING' || simulation.status === 'PAUSED') && (
-                  <button className="btn btn-danger" onClick={() => stopSimulation()}>
-                    ⏹ Stop
-                  </button>
-                )}
-                {simulation.simTime && (
-                  <div style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: '14px', color: 'var(--accent-cyber)' }}>
-                    SIM: {new Date(simulation.simTime).toUTCString()} | DAY {simulation.currentAtoDay} | {simulation.compressionRatio}×
-                  </div>
-                )}
-              </>
-            ) : (
-              <span style={{ color: 'var(--text-muted)' }}>
-                Select or generate a scenario first →{' '}
-                <a href="/scenario" style={{ color: 'var(--accent-primary)' }}>Scenario Setup</a>
-              </span>
+        {/* ─── Scenario Context Bar ──────────────────────────────── */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '16px',
+          padding: '12px 16px', marginBottom: '20px',
+          background: 'var(--bg-secondary)', borderRadius: '8px',
+          borderLeft: '3px solid var(--accent-primary)',
+        }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: '15px', color: 'var(--text-bright)' }}>
+              {scenName}
+            </div>
+            {scenTheater && (
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                {scenTheater} — {unitCount} units — {orderCount} orders
+              </div>
             )}
           </div>
+          <span className={`badge badge-${isSimActive ? 'operational' : 'inactive'}`}>
+            {isSimActive ? `DAY ${simulation.currentAtoDay}` : 'READY'}
+          </span>
         </div>
 
-        {/* ─── Stats Grid ──────────────────────────────────────────── */}
+        {/* ─── Post-Generation CTA ──────────────────────────────── */}
+        {!isSimActive && !hasIngestedDocs && (
+          <div className="card" style={{ marginBottom: '20px', borderColor: 'var(--accent-warning)', borderWidth: '1px', borderStyle: 'solid' }}>
+            <div className="card-body" style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '16px' }}>
+              <span style={{ fontSize: '32px' }}>📥</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text-bright)', marginBottom: '4px' }}>
+                  Next Step: Ingest Documents
+                </div>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                  Your scenario generated doctrine documents and an MSEL. Ingest them through the
+                  Doc Intake pipeline to extract structured data (missions, injects, priorities).
+                </div>
+              </div>
+              <button
+                className="btn btn-primary"
+                onClick={() => navigate('/intake')}
+                style={{ whiteSpace: 'nowrap' }}
+              >
+                📥 Doc Intake
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ─── Stats Grid ──────────────────────────────────────── */}
         <div className="stats-grid">
           <div className="stat-card">
             <div className="stat-label">Active Missions</div>
             <div className="stat-value" style={{ color: 'var(--accent-primary)' }}>
-              {activeMissions}
+              {isSimActive ? activeMissions : '—'}
             </div>
-            <div className="stat-trend positive">TRACKING</div>
+            <div className="stat-trend positive">{isSimActive ? 'TRACKING' : 'IDLE'}</div>
           </div>
 
           <div className="stat-card">
             <div className="stat-label">ATO Day</div>
             <div className="stat-value" style={{ color: 'var(--accent-secondary)' }}>
-              {simulation.currentAtoDay || '—'}
+              {isSimActive ? simulation.currentAtoDay : '—'}
             </div>
-            <div className="stat-trend">{simulation.compressionRatio}× compression</div>
+            <div className="stat-trend">
+              {isSimActive ? `${simulation.compressionRatio}× compression` : 'NOT STARTED'}
+            </div>
           </div>
 
           <div className="stat-card">
             <div className="stat-label">Space Gaps</div>
             <div className="stat-value" style={{ color: criticalGaps > 0 ? 'var(--accent-danger)' : 'var(--accent-success)' }}>
-              {criticalGaps}
+              {isSimActive ? criticalGaps : '—'}
             </div>
             <div className={`stat-trend ${criticalGaps > 0 ? 'negative' : 'positive'}`}>
-              {criticalGaps > 0 ? 'CRITICAL' : 'NOMINAL'}
+              {isSimActive ? (criticalGaps > 0 ? 'CRITICAL' : 'NOMINAL') : 'IDLE'}
             </div>
           </div>
 
           <div className="stat-card">
-            <div className="stat-label">Scenarios</div>
+            <div className="stat-label">Units</div>
             <div className="stat-value" style={{ color: 'var(--accent-warning)' }}>
-              {scenarios.length}
+              {unitCount || '—'}
             </div>
-            <div className="stat-trend">LOADED</div>
+            <div className="stat-trend">ORBAT</div>
           </div>
         </div>
 
-        {/* ─── Domain Activity ─────────────────────────────────────── */}
+        {/* ─── Domain Activity + Alerts ─────────────────────────── */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginTop: '20px' }}>
           <div className="card">
             <div className="card-header">
               <h3 className="card-title">Domain Activity</h3>
             </div>
             <div className="card-body">
-              <DomainBar label="AIR" count={missionsByDomain.air} total={activeMissions} color="#00d4ff" />
-              <DomainBar label="MARITIME" count={missionsByDomain.maritime} total={activeMissions} color="#0090ff" />
-              <DomainBar label="SPACE" count={missionsByDomain.space} total={activeMissions} color="#a855f7" />
+              {isSimActive ? (
+                <>
+                  <DomainBar label="AIR" count={missionsByDomain.air} total={activeMissions} color="#00d4ff" />
+                  <DomainBar label="MARITIME" count={missionsByDomain.maritime} total={activeMissions} color="#0090ff" />
+                  <DomainBar label="SPACE" count={missionsByDomain.space} total={activeMissions} color="#a855f7" />
+                </>
+              ) : (
+                <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '24px', fontSize: '13px' }}>
+                  Domain activity will populate when the simulation is running.
+                  <br />
+                  <span style={{ fontSize: '11px', marginTop: '8px', display: 'block' }}>
+                    Use the playback controls in the sidebar to start the simulation.
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
           <div className="card">
             <div className="card-header">
               <h3 className="card-title">Recent Alerts</h3>
-              <span className="badge badge-inactive">{alerts.length}</span>
+              <span className="badge badge-inactive">{isSimActive ? alerts.length : 0}</span>
             </div>
             <div className="card-body" style={{ maxHeight: '200px', overflowY: 'auto' }}>
-              {alerts.length === 0 ? (
+              {!isSimActive ? (
+                <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '20px', fontSize: '13px' }}>
+                  Alerts will appear when the simulation is running.
+                </div>
+              ) : alerts.length === 0 ? (
                 <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '20px', fontSize: '13px' }}>
                   No alerts — simulation events will appear here
                 </div>
@@ -189,65 +244,10 @@ export function CommandDashboard() {
           </div>
         </div>
 
-        {/* ─── Scenarios List ──────────────────────────────────────── */}
-        <div className="card" style={{ marginTop: '20px' }}>
-          <div className="card-header">
-            <h3 className="card-title">Available Scenarios</h3>
-          </div>
-          <div className="card-body">
-            {scenarios.length === 0 ? (
-              <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '20px' }}>
-                No scenarios yet. <a href="/scenario" style={{ color: 'var(--accent-primary)' }}>Generate one →</a>
-              </div>
-            ) : (
-              scenarios.map((s: any) => (
-                <div
-                  key={s.id}
-                  onClick={() => useOverwatchStore.getState().setActiveScenario(s.id)}
-                  style={{
-                    padding: '12px 16px',
-                    borderBottom: '1px solid var(--border-subtle)',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    background: s.id === activeScenarioId ? 'rgba(0, 212, 255, 0.08)' : 'transparent',
-                    borderLeft: s.id === activeScenarioId ? '3px solid var(--accent-primary)' : '3px solid transparent',
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: '14px' }}>{s.name}</div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                      {s.theater} — {s.adversary}
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '12px', alignItems: 'center', fontSize: '11px', color: 'var(--text-muted)' }}>
-                    <span>{s._count?.taskingOrders || 0} orders</span>
-                    <span>{s._count?.units || 0} units</span>
-                    <span>{s._count?.spaceAssets || 0} space assets</span>
-                    <button
-                      onClick={(e) => handleDelete(s.id, e)}
-                      style={{
-                        padding: '4px 8px',
-                        borderRadius: '4px',
-                        border: '1px solid',
-                        borderColor: confirmDelete === s.id ? 'var(--accent-danger)' : 'var(--border-subtle)',
-                        background: confirmDelete === s.id ? 'rgba(255, 82, 82, 0.15)' : 'transparent',
-                        color: confirmDelete === s.id ? 'var(--accent-danger)' : 'var(--text-muted)',
-                        cursor: 'pointer',
-                        fontSize: '11px',
-                        fontWeight: 600,
-                        transition: 'all 0.15s ease',
-                      }}
-                    >
-                      {confirmDelete === s.id ? 'Confirm?' : '✕'}
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
+        {/* ─── Game Master Controls ─────────────────────────────── */}
+        {isSimActive && (
+          <GameMasterCard scenarioId={activeScenarioId} currentDay={simulation.currentAtoDay} />
+        )}
       </div>
     </>
   );
@@ -265,6 +265,142 @@ function DomainBar({ label, count, total, color }: { label: string; count: numbe
       </div>
       <div style={{ height: '6px', background: 'var(--bg-tertiary)', borderRadius: '3px', overflow: 'hidden' }}>
         <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: '3px', transition: 'width 0.5s ease' }} />
+      </div>
+    </div>
+  );
+}
+
+// ─── Game Master Card ────────────────────────────────────────────────────────
+
+function GameMasterCard({ scenarioId, currentDay }: { scenarioId: string; currentDay: number }) {
+  const { socket } = useOverwatchStore();
+  const [atoDay, setAtoDay] = useState(currentDay || 1);
+  const [gmLoading, setGmLoading] = useState<'ato' | 'inject' | 'bda' | null>(null);
+  const [gmLog, setGmLog] = useState<Array<{ time: string; message: string; type: 'success' | 'error' | 'info' }>>([]);
+
+  useEffect(() => {
+    if (currentDay > 0) setAtoDay(currentDay);
+  }, [currentDay]);
+
+  const addLog = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+    setGmLog(prev => [{ time, message, type }, ...prev].slice(0, 10));
+  };
+
+  // Listen for GM WebSocket events
+  useEffect(() => {
+    if (!socket) return;
+
+    const onAtoComplete = (data: any) => {
+      addLog(`ATO Day ${data.atoDay} complete — ${data.missionCount || 0} missions`, 'success');
+      setGmLoading(null);
+    };
+    const onInject = (data: any) => {
+      addLog(`Inject Day ${data.atoDay}: ${data.injects?.length || 0} injects fired`, 'success');
+      setGmLoading(null);
+    };
+    const onBdaComplete = (data: any) => {
+      addLog(`BDA Day ${data.atoDay} complete`, 'success');
+      setGmLoading(null);
+    };
+    const onError = (data: any) => {
+      addLog(`${data.action} Day ${data.atoDay} failed: ${data.error}`, 'error');
+      setGmLoading(null);
+    };
+
+    socket.on('gamemaster:ato-complete', onAtoComplete);
+    socket.on('gamemaster:inject', onInject);
+    socket.on('gamemaster:bda-complete', onBdaComplete);
+    socket.on('gamemaster:error', onError);
+
+    return () => {
+      socket.off('gamemaster:ato-complete', onAtoComplete);
+      socket.off('gamemaster:inject', onInject);
+      socket.off('gamemaster:bda-complete', onBdaComplete);
+      socket.off('gamemaster:error', onError);
+    };
+  }, [socket]);
+
+  const callGM = async (action: 'ato' | 'inject' | 'bda') => {
+    setGmLoading(action);
+    addLog(`${action.toUpperCase()} Day ${atoDay}…`);
+    try {
+      await fetch(`/api/game-master/${scenarioId}/${action}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ atoDay }),
+      });
+    } catch {
+      addLog(`${action.toUpperCase()} request failed`, 'error');
+      setGmLoading(null);
+    }
+  };
+
+  return (
+    <div className="card" style={{ marginTop: '20px' }}>
+      <div className="card-header">
+        <h3 className="card-title">🎮 Game Master</h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>ATO Day</label>
+          <input
+            type="number"
+            min={1}
+            max={30}
+            value={atoDay}
+            onChange={e => setAtoDay(Math.max(1, parseInt(e.target.value) || 1))}
+            disabled={gmLoading !== null}
+            style={{
+              width: '56px', padding: '4px 8px', fontSize: '12px',
+              background: 'var(--bg-tertiary)', border: '1px solid var(--border)',
+              borderRadius: '4px', color: 'var(--text-bright)', textAlign: 'center',
+            }}
+          />
+        </div>
+      </div>
+      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            className="btn btn-primary"
+            disabled={gmLoading !== null}
+            onClick={() => callGM('ato')}
+            style={{ flex: 1 }}
+          >
+            {gmLoading === 'ato' ? '⟳ Generating…' : '✈️ Generate ATO'}
+          </button>
+          <button
+            className="btn btn-secondary"
+            disabled={gmLoading !== null}
+            onClick={() => callGM('inject')}
+            style={{ flex: 1 }}
+          >
+            {gmLoading === 'inject' ? '⟳ Generating…' : '💥 Fire Inject'}
+          </button>
+          <button
+            className="btn btn-secondary"
+            disabled={gmLoading !== null}
+            onClick={() => callGM('bda')}
+            style={{ flex: 1 }}
+          >
+            {gmLoading === 'bda' ? '⟳ Running…' : '📊 Run BDA'}
+          </button>
+        </div>
+        {gmLog.length > 0 && (
+          <div style={{
+            maxHeight: '120px', overflowY: 'auto',
+            background: 'var(--bg-tertiary)', borderRadius: '6px', padding: '8px',
+          }}>
+            {gmLog.map((entry, i) => (
+              <div key={i} style={{
+                fontSize: '11px', fontFamily: 'var(--font-mono)',
+                padding: '3px 0',
+                color: entry.type === 'error' ? 'var(--accent-danger)' :
+                  entry.type === 'success' ? 'var(--accent-success)' : 'var(--text-muted)',
+              }}>
+                <span style={{ opacity: 0.5 }}>{entry.time}</span> {entry.message}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

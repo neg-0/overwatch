@@ -75,9 +75,10 @@ export function SpaceDashboard() {
   }, [simulation.currentAtoDay]);
 
   const report = allocationReport as any;
-  const allocations = report?.allocations || [];
-  const contentions = report?.contentionEvents || [];
-  const summary = report?.summary || {};
+  const isSimActive = simulation.status === 'RUNNING' || simulation.status === 'PAUSED';
+  const allocations = isSimActive ? (report?.allocations || []) : [];
+  const contentions = isSimActive ? (report?.contentionEvents || []) : [];
+  const summary = isSimActive ? (report?.summary || {}) : {};
 
   // Filter by capability if selected
   const filteredAllocations = selectedCapability
@@ -306,7 +307,7 @@ export function SpaceDashboard() {
         </div>
 
         {/* ─── Space Gaps ────────────────────────────────────── */}
-        {spaceGaps.length > 0 && (
+        {isSimActive && spaceGaps.length > 0 && (
           <div className="card">
             <div className="card-header">
               <span className="card-title">⚠️ Coverage Gaps</span>

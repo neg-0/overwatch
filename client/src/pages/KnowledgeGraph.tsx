@@ -1,5 +1,5 @@
 import * as d3 from 'd3';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useOverwatchStore } from '../store/overwatch-store';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -34,7 +34,6 @@ interface SimNode extends d3.SimulationNodeDatum {
   label: string;
   sublabel?: string;
   meta?: Record<string, unknown>;
-  // d3 will add x, y, vx, vy
 }
 
 interface SimLink extends d3.SimulationLinkDatum<SimNode> {
@@ -55,6 +54,11 @@ const NODE_CONFIG: Record<GraphNodeType, { color: string; icon: string }> = {
 
 const NODE_RADIUS = 24;
 
+// Types that are always visible (relationship graph)
+const CORE_TYPES: Set<GraphNodeType> = new Set(['DOCUMENT', 'PRIORITY', 'MISSION', 'TARGET']);
+// Types hidden by default (raw ORBAT data — too many disconnected nodes)
+const ORBAT_TYPES: Set<GraphNodeType> = new Set(['UNIT', 'BASE', 'SPACE_ASSET']);
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function KnowledgeGraph() {
@@ -69,16 +73,7 @@ export function KnowledgeGraph() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState({ nodes: 0, edges: 0 });
-
-  // ─── Game Master State ──────────────────────────────────────────────────
-  const [atoDay, setAtoDay] = useState(1);
-  const [gmLoading, setGmLoading] = useState<'ato' | 'inject' | 'bda' | null>(null);
-  const [gmLog, setGmLog] = useState<Array<{ time: string; message: string; type: 'success' | 'error' | 'info' }>>([]);
-
-  const addGmLog = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
-    const time = new Date().toLocaleTimeString('en-US', { hour12: false });
-    setGmLog(prev => [{ time, message, type }, ...prev].slice(0, 20));
-  }, []);
+  const [showOrbat, setShowOrbat] = useState(false);
 
   // ─── Fetch Graph Data ────────────────────────────────────────────────────
 
@@ -128,77 +123,33 @@ export function KnowledgeGraph() {
       }));
     };
 
-    // Game Master events
-    const handleAtoComplete = (data: { atoDay: number; missionCount?: number; durationMs: number }) => {
-      addGmLog(`ATO Day ${data.atoDay} complete — ${data.missionCount || 0} missions (${(data.durationMs / 1000).toFixed(1)}s)`, 'success');
-      setGmLoading(null);
-      fetchGraph(); // Refresh the full graph after ingest-back
-    };
-
-    const handleInject = (data: { atoDay: number; injects: Array<{ title: string; injectType: string }> }) => {
-      const titles = data.injects.map(i => `[${i.injectType}] ${i.title}`).join(', ');
-      addGmLog(`Inject Day ${data.atoDay}: ${titles}`, 'success');
-      setGmLoading(null);
-    };
-
-    const handleBdaComplete = (data: {
-      atoDay: number;
-      durationMs: number;
-      retargetSummary?: {
-        degradedTargets: string[];
-        restrikeNominations: string[];
-        updatedPriorities: number;
-      };
-    }) => {
-      let msg = `BDA Day ${data.atoDay} complete (${(data.durationMs / 1000).toFixed(1)}s)`;
-      if (data.retargetSummary && data.retargetSummary.updatedPriorities > 0) {
-        msg += ` — ${data.retargetSummary.degradedTargets.length} degraded, ${data.retargetSummary.restrikeNominations.length} re-strike nominations`;
-      }
-      addGmLog(msg, 'success');
-      setGmLoading(null);
-      fetchGraph();
-    };
-
-    const handleRetarget = (data: {
-      atoDay: number;
-      degradedTargets: string[];
-      restrikeNominations: string[];
-      updatedPriorities: number;
-    }) => {
-      if (data.restrikeNominations.length > 0) {
-        addGmLog(`⚡ Re-strike targets: ${data.restrikeNominations.join(', ')}`, 'info');
-      }
-      if (data.degradedTargets.length > 0) {
-        addGmLog(`✓ Sufficiently degraded: ${data.degradedTargets.join(', ')}`, 'info');
-      }
-    };
-
-    const handleGmError = (data: { action: string; atoDay: number; error: string }) => {
-      addGmLog(`${data.action.toUpperCase()} Day ${data.atoDay} failed: ${data.error}`, 'error');
-      setGmLoading(null);
-    };
-
     socket.on('graph:update', handleGraphUpdate);
-    socket.on('gamemaster:ato-complete', handleAtoComplete);
-    socket.on('gamemaster:inject', handleInject);
-    socket.on('gamemaster:bda-complete', handleBdaComplete);
-    socket.on('gamemaster:retarget', handleRetarget);
-    socket.on('gamemaster:error', handleGmError);
-
     return () => {
       socket.off('graph:update', handleGraphUpdate);
-      socket.off('gamemaster:ato-complete', handleAtoComplete);
-      socket.off('gamemaster:inject', handleInject);
-      socket.off('gamemaster:bda-complete', handleBdaComplete);
-      socket.off('gamemaster:retarget', handleRetarget);
-      socket.off('gamemaster:error', handleGmError);
     };
-  }, [socket, addGmLog, fetchGraph]);
+  }, [socket]);
+
+  // ─── Filtered Data ──────────────────────────────────────────────────────
+
+  const filteredNodes = useMemo(() => {
+    if (showOrbat) return nodes;
+    return nodes.filter(n => CORE_TYPES.has(n.type));
+  }, [nodes, showOrbat]);
+
+  const filteredEdges = useMemo(() => {
+    const nodeIds = new Set(filteredNodes.map(n => n.id));
+    return edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
+  }, [edges, filteredNodes]);
+
+  const orbatCount = useMemo(() =>
+    nodes.filter(n => ORBAT_TYPES.has(n.type)).length,
+    [nodes]
+  );
 
   // ─── D3 Force Simulation ──────────────────────────────────────────────
 
   useEffect(() => {
-    if (!svgRef.current || !containerRef.current || nodes.length === 0) return;
+    if (!svgRef.current || !containerRef.current || filteredNodes.length === 0) return;
 
     const svg = d3.select(svgRef.current);
     const container = containerRef.current;
@@ -237,8 +188,8 @@ export function KnowledgeGraph() {
     svg.call(zoom);
 
     // Clone data for D3 (it mutates)
-    const simNodes: SimNode[] = nodes.map(n => ({ ...n }));
-    const simLinks: SimLink[] = edges
+    const simNodes: SimNode[] = filteredNodes.map(n => ({ ...n }));
+    const simLinks: SimLink[] = filteredEdges
       .filter(e => {
         const hasSource = simNodes.some(n => n.id === e.source);
         const hasTarget = simNodes.some(n => n.id === e.target);
@@ -250,14 +201,16 @@ export function KnowledgeGraph() {
         relationship: e.relationship,
       }));
 
-    // Force simulation
+    // Force simulation — tuned for performance
     const simulation = d3.forceSimulation<SimNode>(simNodes)
       .force('link', d3.forceLink<SimNode, SimLink>(simLinks)
         .id(d => d.id)
         .distance(120))
       .force('charge', d3.forceManyBody().strength(-300))
       .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide(NODE_RADIUS + 10));
+      .force('collision', d3.forceCollide(NODE_RADIUS + 10))
+      .alphaDecay(0.05)    // Settle faster (default 0.0228)
+      .alphaMin(0.1);      // Stop sooner (default 0.001)
 
     simulationRef.current = simulation;
 
@@ -419,9 +372,9 @@ export function KnowledgeGraph() {
     return () => {
       simulation.stop();
     };
-  }, [nodes, edges]);
+  }, [filteredNodes, filteredEdges, nodes]);
 
-  // ─── Render ──────────────────────────────────────────────────────────────
+  // ─── Empty States ──────────────────────────────────────────────────────
 
   if (!activeScenarioId) {
     return (
@@ -433,6 +386,27 @@ export function KnowledgeGraph() {
     );
   }
 
+  // No document/priority/mission nodes — only raw ORBAT data
+  const hasRelationshipNodes = nodes.some(n => CORE_TYPES.has(n.type));
+
+  if (!loading && nodes.length > 0 && !hasRelationshipNodes) {
+    return (
+      <div className="kg-empty">
+        <div className="kg-empty__icon">📥</div>
+        <h2>Knowledge Graph</h2>
+        <p style={{ maxWidth: '420px', lineHeight: 1.6 }}>
+          The knowledge graph builds as documents are ingested. Right now only raw ORBAT data exists
+          ({orbatCount} units/bases/assets). Ingest your scenario documents to see relationships.
+        </p>
+        <a href="/intake" style={{ color: 'var(--accent-primary)', marginTop: '12px', display: 'inline-block' }}>
+          📥 Go to Doc Intake →
+        </a>
+      </div>
+    );
+  }
+
+  // ─── Render ──────────────────────────────────────────────────────────────
+
   return (
     <div className="kg-page">
       {/* ─── Header Bar ─────────────────────────────────────────────── */}
@@ -442,8 +416,18 @@ export function KnowledgeGraph() {
           Knowledge Graph
         </div>
         <div className="kg-header__stats">
-          <span className="kg-stat">{stats.nodes} nodes</span>
-          <span className="kg-stat">{stats.edges} edges</span>
+          <span className="kg-stat">{filteredNodes.length} nodes</span>
+          <span className="kg-stat">{filteredEdges.length} edges</span>
+          {orbatCount > 0 && (
+            <button
+              className={`kg-refresh-btn ${showOrbat ? 'active' : ''}`}
+              onClick={() => setShowOrbat(!showOrbat)}
+              title={showOrbat ? 'Hide ORBAT nodes (units/bases/space assets)' : `Show ${orbatCount} ORBAT nodes`}
+              style={showOrbat ? { background: 'var(--accent-primary)', color: '#000' } : undefined}
+            >
+              {showOrbat ? `⚔️ ${orbatCount} ORBAT` : `+ ${orbatCount} ORBAT`}
+            </button>
+          )}
           <button className="kg-refresh-btn" onClick={fetchGraph} disabled={loading}>
             {loading ? '⟳' : '↻'} Refresh
           </button>
@@ -452,109 +436,16 @@ export function KnowledgeGraph() {
 
       {/* ─── Legend ──────────────────────────────────────────────────── */}
       <div className="kg-legend">
-        {Object.entries(NODE_CONFIG).map(([type, cfg]) => (
-          <div key={type} className="kg-legend__item">
-            <span className="kg-legend__dot" style={{ backgroundColor: cfg.color }} />
-            <span className="kg-legend__icon">{cfg.icon}</span>
-            <span className="kg-legend__label">{formatType(type)}</span>
-          </div>
-        ))}
+        {Object.entries(NODE_CONFIG)
+          .filter(([type]) => showOrbat || CORE_TYPES.has(type as GraphNodeType))
+          .map(([type, cfg]) => (
+            <div key={type} className="kg-legend__item">
+              <span className="kg-legend__dot" style={{ backgroundColor: cfg.color }} />
+              <span className="kg-legend__icon">{cfg.icon}</span>
+              <span className="kg-legend__label">{formatType(type)}</span>
+            </div>
+          ))}
       </div>
-
-      {/* ─── Game Master Controls ─────────────────────────────────── */}
-      {activeScenarioId && (
-        <div className="gm-controls">
-          <div className="gm-controls__header">
-            <span className="gm-controls__icon">🎮</span>
-            <h3>Game Master</h3>
-          </div>
-          <div className="gm-controls__body">
-            <div className="gm-day-picker">
-              <label>ATO Day</label>
-              <input
-                type="number"
-                min={1}
-                max={30}
-                value={atoDay}
-                onChange={e => setAtoDay(Math.max(1, parseInt(e.target.value) || 1))}
-                disabled={gmLoading !== null}
-              />
-            </div>
-            <div className="gm-actions">
-              <button
-                className="gm-btn gm-btn--ato"
-                disabled={gmLoading !== null}
-                onClick={async () => {
-                  setGmLoading('ato');
-                  addGmLog(`Generating ATO Day ${atoDay}…`, 'info');
-                  try {
-                    await fetch(`/api/game-master/${activeScenarioId}/ato`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ atoDay }),
-                    });
-                  } catch {
-                    addGmLog('ATO request failed', 'error');
-                    setGmLoading(null);
-                  }
-                }}
-              >
-                {gmLoading === 'ato' ? '⟳ Generating…' : '✈️ Generate ATO'}
-              </button>
-              <button
-                className="gm-btn gm-btn--inject"
-                disabled={gmLoading !== null}
-                onClick={async () => {
-                  setGmLoading('inject');
-                  addGmLog(`Generating inject for Day ${atoDay}…`, 'info');
-                  try {
-                    await fetch(`/api/game-master/${activeScenarioId}/inject`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ atoDay }),
-                    });
-                  } catch {
-                    addGmLog('Inject request failed', 'error');
-                    setGmLoading(null);
-                  }
-                }}
-              >
-                {gmLoading === 'inject' ? '⟳ Generating…' : '💥 Generate Inject'}
-              </button>
-              <button
-                className="gm-btn gm-btn--bda"
-                disabled={gmLoading !== null}
-                onClick={async () => {
-                  setGmLoading('bda');
-                  addGmLog(`Running BDA for Day ${atoDay}…`, 'info');
-                  try {
-                    await fetch(`/api/game-master/${activeScenarioId}/bda`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ atoDay }),
-                    });
-                  } catch {
-                    addGmLog('BDA request failed', 'error');
-                    setGmLoading(null);
-                  }
-                }}
-              >
-                {gmLoading === 'bda' ? '⟳ Running…' : '📊 Run BDA'}
-              </button>
-            </div>
-            {gmLog.length > 0 && (
-              <div className="gm-log">
-                {gmLog.map((entry, i) => (
-                  <div key={i} className={`gm-log__entry gm-log__entry--${entry.type}`}>
-                    <span className="gm-log__time">{entry.time}</span>
-                    <span className="gm-log__msg">{entry.message}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* ─── Graph Canvas ───────────────────────────────────────────── */}
       <div className="kg-canvas" ref={containerRef}>

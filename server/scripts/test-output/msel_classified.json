@@ -1,9 +1,9 @@
 {
   "hierarchyLevel": "PLANNING",
-  "documentType": "JIPTL",
+  "documentType": "STAFF_DOC",
   "sourceFormat": "STAFF_DOC",
-  "confidence": 0.45,
-  "title": "Joint Exercise Injection Timeline – Theater Scenario (Operational Intel, Friction, and Crisis Injects)",
-  "issuingAuthority": "Joint Exercise Control Group",
-  "effectiveDateStr": ""
+  "confidence": 0.6,
+  "title": "MASTER SCENARIO EVENTS LIST (MSEL) INDOPACOM EXCON WESTPAC SHIELD 26",
+  "issuingAuthority": "INDOPACOM EXCON (EXCON SimCell)",
+  "effectiveDateStr": "2026-03-01T00:00:00Z"
 }

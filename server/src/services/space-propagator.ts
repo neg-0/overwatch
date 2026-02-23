@@ -66,13 +66,29 @@ export function approximateGeoPosition(
   const isGeo = periodMin > 1400 && periodMin < 1500;
   const altKm = isGeo ? 35786 : ((periodMin / (2 * Math.PI)) * 6371 * Math.sqrt(6371));
 
-  // For GEO, latitude oscillates based on inclination
   const hourAngle = (datetime.getTime() / (3600000 * 24)) * 2 * Math.PI;
-  const latOscillation = inclination * Math.sin(hourAngle);
+  let lat = inclination * Math.sin(hourAngle);
+  let lon = baseLon + (eccentricity * 360 * Math.cos(hourAngle));
+
+  // Handle orbits that cross the poles (e.g., Sun-Synchronous Orbits with inclination > 90)
+  // Normalize longitude to [-180, 180]
+  lon = ((lon + 180) % 360 + 360) % 360 - 180;
+
+  // Normalize latitude to [-270, 270) to catch polar crossings
+  lat = ((lat + 270) % 360 + 360) % 360 - 270;
+  if (lat > 90) {
+    // Crossed North Pole: lat goes back down, longitude flips 180 degrees
+    lat = 180 - lat;
+    lon = lon > 0 ? lon - 180 : lon + 180;
+  } else if (lat < -90) {
+    // Crossed South Pole: lat comes back up, longitude flips 180 degrees
+    lat = -180 - lat;
+    lon = lon > 0 ? lon - 180 : lon + 180;
+  }
 
   return {
-    latitude: latOscillation,
-    longitude: baseLon + (eccentricity * 360 * Math.cos(hourAngle)),
+    latitude: Math.max(-90, Math.min(90, lat)),
+    longitude: lon,
     altitude_km: isGeo ? 35786 : altKm,
   };
 }

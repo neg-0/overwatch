@@ -58,14 +58,15 @@ export interface SpaceAssetSpec {
   affiliation: 'FRIENDLY' | 'HOSTILE' | 'NEUTRAL';
   capabilities: SpaceCapabilityType[];
   status: string;
+  noradId?: string;    // NORAD catalog number for TLE lookup (public satellites)
   inclination: number;
   eccentricity: number;
   periodMin: number;
   apogeeKm: number;
   perigeeKm: number;
-  bandwidthProvided?: string[];  // e.g. ['SHF', 'EHF'] — what comms bands this satellite serves
-  coverageRegion?: string;       // e.g. 'WESTPAC', 'GLOBAL'
-  operator?: string;             // e.g. 'PLASSF', 'VKS', 'USSF'
+  bandwidthProvided?: string[];
+  coverageRegion?: string;
+  operator?: string;
 }
 
 export interface BlueUnitSpec {
@@ -1314,6 +1315,56 @@ export async function seedBasesForScenario(scenarioId: string): Promise<void> {
   console.log(`  [REF-DATA] Created ${INDOPACOM_BASES.length} INDOPACOM bases for scenario`);
 }
 
+// ─── NORAD Catalog Numbers ───────────────────────────────────────────────────
+// Public NORAD IDs for well-known satellites (source: space-track.org / CelesTrak).
+// NRO/classified systems intentionally omitted — they have no public catalog entries.
+// The seeder falls back to this table when the SpaceAssetSpec doesn't include noradId.
+const NORAD_CATALOG: Record<string, string> = {
+  // GPS III
+  'GPS III SV01': '43873', 'GPS III SV02': '44506', 'GPS III SV03': '45854',
+  'GPS III SV04': '46826', 'GPS III SV05': '48859', 'GPS III SV06': '53098',
+  // GPS IIF
+  'GPS IIF-1': '36585', 'GPS IIF-2': '37753', 'GPS IIF-3': '38833',
+  'GPS IIF-4': '39166', 'GPS IIF-5': '39533', 'GPS IIF-6': '39741',
+  'GPS IIF-7': '40105', 'GPS IIF-8': '40294', 'GPS IIF-9': '40534',
+  'GPS IIF-10': '40730', 'GPS IIF-11': '41019', 'GPS IIF-12': '41328',
+  // GPS IIR-M
+  'GPS IIR-M1': '29601', 'GPS IIR-M2': '32260', 'GPS IIR-M3': '32384',
+  'GPS IIR-M4': '32711', 'GPS IIR-M5': '35752', 'GPS IIR-M6': '36400',
+  'GPS IIR-M7': '38857',
+  // WGS
+  'WGS-1': '32258', 'WGS-2': '33118', 'WGS-3': '34713',
+  'WGS-4': '36108', 'WGS-5': '38070', 'WGS-6': '39222',
+  'WGS-7': '40746', 'WGS-8': '42075', 'WGS-9': '44071',
+  // SBIRS GEO
+  'SBIRS GEO-1': '37481', 'SBIRS GEO-2': '38173',
+  'SBIRS GEO-3': '43162', 'SBIRS GEO-4': '44481',
+  // GOES
+  'GOES-16 (East)': '41866', 'GOES-17 (Standby)': '43226', 'GOES-18 (West)': '51850',
+  // TDRS
+  'TDRS-8': '27566', 'TDRS-9': '27389', 'TDRS-10': '27566',
+  'TDRS-11': '39070', 'TDRS-12': '40661', 'TDRS-13': '43158',
+  // MUOS
+  'MUOS-1': '38257', 'MUOS-2': '39486', 'MUOS-3': '40374',
+  'MUOS-4': '41622', 'MUOS-5': '42649',
+  // AEHF
+  'AEHF-4': '43651', 'AEHF-5': '44481', 'AEHF-6': '45465',
+  // Milstar
+  'Milstar-2 F4': '26715', 'Milstar-2 F5': '28470',
+  // DMSP
+  'DMSP-5D3 F19': '40384', 'DMSP-5D3 F20': '99999',
+  // STSS
+  'STSS-Demo-1': '35937', 'STSS-Demo-2': '35938',
+  // SSA
+  'SAPPHIRE': '39088', 'SBSS Block 10': '37849',
+  // Landsat
+  'Landsat-8': '39084', 'Landsat-9': '49260',
+  // WorldView
+  'WorldView-3': '40115',
+  // CBAS
+  'CBAS-2': '48274',
+};
+
 export async function seedSpaceAssetsForScenario(scenarioId: string): Promise<void> {
   let total = 0;
 
@@ -1332,6 +1383,7 @@ export async function seedSpaceAssetsForScenario(scenarioId: string): Promise<vo
           affiliation: asset.affiliation,
           capabilities: asset.capabilities,
           status: asset.status,
+          noradId: asset.noradId ?? NORAD_CATALOG[asset.name] ?? null,
           operator: asset.operator,
           coverageRegion: asset.coverageRegion,
           bandwidthProvided: asset.bandwidthProvided ?? [],

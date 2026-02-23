@@ -118,15 +118,14 @@ All calls use `reasoning_effort: 'medium'` to balance quality with speed.
 
 | Property | Value |
 |---|---|
-| **Location** | `scenario-generator.ts:1256–1347` |
+| **Location** | `scenario-generator.ts` |
 | **Model** | `midRange` |
 | **Calls** | 1 LLM call |
-| **Output** | 8–30 `ScenarioInject` records |
-| **Fallback** | 4 hardcoded injects (tanker divert, SAM repositioning, GPS jamming, civilian vessel) |
+| **Output** | 1 `PlanningDocument` (docType: `MSEL`) |
 
-**Prompt Strategy**: Uses `MSEL_PROMPT` with theater, adversary, duration, ORBAT summary, and space asset list. Instructs the LLM to distribute injects with higher density in Phase 2–3.
+**Prompt Strategy**: Uses CJCSM 3500.03F-compliant MSEL prompt requesting a pipe-delimited table with 10 columns (SERIAL, DTG, LEVEL, TYPE, MODE, FROM, TO, MESSAGE, EXPECTED RESPONSE, OBJECTIVE, NOTES). Includes theater, adversary, duration, ORBAT summary, and space asset context.
 
-**Output Parsing**: Expects JSON array. Each inject includes `triggerDay`, `triggerHour`, `injectType`, `title`, `description`, `impact`. Days are clamped to scenario duration; invalid inject types default to FRICTION.
+**Output**: Generates a realistic text document stored as a `PlanningDocument`. `ScenarioInject` records are extracted when the document is ingested through the doc-ingest pipeline (`EVENT_LIST` hierarchy level).
 
 ---
 

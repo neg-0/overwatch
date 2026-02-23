@@ -1,333 +1,48 @@
-{
-  "injects": [
-    {
-      "triggerDay": 1,
-      "triggerHour": 10,
-      "injectType": "INTEL",
-      "title": "HUMINT: Fishing Vessel Reports Unusual Ship Movements",
-      "description": "Local fishing vessel near an island reports multiple gray-hull vessels conducting nighttime small-boat transfers. Vessel provided GPS tracks and photos to local authorities.",
-      "impact": "Suggests possible covert logistics/resupply to hostile outpost; requires ISR allocation and potential diversion of maritime patrol assets."
-    },
-    {
-      "triggerDay": 1,
-      "triggerHour": 15,
-      "injectType": "FRICTION",
-      "title": "Port Congestion at Forward Logistics Hub",
-      "description": "Main allied forward logistics port reports berth congestion following surge in pre-positioned equipment receipts; offload times projected to increase by 36 hours for several sealift loads.",
-      "impact": "Delays receipt of spare parts and vehicle packages; impacts maintenance cycles and unit readiness for next 72 hours unless surface distribution reprioritized."
-    },
-    {
-      "triggerDay": 2,
-      "triggerHour": 6,
-      "injectType": "SPACE",
-      "title": "SBIRS Transient Glitch — Elevated False Positive Thermal Events",
-      "description": "SBIRS constellation reporting transient false-positive missile/rocket plume detections from a sector over the East China Sea due to sensor anomaly. Engineering teams investigating.",
-      "impact": "Temporary uncertainty in missile warning/launch detection in affected sector; commanders must cross-cue with regional sensors and withhold launch attribution pending confirmation."
-    },
-    {
-      "triggerDay": 2,
-      "triggerHour": 14,
-      "injectType": "FRICTION",
-      "title": "F-35A Flight Control Software Fault",
-      "description": "388 FW reports 4 aircraft grounded due to flight control software fault requiring TCTO patch. Expected 8-hour repair window.",
-      "impact": "Reduces available DCA sorties by 16% for Day 2 afternoon cycle."
-    },
-    {
-      "triggerDay": 2,
-      "triggerHour": 18,
-      "injectType": "INTEL",
-      "title": "SIGINT: Increased PRC Naval Radio Traffic West of First Island Chain",
-      "description": "Signals intercept indicates heightened encrypted voice/data comms among PLA surface units operating west of the First Island Chain, including increased frequency hopping patterns.",
-      "impact": "Indicates possible coordinated operations or task force assembly; recommends elevating maritime surveillance posture and EMCON review."
-    },
-    {
-      "triggerDay": 3,
-      "triggerHour": 3,
-      "injectType": "FRICTION",
-      "title": "Aegis Ship Powerplant Fault During Night Transit",
-      "description": "Aegis destroyer experiences reduced electrical generation due to a GTG (gas turbine generator) fault. Propulsion available but power management degraded; diagnostic underway.",
-      "impact": "Temporarily reduces ship's margin for high-energy sensors/weapons and limits continuous high-speed transit capability until repairs completed (12–24 hours)."
-    },
-    {
-      "triggerDay": 3,
-      "triggerHour": 11,
-      "injectType": "CRISIS",
-      "title": "Civilian Airliner Diverts Near Exercise Area",
-      "description": "Commercial airline requests emergency diversion to island airport due to onboard medical emergency. Aircraft entered restricted exercise airspace during diversion.",
-      "impact": "Immediate cease-fire corridor required; air operations must deconflict; ROE consideration for noncombatant evacuation and temporary hold on certain strikes."
-    },
-    {
-      "triggerDay": 3,
-      "triggerHour": 16,
-      "injectType": "INTEL",
-      "title": "ISR Imagery: Shore Installations Emplaced New Radar Arrays",
-      "description": "High-resolution SAR and EO imagery reveals emplacement of three new phased-array radar sites on previously unreported coastal ridgelines.",
-      "impact": "Potentially increases enemy early-warning/targeting capability; affects strike planning and electromagnetic mission planning."
-    },
-    {
-      "triggerDay": 4,
-      "triggerHour": 1,
-      "injectType": "SPACE",
-      "title": "GPS III Signal Degradation Reported in Sector",
-      "description": "Reports from regional forces indicate intermittent GPS timing and positioning anomalies starting just after midnight in a 600 km swath of the theater. GPS III control reports investigating potential localized interference.",
-      "impact": "Affects precision navigation for air and maritime assets, weapon guidance, and comms timing; forces use of alternate navigation aids and issuance of cautions for weapon employment."
-    },
-    {
-      "triggerDay": 4,
-      "triggerHour": 9,
-      "injectType": "FRICTION",
-      "title": "Intelligence Unit Network Outage",
-      "description": "Main theater analysis node reports network outage tied to local power fault at the datacenter hosting fused intel products. Estimated restoration 6–10 hours.",
-      "impact": "Delays tactical intel dissemination and fused briefings; commanders must rely on cached products and lower-fidelity feeds until restored."
-    },
-    {
-      "triggerDay": 4,
-      "triggerHour": 13,
-      "injectType": "INTEL",
-      "title": "HUMINT: Peninsula Militia Mobilization Observed",
-      "description": "Multiple HUMINT sources report organized militia/paramilitary recruitment and localized mobilization in a coastal province, including transport of light arms to island positions.",
-      "impact": "Increases risk of irregular warfare and escalatory incidents near contested islands; requires force protection adjustments and rules-of-engagement review for patrols."
-    },
-    {
-      "triggerDay": 4,
-      "triggerHour": 18,
-      "injectType": "CRISIS",
-      "title": "Diplomatic Protest — Host Nation Restricts Airspace",
-      "description": "Host nation government issues immediate restriction on the overflight of certain maritime zones citing civilian safety, closing two transit corridors used by coalition air assets.",
-      "impact": "Air routing altered; increased transit times and fuel planning impacts for sorties and airlift; diplomatic engagement required to negotiate corridor access."
-    },
-    {
-      "triggerDay": 5,
-      "triggerHour": 4,
-      "injectType": "FRICTION",
-      "title": "Medevac Helicopter Maintenance Delay",
-      "description": "Forward deployed MEDEVAC rotary-wing reports critical hydraulic actuator contamination identified during pre-flight; parts not on-site, estimated 48-hour repair/replacement lead time.",
-      "impact": "Reduces organic casualty evacuation capability in forward area; contingency plans needed with naval/partner assets and medical staging adjustments."
-    },
-    {
-      "triggerDay": 5,
-      "triggerHour": 10,
-      "injectType": "INTEL",
-      "title": "SIGINT: Possible Aerial Refuel Track Identified",
-      "description": "Signals indicate tanker-to-fighter datalink comms consistent with aerial refueling operations among hostile air assets transiting toward southern sector.",
-      "impact": "Extends potential time-on-station for adversary fighters; increases threat window to allied air and maritime forces; ISR tasked to validate."
-    },
-    {
-      "triggerDay": 5,
-      "triggerHour": 15,
-      "injectType": "SPACE",
-      "title": "Commercial SATCOM Congestion/Interference Affecting WGS Gateways",
-      "description": "Commercial satellite operator reports coordinated interference on multiple uplink frequencies near WGS gateway sites; users report degraded SATCOM QoS for non-priority traffic.",
-      "impact": "Degrades throughput for logistics, non-tiered comms, and some ISR feeds; high-priority mission comms retained but bandwidth constrained. Reprioritization required."
-    },
-    {
-      "triggerDay": 5,
-      "triggerHour": 21,
-      "injectType": "CRISIS",
-      "title": "Coastal Civilian Protest Escalates Near Base",
-      "description": "Large-scale civilian protest near a forward logistics base escalates into confrontations with security personnel; videos trending on social media creating pressure on host-nation authorities.",
-      "impact": "Force protection posture elevated; restricts base access and complicates logistics flow; public affairs and diplomatic coordination required to de-escalate."
-    },
-    {
-      "triggerDay": 6,
-      "triggerHour": 7,
-      "injectType": "FRICTION",
-      "title": "Surface-to-Air Missile Maintenance Parts Shortage",
-      "description": "Shelf-life expiry discovered on critical spare components for a shore-based SAM battery during routine inspection; resupply ETAs 72 hours due to port congestion.",
-      "impact": "Reduces readiness of air defense coverage in assigned sector; requires redistributing air defense assets or accepting coverage gaps."
-    },
-    {
-      "triggerDay": 6,
-      "triggerHour": 12,
-      "injectType": "INTEL",
-      "title": "Recon Drone Tracks Show New Logistics Landing Sites",
-      "description": "Persistent UAS surveillance tracks indicate establishment of improvised logistics landing zones on small islands with frequent deliveries at night.",
-      "impact": "Indicates expanded adversary sustainment network; recommends interdiction targeting and maritime/blockade consideration."
-    },
-    {
-      "triggerDay": 6,
-      "triggerHour": 19,
-      "injectType": "CRISIS",
-      "title": "Unidentified Submersible Incident Reported by Commercial Vessel",
-      "description": "Commercial tanker reports near-collision with unidentified submerged object (USO) in transit lane; minor hull scrape reported and crew spooked. Maritime authorities request naval investigation.",
-      "impact": "Requires allocation of ASW/escort assets to investigate and secure shipping lanes; potential diplomatic friction if asset traced to another state actor."
-    },
-    {
-      "triggerDay": 7,
-      "triggerHour": 2,
-      "injectType": "SPACE",
-      "title": "Threat of Space Debris Conjunction with Recon Satellite",
-      "description": "Space situational awareness team issues warning of a high-probability conjunction between a fragmented debris object and a theater ISR satellite in low Earth orbit within 8 hours.",
-      "impact": "May require temporary satellite safe-mode maneuvering, disrupting ISR collection windows and delaying planned imagery collection for target prosecution."
-    },
-    {
-      "triggerDay": 7,
-      "triggerHour": 9,
-      "injectType": "FRICTION",
-      "title": "Fuel Contamination at Forward Aviation Facility",
-      "description": "Fuel quality checks detect microbial contamination in jet A-1 at a forward airfield. Grounding of refuel operations pending fuel source isolation and clean-up (expected 24–48 hours).",
-      "impact": "Limits sortie generation rates from that field; aircraft redeployment/alternate basing or limited sortie profiles required, increasing transit times."
-    },
-    {
-      "triggerDay": 7,
-      "triggerHour": 16,
-      "injectType": "INTEL",
-      "title": "Open-Source Reporting: PRC Conducts Coastal Martial Law Exercises",
-      "description": "Open-source and HUMINT confirms large-scale 'civil defense' drills along the coast, including mobilization of logistics and enforcement units near contested islands.",
-      "impact": "May be cover for real operations or preparation for escalation; prompts readiness checks and potential force posture adjustments."
-    },
-    {
-      "triggerDay": 8,
-      "triggerHour": 5,
-      "injectType": "CRISIS",
-      "title": "Small-Island Missile Launch Reported",
-      "description": "Multiple forward observers and commercial AIS report a short-range ballistic missile launch from a friendly-but-autonomous island chain (not previously militarized). No attribution yet.",
-      "impact": "Immediate escalation risk; requires rapid verification, potential recall of patrolling aircraft, and high-level political consultation on proportional response."
-    },
-    {
-      "triggerDay": 8,
-      "triggerHour": 13,
-      "injectType": "FRICTION",
-      "title": "Ammunition Shortage at Coastal Artillery Battery",
-      "description": "Inventory audit reveals extended shortfall in specific mortar and naval gun munitions after sustained operations. Resupply estimates hampered by port delays and contested waters.",
-      "impact": "Limits sustained fire missions; planners must prioritize targets and coordinate for emergency resupply or ammunition redistribution."
-    },
-    {
-      "triggerDay": 8,
-      "triggerHour": 20,
-      "injectType": "INTEL",
-      "title": "COMINT: PRC Merchant Shipping Re-Routed to Obscure Movements",
-      "description": "Communications intercepts show PRC shipping being re-routed via smaller coastal ports with increased night movements and use of commercial tugs to move white hulls.",
-      "impact": "Indicates attempts to mask logistics; complicates maritime domain awareness and plots for interdiction or surveillance."
-    },
-    {
-      "triggerDay": 9,
-      "triggerHour": 8,
-      "injectType": "SPACE",
-      "title": "Tactical Link Degradation Between WGS and Theater SATCOM Terminals",
-      "description": "Intermittent packet loss and high latency reported on several WGS channels supporting tactical C2 and ISR data streams. Engineering traces indicate uplink-side anomalies.",
-      "description": "WGS gateway anomalies causing packet loss on tactical SATCOM.",
-      "impact": "Degrades real-time C2 and ISR feeds; forces fallback to HF/line-of-sight and prioritization of critical links; delays decision cycles."
-    },
-    {
-      "triggerDay": 9,
-      "triggerHour": 14,
-      "injectType": "FRICTION",
-      "title": "Heavy Weather Disrupts Amphibious Movement",
-      "description": "Tropical low pressure intensifies unexpectedly producing high seas and winds, resulting in cancellation of scheduled amphibious lifts and delayed ship-to-shore operations.",
-      "impact": "Disrupts timetable for follow-on forces and logistics; requires replanning, redistribution of landing craft and adjustment of fire support windows."
-    },
-    {
-      "triggerDay": 9,
-      "triggerHour": 19,
-      "injectType": "INTEL",
-      "title": "EMCON Violation: Unidentified Active Radar Illuminators Detected",
-      "description": "Multiple coalition aircraft report being painted by unknown ground-based active radar illuminators in disputed areas; some signals correlate with mobile emitter signatures.",
-      "impact": "Increases risk to air operations and indicates targeting attempts; requires immediate EW suppression consideration and adjustment of flight routes."
-    },
-    {
-      "triggerDay": 10,
-      "triggerHour": 6,
-      "injectType": "CRISIS",
-      "title": "Political Restriction on Offensive Operations Issued",
-      "description": "National leadership issues temporary political constraint limiting offensive strikes within 50 nautical miles of a contested archipelago pending diplomatic talks.",
-      "impact": "Operational constraints on strike planners and maritime interdiction; forces must adjust targeting priorities, rely on defensive postures, and expedite diplomatic channels."
-    },
-    {
-      "triggerDay": 10,
-      "triggerHour": 12,
-      "injectType": "FRICTION",
-      "title": "Critical Spare Parts Delayed — Airborne Early Warning Radars",
-      "description": "Replacement AESA modules for AWACS-type aircraft delayed when vendor logistics center closed due to local outbreak of disease among staff. ETAs shifted by 5 days.",
-      "impact": "Reduces availability of AEW coverage as aircraft cycle through reduced-capability maintenance; requires redistribution of AEW assets and prioritization of mission sets."
-    },
-    {
-      "triggerDay": 10,
-      "triggerHour": 18,
-      "injectType": "INTEL",
-      "title": "Satellite Imagery: Anti-Ship Cruise Missile Batteries Camouflaged",
-      "description": "Recent EO/IR satellite imagery shows deployment and concealment of coastal anti-ship cruise missile launchers in dense vegetation along a major choke point.",
-      "impact": "Elevates threat to transiting shipping and amphibious forces; targeting and SEAD planning must be updated and prioritized."
-    },
-    {
-      "triggerDay": 11,
-      "triggerHour": 3,
-      "injectType": "CRISIS",
-      "title": "Accidental Engagement of Fishing Boat",
-      "description": "A coalition patrol mistakenly engaged a small fishing craft after misidentification; local media releases imagery showing casualties and property damage.",
-      "impact": "Severe political/diplomatic fallout; immediate pause on certain operations, investigation required, and PSYOP/public affairs consequences to manage."
-    },
-    {
-      "triggerDay": 11,
-      "triggerHour": 11,
-      "injectType": "FRICTION",
-      "title": "Hospital Surge — Medical Capacity Strained",
-      "description": "Regional military medical facilities report a sudden influx of combat and non-combat casualties due to concurrent incidents; blood and ICU capacity reaching critical levels.",
-      "impact": "Forces triage priorities, influences medevac decisions, and may limit acceptance of further casualties without external medical support or evacuation to rear."
-    },
-    {
-      "triggerDay": 11,
-      "triggerHour": 17,
-      "injectType": "INTEL",
-      "title": "PRC Electronic Warfare Ship Now Operating in Proximity",
-      "description": "Signals and ES confirm a PRC specialized EW vessel has moved within 120 nm of key straits and is emitting high-power jamming in C-band frequencies.",
-      "impact": "Degrades navcomm and certain radar bands for allied forces in the area; requires EW mitigation, route alteration, and potential engagement consideration."
-    },
-    {
-      "triggerDay": 12,
-      "triggerHour": 2,
-      "injectType": "SPACE",
-      "title": "Cyber Intrusion Attempt on GPS Ground System",
-      "description": "Cybersecurity monitors detect probing and attempted credentialed access against a regional GPS III uplink/control node. Intrusion blocked, forensics ongoing.",
-      "impact": "Raises risk to continuity of GPS signal integrity and control; elevates cyber defensive posture and may necessitate contingency ops for timing/positioning alternatives."
-    },
-    {
-      "triggerDay": 12,
-      "triggerHour": 9,
-      "injectType": "FRICTION",
-      "title": "Engine Failures in Maritime Patrol Squadron",
-      "description": "Two P-8 aircraft report engine nozzle anomalies identified during post-sortie inspections; fleet safety stand-down invoked pending inspections across squadron.",
-      "impact": "Reduces maritime patrol ISR coverage for 24–48 hours, forcing reprioritization of patrol tracks and reliance on space/ship-based sensors."
-    },
-    {
-      "triggerDay": 12,
-      "triggerHour": 14,
-      "injectType": "CRISIS",
-      "title": "Host-Nation Government Requests Extended Withdrawal of Some Forces",
-      "description": "Host-nation leadership, under domestic political pressure, requests temporary withdrawal of certain allied forward-deployed units from a base for 72 hours.",
-      "impact": "Complicates basing and sustainment plans, requires redistribution of force posture, and may reduce footprint in critical sectors for short duration."
-    },
-    {
-      "triggerDay": 13,
-      "triggerHour": 7,
-      "injectType": "INTEL",
-      "title": "Intercepted Orders Indicate Possible Strike Window",
-      "description": "High-confidence SIGINT intercept captures orders referencing a narrow window of opportunity to disable allied ISR assets; timing corresponds with predicted low-sun-angle passes.",
-      "impact": "Indicates potential pre-planned hostile action; recommends hardening ISR assets, repositioning vulnerable platforms, and preemptive countermeasures in that window."
-    },
-    {
-      "triggerDay": 13,
-      "triggerHour": 16,
-      "injectType": "FRICTION",
-      "title": "Supply Convoy Attacked — Route Closure",
-      "description": "A forward supply convoy came under indirect fire while transiting an island route; no loss of materiel but route declared unsafe until further clearance operations are conducted.",
-      "impact": "Logistics throughput reduced, resupply timelines extended, and convoys must reroute under escort increasing resource expenditure."
-    },
-    {
-      "triggerDay": 14,
-      "triggerHour": 10,
-      "injectType": "CRISIS",
-      "title": "Temporary Ceasefire Proposal from Third-Party Mediator",
-      "description": "A regional mediator offers a proposed 48-hour ceasefire with monitoring conditions that would pause kinetic operations in certain sectors to open humanitarian corridors.",
-      "impact": "Commanders must evaluate operational and political implications, potentially halt planned offensive actions, and coordinate monitoring/verification mechanisms."
-    },
-    {
-      "triggerDay": 14,
-      "triggerHour": 18,
-      "injectType": "FRICTION",
-      "title": "After-Action: Theater-wide Equipment Maintenance Backlog",
-      "description": "End-of-exercise assessment reveals maintenance backlog across air, maritime, and ground fleets due to high-sortie tempo and supply chain delays; critical systems flagged for extended depot maintenance.",
-      "impact": "Impacts redeployment timelines and readiness for follow-on operations; requires surge depot planning and prioritization of assets for repair and return to service."
-    }
-  ]
-}
+MASTER SCENARIO EVENTS LIST (MSEL)
+Exercise/Operation name: INDOPACOM EXCON — WESTPAC SHIELD 26
+EXCON issuing authority: INDOPACOM EXCON (EXCON SimCell)
+Classification: UNCLASSIFIED//FOR OFFICIAL USE ONLY (EXERCISE)
+Effective period: 010000Z MAR 26 — 150000Z MAR 26 (14 days: 2026-03-01T00:00:00Z to 2026-03-15T00:00:00Z)
+References: CJCSM 3500.03F, JP 3-0, JP 5-0
+
+SERIAL | DTG | LEVEL | TYPE | MODE | FROM | TO | MESSAGE | EXPECTED RESPONSE | OBJECTIVE | NOTES
+001 | 010600Z MAR 26 | STR-T | INFORMATION | MSG_TRAFFIC | INDOPACOM J2 | JFCC INDOPAC | HUMINT report: Local PRC fishing vessel observed off LUZON STRAIT conducting unusual nighttime navigation, lights shielded, coordinates 18°30'N 120°45'E, possible intelligence collection. | J2/JFACC to validate with ISR tasking, adjust air/sea patrols, advise ROE implications. | INTEL 2.1 - Situation awareness, ST 3.2 - C2 | Exercise inject; allow 2 hours for validation. Evaluate ISR cueing and intel fusion.
+002 | 011200Z MAR 26 | OPR | ACTION | RADIO | CSG-5 OPS | JFMCC/JFACC | USS RONALD REAGAN (CVN-76) reports unexpected APU malfunction on #2 shaft, affecting sortie generation rate; expected to reduce flight deck cycles by 30% until repair at 011800Z MAR 26. | JFMCC/JFACC re-plan air tasking, redistribute CAP to allied airfields/carrier escorts, request emergent maintenance support. | OP 5.1 - Air Superiority, LOG 4.1 - Sustainment | Controller: allow 6-hour recovery window; measure re-tasking and prioritization.
+003 | 011800Z MAR 26 | TAC | CONTINGENCY | VERBAL | US EMBASSY MANILA (Sim) | JTF CDR | Civilian protest reported at Port of ILOILO near logistic node causing closure of port for 24 hours; local authorities request foreign forces limit visibility. | JTF to adjust maritime logistics routes, consider alternate ports, coordinate CA/host-nation liaison for continuity. | LOG 4.2 - Distribution, ST 5.3 - Civilian-Military Coordination | Simulated diplomatic constraint. Do not simulate host-nation policy change beyond 24 hrs without EXCON approval.
+004 | 020300Z MAR 26 | STR-T | INFORMATION | MSG_TRAFFIC | SBIRS GEO OPS (SimCell) | INDOPACOM J2 | SBIRS intercept: PRC regional SAM test-launch detected, high-altitude ballistic trajectory from Hainan, boost detected 02/0245Z MAR 26, impact predicted over South China Sea, no claimed target. | INDOPACOM J2 to disseminate to JTF/CSG/air assets, assess escalation, cue OPIR tracking and ATO planners. | INTEL 1.3 - Targeting, OP 4.2 - Air Defense Suppression | Time-sensitive; ensure OPIR correlation within 15 min. Evaluate missile tracking and warning dissemination.
+005 | 020900Z MAR 26 | OPR | DECISION_POINT | MSG_TRAFFIC | PRC MFA (Sim) | SECDEF (Sim)/INDOPACOM CDR | Diplomatic note: PRC issues protest over increased allied air patrols near HPR waters, warns of "necessary measures" if patrols continue. | Commanders to provide recommended posture adjustments and escalation ladder to SECDEF; legal and policy cell to brief ROE options within 2 hours. | ST 2.1 - Strategic deterrence, DEC 1.1 - Commander escalation decision | Inject requires documented decision brief and recommended courses of action (COA).
+006 | 021400Z MAR 26 | TAC | ACTION | RADIO | 35 FW (F-35A) FLT OPS | JFACC ATO Cell | F-35A (Callsign NIGHTOWL 11) reported inflight UHF comms degradation on 243.0 MHz while on CAP, intermittent for last 20 mins, GPS position stable. | ATO cell coordinate frequency checks, divert to alternate comms (SATCOM, VHF guard), schedule maintenance on landing. | ST 3.3 - Air Superiority, LOG 3.1 - Aircraft Maintenance | Controller: simulate avionics BIT. Evaluate comms redundancy and ATO updates.
+007 | 021900Z MAR 26 | OPR | INFORMATION | EMAIL | 613 AOC ISR | JTF CDR/JFACC | ISR imagery: commercial SAR over PRC airfield at HAINAN shows dispersal of fighters to secondary fields, increased logistics vehicles, coordinates 19°14'N 109°44'E. | J2/JFACC recommend re-tasking strikes or dynamic targeting, update alert states. | INTEL 2.2 - ISR Exploitation, OP 5.2 - Targeting | Allow 4 hours for dynamic targeting cycle. Evaluate sensor-to-shooter timeline.
+008 | 030600Z MAR 26 | TAC | CONTINGENCY | HANDOUT | HOST NATION COASTGUARD (Sim) | JFMCC/JTF LOGS | Host-nation imposes temporary restrictions on close-in overflights of coastal fishing zones for 48 hours due to local elections; affects ISR sorties under 50 nm of coast. | JFMCC to deconflict ISR routes, adjust collection priorities, coordinate with host nation for waivers. | ST 5.3 - Civilian-Military Coordination, LOG 4.3 - Airspace Management | Simulated political constraint; do not change ROE beyond given restriction.
+009 | 040200Z MAR 26 | OPR | ACTION | MSG_TRAFFIC | USTRANSCOM (Sim) | JTF LOGS | Manifest delay: Chilean cargo ship (MV PACIFIC EAGLE) carrying critical spares diverted, ETA to Subic delayed 72 hours, reducing parts availability for E-3/SR sustainment. | LOGS to adjust supply prioritization, initiate surge maintenance via forward-deployed spares, request allied support. | LOG 4.1 - Sustainment, ST 3.4 - Airlift/Sealift | Evaluate alternative sourcing and prioritization decisions.
+010 | 040800Z MAR 26 | TAC | INFORMATION | CHAT | P-8 MPA (TACDET) | JTF CDR / J2 | ASW patrol detects probable PRC diesel submarine pinged by towed array at 13:35Z, bearing 214T, range estimated 35 nm from coordinates 10°45'N 126°10'E. | JTF to task ASW assets, notify JMSDF/Allied ASW elements, update maritime picture. | OP 6.1 - Maritime Domain Awareness, INTEL 2.3 - Sensor Reporting | Use ASW playbook; evaluate multi-domain coordination and tracking handoff.
+011 | 041400Z MAR 26 | STR-T | DECISION_POINT | MSG_TRAFFIC | PRC PLANESIM (Sim) | INDOPACOM CDR / SECDEF | PRC announces establishment of an ADIZ extension over disputed shoal, warns foreign military aircraft will be intercepted. | INDOPACOM to recommend strategic response options, escalate to SecDef as required; provide COMOPs options to diplomatic channel. | DEC 1.2 - Strategic response, ST 2.1 - Deterrence | High-level inject: expect return brief to EXCON within 3 hours. Evaluate political-military coordination.
+012 | 041900Z MAR 26 | TAC | ACTION | RADIO | DDG-51 Squadron (Sim) | JFMCC Surface Warfare Coord | Destroyer reports AN/SPY radar anomaly: partial degradation of target track update rate while operating in littoral clutter at 19°00'N 117°30'E. | Surface warfare cell to reroute CVN/Helo ASW/AA assets, schedule emergent maintenance at nearest safe harbor. | OP 4.3 - Maritime Air Defense, LOG 3.2 - Shipboard Maintenance | Allow 12-hour repair timeline; monitor for target track handover efficacy.
+013 | 050300Z MAR 26 | OPR | INFORMATION | MSG_TRAFFIC | WGS OPS (SimCell) | JFCC INDOPAC | SATCOM health advisory: WGS-5 experiencing intermittent ground control uplink delays impacting bandwidth for theater ISR downlinks between 0500-0530Z. | JFCC to re-route critical ISR via alternate WGS or AEHF where available; prioritize links. | INTEL 1.1 - ISR Dissemination, ST 3.2 - C2 | Space inject; allow 30-60 min mitigation. Evaluate SATCOM redundancy planning.
+014 | 050900Z MAR 26 | TAC | ACTION | RADIO | VADM CSG-5 (CSG CDR) | JFMCC | CVN flight deck reports increased crosswinds 45 knots gusting, limiting launch/recovery cycles and increasing FOD risk. | JFMCC to adjust ATO sortie rates, consider forward basing of strike packages to allied airfields, coordinate tanker/airspace. | OP 5.1 - Air Superiority, LOG 3.1 - Air Operations | Weather inject; controllers may extend effects; evaluate decision to forward-base sorties.
+015 | 051700Z MAR 26 | OPR | DECISION_POINT | MSG_TRAFFIC | J2 HUMINT Net | JTF CDR/JTFC | HUMINT: credible report of PRC special operations teams preparing raids on uninhabited islands occupied by allied forces within 48 hours; indicators: small craft staging, night movement, coordinates 15°12'N 121°30'E. | JTF to raise alert level, recommend force protection measures, consider pre-emptive interdiction strikes. | DEC 2.1 - Tactical decision, OP 6.2 - Force Protection | Time-sensitive. Expect ordering of force protection posture and ISR allocation.
+016 | 060300Z MAR 26 | TAC | INFORMATION | MSG_TRAFFIC | MUOS Ops (SimCell) | JFCC INDOPAC | MUOS link degradation reported on UHF SATCOM channel for PACOM ground terminals, affecting legacy narrowband comm between 0600-0630Z. | Tactical comms officers to switch affected units to AEHF/SATCOM terrestrial alternatives; report comms status within 30 minutes. | ST 3.2 - C2, INTEL 1.1 - Comm Resilience | Space inject. Evaluate contingency communications and fallback procedures.
+017 | 061000Z MAR 26 | OPR | ACTION | EMAIL | JFACC ATO Cell | F-16C Wing OPS | F-16C (CLASSIC 21) aborted takeoff due to hydraulic leak on runway 06 at Andersen AFB, one aircraft out of mission for 48 hrs. | ATO cell adjust package allocations, schedule aircraft ferry/maintenance, reassign CAP assets. | OP 5.1 - Air Superiority, LOG 3.1 - Maintenance | Measure prioritization and ATO amendment timeliness.
+018 | 061800Z MAR 26 | TAC | CONTINGENCY | VERBAL | LOCAL CIVIL AUTHORITY (Sim) | JTF CIVIL AFFAIRS | Local tsunami alert issued after distant seismic event, ports in MINDANAO closed for 12 hours, civil infrastructure assessment requested. | JTF to provide humanitarian assessment, standby HADR planning, redirect shipping and amphibious plans. | ST 5.1 - Humanitarian Assistance, LOG 4.4 - Emergency Response | Civilian incident inject; do not escalate military ops except HADR.
+019 | 070200Z MAR 26 | OPR | INFORMATION | CHAT | SUB SQUADRON OPS (Sim) | JTF CDR/ASW Coord | Friendly SSN reports detection of suspicious PRC SIGINT trawler attempting to shadow logistics group at 07°10'N 125°50'E, pattern consistent with ELINT collection. | Recommend tasking P-8/ISR and legal review for harassment interdiction; consider escort modification. | INTEL 2.4 - SIGINT Exploitation, OP 6.3 - Maritime Security | Evaluate detection-to-action cycle and rules of engagement application.
+020 | 070900Z MAR 26 | STR-T | DECISION_POINT | MSG_TRAFFIC | INDOPACOM CDR | SECDEF / WH NSC Sim | PRC conducts limited anti-ship missile salvo test (non-kinetic simulation) inside contested waters; political pressure mounts for retaliation. | Strategic leaders to submit recommended options with risk assessments to SecDef; legal counsel to brief on proportional response and escalation ladder. | DEC 1.3 - Strategic escalation, ST 2.1 - Deterrence | High-level exercise inject; require written COA within 4 hours. Exercise evaluators observe delegation and counsel integration.
+021 | 080200Z MAR 26 | TAC | ACTION | RADIO | FARP OPS (Sim) | 2 FW (F-16) LOGS | Forward arming and refueling point at 12°30'N 121°00'E reports fuel contamination sample positive for particulate; FARP closed until contamination cleared (~8 hrs). | JTF LOGS to re-route fueling, enact fuel quality control procedures, redistribute sorties. | LOG 4.1 - Sustainment, ST 3.1 - Distributed Operations | Measure fuel QA procedures and contingency fueling plans.
+022 | 080800Z MAR 26 | OPR | INFORMATION | MSG_TRAFFIC | AEHF OPS (SimCell) | JFCC INDOPAC | AEHF satellite showing scheduled anomaly during pass window 081500-082200Z MAR 26; potential impact to protected comms link for strategic/TS/SCI terminals. | JTF/STRAT to prioritize AEHF use, re-route priority comms via alternate protected means, notify users. | ST 3.2 - C2, INTEL 1.1 - Comm Resilience | Space inject; evaluate protected comm planning and COOP activation.
+023 | 081400Z MAR 26 | TAC | DECISION_POINT | VERBAL | JFACC ISR Coord | JTF CDR/JFACC | Multiple ISR assets detect movement of PRC amphibious shipping toward contested atoll cluster, visual confirmation of LCAC and landing craft massing at 14°50'N 120°10'E. Time-on-target estimated 36-48 hrs. | JTF/JFACC to recommend interdiction options, decide on strike/time-sensitive targeting, and coordinate with allies. | DEC 2.2 - Operational interdiction, OP 5.2 - Targeting | Time-sensitive; require COA selection and execution timeline. Controllers will escalate if no decision in 3 hours.
+024 | 090200Z MAR 26 | TAC | ACTION | RADIO | CSG EW DET (Sim) | JFACC / CSG OPS | EW report: suspected GPS jamming detected affecting navigation accuracy for 1-2 nm within area 16°00'N 119°30'E, timeframe 0900-0930Z MAR 26. Affected platforms report degraded precision weapons employment. | JFACC to restrict GPS-dependent weapons in affected area, task EW suppression, use inertial/GPS-denied tactics, notify strike packages. | OP 5.3 - EW/SEAD, INTEL 3.1 - Electronic Warfare | Space-related (GPS jamming). Validate decision to employ alternate guidance; evaluate jamming source localization.
+025 | 091600Z MAR 26 | OPR | INFORMATION | MSG_TRAFFIC | J2 GEOINT | JTF CDR / JFACC | Imagery exploitation: construction of hardened shelters consistent with HQ/command nodes at PRC island 16°35'N 121°05'E, increased comms antenna signatures. | Targeting cell to nominate potential HPTs and ISR priority 1, coordinate with legal and targeting. | INTEL 2.2 - GEOINT, OP 5.2 - Targeting | Standard targeting cycle. Evaluate law of armed conflict (LOAC) application.
+026 | 100300Z MAR 26 | TAC | ACTION | RADIO | TASK GROUP SUBSURFACE | JTF / ASW Coord | Friendly sub reports sonar contact lost during evasion, last known MGRS 55NBE12345678 (approx 11°22'N 124°30'E), strong thermocline present. | ASW coord to re-task search assets, establish contact protocols, declare search pattern. | OP 6.1 - ASW, ST 3.2 - C2 | Allow 6-12 hr search window. Evaluate ASW coordination and rescue planning.
+027 | 100900Z MAR 26 | STR-T | INFORMATION | MSG_TRAFFIC | SPACE SITUATIONAL AWARENESS (Sim) | INDOPACOM J2 | Space debris alert: conjunction predicted between GEO comm satellite and unidentified debris fragment over INDOPACOM arc at 101200Z MAR 26, potential brief AEHF link interruption. | Space cell to coordinate with STRATCOM for maneuver recommendations, inform AEHF/WGS ops and affected users. | INTEL 4.1 - Space Domain Awareness, ST 3.2 - C2 | Space inject. Controllers to simulate maneuver decision and evaluate comms re-route.
+028 | 110200Z MAR 26 | TAC | DECISION_POINT | MSG_TRAFFIC | JFACC TARGETING | JTF CDR / JFACC | Time-sensitive target: PRC amphibious group confirmed loaded and underway, ETA to contested atolls 110200Z-111800Z MAR 26; kinetic interdiction would likely degrade enemy capability but risk escalation. | Joint commander to approve interdiction strike package or select non-kinetic interdiction measures within 2 hours. | DEC 2.3 - Operational strike decision, OP 5.2 - Targeting | High-pressure inject; EXCON to observe decision cycle, legal review required.
+029 | 120300Z MAR 26 | OPR | CONTINGENCY | EMAIL | US EMBASSY TOKYO (Sim) | INDOPACOM CDR / JTF | Allied political leader issues statement limiting use of forward-deployed strike aircraft from host nation bases for offensive operations; defensive ops permitted. | Adjust ATO planning, re-evaluate basing and sortie generation, brief strategic leadership on diplomatic constraint. | ST 5.3 - Alliance Management, LOG 4.2 - Basing | Political constraint inject; controllers assess creative basing/overflight solutions.
+030 | 120900Z MAR 26 | TAC | INFORMATION | MSG_TRAFFIC | GPS III Ops (SimCell) | JFCC INDOPAC | GPS III SVs reporting partial constellation anomaly: 6 SVs online but delayed ephemeris updates from 1200-1230Z MAR 26 impacting precision navigation for guided munitions within INDOPACOM arc. | Weapon release authority to suspend GPS-guided weapons in affected window, use INS/TERCOM alternatives, notify pilots and weapon system managers. | INTEL 1.1 - NAV Resilience, OP 5.3 - Weapons Employment | Space inject. Evaluate gun-to-target planning without GPS, assess alternate targeting/fuzing.
+031 | 121800Z MAR 26 | TAC | ACTION | RADIO | CVN FLIGHT DECK CONTROL | JFACC ATO Cell | Night deck operations reported foreign object damage (FOD) to one F-35A tire due to unsecured pallet on deck, flight denial for 24 hrs. | Flight operations to adjust tempo, identify root cause, enforce FOD prevention measures. | LOG 3.1 - Flight Ops Safety, ST 3.3 - Air Superiority | Safety inject; require investigation report and corrective action.
+032 | 131000Z MAR 26 | OPR | CONTINGENCY | MSG_TRAFFIC | WHOLE OF GOVT POLAD (Sim) | INDOPACOM CDR / SECDEF | International shipping company suspends transits through contested sea lanes citing insurance denial; logistic throughput to regional ports predicted to drop 40% over 5 days. | Strategic logistics planning to identify alternative routes, surge sealift allocation, coordinate with commercial partners. | LOG 4.1 - Strategic Sustainment, ST 5.2 - Economic Effects | Multi-day inject; measure sustainment adaptation and interagency coordination.
+033 | 131900Z MAR 26 | TAC | INFORMATION | CHAT | P-8 ISR | JTF CDR / J2 | Persistent ISR: PRC surface-to-air missile batteries repositioned to secondary islands with mobile TEL signatures, new radar emission at 16°45'N 120°50'E. | J2 to nominate radar and TELs as targeting priorities, task SEAD assets, notify strike planners. | INTEL 2.2 - Target Development, OP 4.2 - Air Defense Suppression | Evaluate sensor-to-shooter timelines and deconfliction.
+034 | 140400Z MAR 26 | STR-T | DECISION_POINT | MSG_TRAFFIC | INDOPACOM CDR | SECDEF/WH NSC Sim | PRC fires warning shots across bow of allied destroyer escorting logistics ship in international waters; commander must decide immediate tactical response and recommend strategic course. | INDOPACOM produce expeditious COA for tactical self-defense actions and recommended strategic messaging to SecDef. | DEC 1.4 - Escalation management, ST 2.1 - Deterrence | High-level warfighting decision; evaluate use of proportional response, communications and restraint.
+035 | 140900Z MAR 26 | TAC | ACTION | RADIO | SATCOM OPS (SimCell) | JFACC / JTF C2 | WGS backup link overloaded due to surge in ISR downlinks after AEHF anomaly; reduced throughput for non-priority users. | AOC to enforce comms prioritization, reduce lower-priority streams, implement compression. | ST 3.2 - C2 Resilience, INTEL 1.1 - Data Management | Space/satcom resource management inject. Measure prioritization and bandwidth control.
+036 | 141400Z MAR 26 | OPR | INFORMATION | MSG_TRAFFIC | CIVIL AFFAIRS (Sim) | JTF CDR | Local population reports civilian casualties on contested atoll after exchange between PRC forces and local fishermen; international media requests clarification. | JTF PAO and Legal to prepare coordinated statement, coordinate HADR and casualty assistance as required. | ST 5.1 - Civilian Protection, ST 5.3 - Strategic Communications | Contingency reporting; evaluate PAO and legal processes.
+037 | 150200Z MAR 26 | TAC | ACTION | RADIO | NAVAL CYBER (Sim) | JFACC/JTF C2 | Cyber anomaly: suspected denial-of-service attack against customs/port AIS servers at Subic Bay, resulting in delayed vessel clearances; affects resupply. | Cyber cell to initiate defensive measures, coordinate with host-nation cyber teams, prioritize restoration of AIS. | LOG 4.1 - Port Operations, INTEL 4.2 - Cyber Defense | Simulated cyber inject. Evaluate cyber incident response and civil-military coordination.
+038 | 150800Z MAR 26 | TAC | INFORMATION | MSG_TRAFFIC | OPIR (SBIRS) (SimCell) | INDOPACOM J2 | OPIR detects heat signatures consistent with firing of multiple ballistic rockets from PRC mainland toward uninhabited maritime area, no impact to allied forces predicted. | J2 to update warning channels, recommend increased maritime vigilance, no kinetic response required unless threat to forces confirmed. | INTEL 1.3 - Missile Warning, ST 3.2 - C2 | Space OPIR inject. Measure rapid dissemination to units at sea.
+039 | 151400Z MAR 26 | OPR | DECISION_POINT | MSG_TRAFFIC | JTF CDR | INDOPACOM CDR/SECDEF (Sim) | After continued hostile maneuvering by PRC amphibious group and diplomatic breakdown, joint commander recommends limited precision strike package to disrupt enemy assault; requires authority. | INDOPACOM/SECDEF to approve or deny strike, provide ROE and escalation guidance. | DEC 2.4 - Operational strike clearance, OP 5.2 - Joint Fires | Major exercise decision point; tracks legal counsel, coalition posture, and timing. Documentation required.
+040 | 151900Z MAR 26 | TAC | CONTINGENCY | HANDOUT | PORT AUTHORITY (Sim) | JTF LOGS | Significant storm forecast for region 16°-18°N 118°-121°E with gale-force winds in 24-36 hrs; port operations and at-sea replenishment to be suspended. | JTF LOGS to secure afloat stock, reroute shipments, and implement storm plans. | LOG 4.4 - Emergency Response, ST 3.1 - Sustainment | Meteorological inject; evaluate rapid logistics re-planning.

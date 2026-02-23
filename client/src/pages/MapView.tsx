@@ -183,6 +183,12 @@ export function MapView() {
     positions.forEach((pos, missionId) => {
       if (!activeDomains.has(pos.domain)) return;
 
+      // Guard against LLM hallucinations that output invalid MapBox coordinates
+      const isValidCoord = typeof pos.latitude === 'number' && !isNaN(pos.latitude) && pos.latitude >= -90 && pos.latitude <= 90 &&
+        typeof pos.longitude === 'number' && !isNaN(pos.longitude) && pos.longitude >= -180 && pos.longitude <= 180;
+
+      if (!isValidCoord) return;
+
       // Accumulate trail points
       const trail = trailsRef.current.get(missionId) || [];
       const lastPoint = trail[trail.length - 1];
@@ -236,6 +242,16 @@ export function MapView() {
 
     positions.forEach((pos, missionId) => {
       if (!activeDomains.has(pos.domain)) return;
+
+      // Guard against LLM hallucinations that output invalid MapBox coordinates
+      const isValidCoord = typeof pos.latitude === 'number' && !isNaN(pos.latitude) && pos.latitude >= -90 && pos.latitude <= 90 &&
+        typeof pos.longitude === 'number' && !isNaN(pos.longitude) && pos.longitude >= -180 && pos.longitude <= 180;
+
+      if (!isValidCoord) {
+        console.warn(`[MAP] Dropping invalid coordinate from stream -> ID: ${missionId}, Lat: ${pos.latitude}, Lng: ${pos.longitude}`);
+        return;
+      }
+
       activeIds.add(missionId);
 
       const color = DOMAIN_COLORS[pos.domain] || '#888';

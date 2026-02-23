@@ -1,7 +1,67 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useOverwatchStore } from '../store/overwatch-store';
+
+interface SpaceDependency {
+  id: string;
+  capability: string;
+  criticality: string;
+  allocatedTo: string | null;
+  status: string;
+}
+
+interface TimelineMission {
+  id: string;
+  callsign: string;
+  domain: string;
+  type: string;
+  status: string;
+  priority: number;
+  atoDay: number;
+  unitName: string;
+  spaceDependencies: SpaceDependency[];
+}
+
+interface TimelineData {
+  scenarioId: string;
+  missions: TimelineMission[];
+}
 
 export function GanttView() {
-  const [selectedTask, setSelectedTask] = useState<string | null>(null);
+  const activeScenarioId = useOverwatchStore((s) => s.activeScenarioId);
+  const [data, setData] = useState<TimelineData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!activeScenarioId) return;
+
+    let mounted = true;
+    const fetchTimeline = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/timeline/${activeScenarioId}`);
+        const json = await res.json();
+        if (!json.success) throw new Error(json.error);
+        if (mounted) setData(json.data);
+      } catch (err) {
+        if (mounted) setError(String(err));
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    fetchTimeline();
+    return () => { mounted = false; };
+  }, [activeScenarioId]);
+
+  const priorityGroups = [1, 2, 3, 4, 5].map(level => {
+    return {
+      level,
+      color: ['', '#ef4444', '#f97316', '#eab308', '#22c55e', '#6b7280'][level],
+      missions: data?.missions.filter(m => m.priority === level) || []
+    };
+  });
 
   return (
     <>
@@ -21,47 +81,101 @@ export function GanttView() {
 
       <div className="content-body" style={{ padding: '16px' }}>
         <div className="gantt-container" style={{ minHeight: 'calc(100vh - 120px)' }}>
-          {/* Gantt Header - Time Scale */}
-          <div className="gantt-header">
-            <div className="gantt-row" style={{ minHeight: '32px' }}>
-              <div className="gantt-label" style={{ fontWeight: 700, color: 'var(--text-bright)', fontSize: '11px' }}>
-                MISSION / CALLSIGN
-              </div>
-              <div className="gantt-bar-area" style={{ display: 'flex', alignItems: 'center', padding: '0 8px' }}>
-                <span className="mono text-xs text-muted">
-                  Timeline will populate when scenario data is loaded
-                </span>
-              </div>
-            </div>
-          </div>
 
-          {/* Empty State */}
-          <div className="empty-state" style={{ minHeight: '400px' }}>
-            <div className="empty-state-icon">📊</div>
-            <div className="empty-state-title">No mission data loaded</div>
-            <div className="empty-state-description">
-              Generate a scenario and start the simulation to see missions plotted on the Gantt timeline.
-              Missions are grouped by priority with color-coded bars, dependency arrows, and space coverage windows.
-            </div>
-            <button className="btn btn-primary" style={{ marginTop: '16px' }}>
-              Go to Scenario Setup →
-            </button>
-          </div>
+          {loading && <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>Loading timeline data...</div>}
+          {error && <div style={{ padding: '2rem', color: '#ef4444' }}>Error: {error}</div>}
 
-          {/* Placeholder priority groups */}
-          {[1, 2, 3, 4, 5].map((priority) => (
-            <div key={priority}>
-              <div className="gantt-priority-group">
-                <div className="gantt-priority-dot" style={{
-                  background: ['', '#ef4444', '#f97316', '#eab308', '#22c55e', '#6b7280'][priority],
-                }} />
-                <span style={{ color: ['', '#ef4444', '#f97316', '#eab308', '#22c55e', '#6b7280'][priority] }}>
-                  Priority {priority}
-                </span>
-                <span className="text-muted text-xs" style={{ marginLeft: 'auto' }}>0 missions</span>
+          {!loading && !error && data?.missions.length === 0 && (
+            <div className="empty-state" style={{ minHeight: '400px' }}>
+              <div className="empty-state-icon">📊</div>
+              <div className="empty-state-title">No mission data loaded</div>
+              <div className="empty-state-description">
+                Generate a scenario and start the simulation to see missions plotted on the Gantt timeline.
               </div>
             </div>
-          ))}
+          )}
+
+          {!loading && !error && (data?.missions.length || 0) > 0 && (
+            <>
+              <div className="gantt-header" style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', marginBottom: '8px', paddingBottom: '8px' }}>
+                <div className="gantt-label" style={{ width: '250px', flexShrink: 0, fontWeight: 700, color: 'var(--text-bright)', fontSize: '11px', paddingLeft: '8px' }}>
+                  MISSION / CALLSIGN
+                </div>
+                <div style={{ display: 'flex', flexGrow: 1, borderLeft: '1px solid var(--border-color)' }}>
+                  {[1, 2, 3, 4, 5].map(day => (
+                    <div key={day} style={{ flex: 1, textAlign: 'center', fontSize: '11px', color: 'var(--text-muted)', borderRight: '1px dashed var(--border-color)' }}>
+                      ATO DAY {day}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {priorityGroups.map((group) => (
+                <div key={group.level} style={{ marginBottom: '16px' }}>
+                  <div className="gantt-priority-group" style={{ display: 'flex', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '6px 8px', borderRadius: '4px', marginBottom: '4px' }}>
+                    <div className="gantt-priority-dot" style={{ width: '8px', height: '8px', borderRadius: '50%', background: group.color, marginRight: '8px' }} />
+                    <span style={{ color: group.color, fontWeight: 600, fontSize: '12px' }}>
+                      Priority {group.level}
+                    </span>
+                    <span className="text-muted text-xs" style={{ marginLeft: 'auto' }}>
+                      {group.missions.length} mission{group.missions.length !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+
+                  {group.missions.map(mission => (
+                    <div key={mission.id} style={{ display: 'flex', alignItems: 'center', padding: '4px 0', fontSize: '12px' }}>
+                      <div style={{ width: '250px', flexShrink: 0, paddingLeft: '24px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        <div style={{ color: 'var(--text-bright)' }}>{mission.callsign}</div>
+                        <div style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{mission.type} • {mission.domain}</div>
+                      </div>
+
+                      <div style={{ display: 'flex', flexGrow: 1, height: '28px', backgroundColor: 'rgba(255,255,255,0.01)', position: 'relative' }}>
+                        <div style={{
+                          position: 'absolute',
+                          left: `${(mission.atoDay - 1) * 20}%`,
+                          width: '20%',
+                          height: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: '0 4px'
+                        }}>
+                          <div style={{
+                            background: `${group.color}40`,
+                            border: `1px solid ${group.color}`,
+                            borderRadius: '4px',
+                            width: '100%',
+                            height: '20px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            padding: '0 6px',
+                            fontSize: '10px',
+                            color: 'var(--text-bright)',
+                            overflow: 'hidden',
+                            whiteSpace: 'nowrap',
+                            cursor: 'pointer'
+                          }}>
+                            {mission.status}
+                            {mission.spaceDependencies.length > 0 && (
+                              <span style={{ marginLeft: 'auto', background: 'var(--bg-dark)', padding: '2px 4px', borderRadius: '2px', fontSize: '9px' }}>
+                                {mission.spaceDependencies.length} SAT
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+
+                  {group.missions.length === 0 && (
+                    <div style={{ paddingLeft: '24px', fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic', margin: '4px 0' }}>
+                      No priority {group.level} missions.
+                    </div>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
+
         </div>
       </div>
     </>

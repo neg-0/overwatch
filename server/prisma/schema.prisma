@@ -236,8 +236,9 @@ model PlanningDocument {
   reviewFlags    Json?    // Items needing human review
   ingestedAt     DateTime?
 
-  priorities     PriorityEntry[]
-  taskingOrders  TaskingOrder[]
+  priorities      PriorityEntry[]
+  taskingOrders   TaskingOrder[]
+  scenarioInjects ScenarioInject[]
 
   @@map("planning_documents")
 }
@@ -670,10 +671,24 @@ model ScenarioInject {
   scenario    Scenario  @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
   triggerDay  Int       // ATO day number
   triggerHour Int       // Hour within day (0-23)
-  injectType  String    // FRICTION, INTEL, CRISIS, SPACE
+  injectType  String    // FRICTION, INTEL, CRISIS, SPACE (legacy) or INFORMATION, ACTION, DECISION_POINT, CONTINGENCY (doctrinal)
   title       String
   description String    @db.Text
-  impact      String    // Operational impact description
+  impact      String    // Operational impact / controller guidance
+
+  // CJCSM 3500.03F doctrine fields
+  serialNumber     String?  // Sequential: "001", "002", ...
+  mselLevel        String?  // STRAT_NAT, STRAT_THEATER, OPERATIONAL, TACTICAL
+  injectMode       String?  // RADIO, EMAIL, VERBAL, MSG_TRAFFIC, HANDOUT, CHAT
+  fromEntity       String?  // Originator (e.g., "EXCON SimCell", "INDOPACOM J2")
+  toEntity         String?  // Recipient (e.g., "JFACC", "CSG-5 OPS")
+  expectedResponse String?  @db.Text // What the training audience should do
+  objectiveTested  String?  // Linked exercise objective or UJTL task
+
+  // Ingestion traceability — links to source MSEL document
+  planningDocId    String?
+  planningDoc      PlanningDocument? @relation(fields: [planningDocId], references: [id])
+
   fired       Boolean   @default(false)
   firedAt     DateTime?
   createdAt   DateTime  @default(now())

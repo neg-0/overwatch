@@ -162,10 +162,11 @@ export async function refreshTLEsForScenario(scenarioId: string): Promise<number
   console.log(`[UDL] Refreshing TLEs for ${spaceAssets.length} space assets (epoch target: ${targetDate.toISOString()})`);
 
   let updated = 0;
+  let skippedNoNorad = 0;
 
   for (const asset of spaceAssets) {
     if (!asset.noradId) {
-      console.log(`[UDL]   ⏭  ${asset.name} — no NORAD ID, skipping`);
+      skippedNoNorad++;
       continue;
     }
 
@@ -202,6 +203,9 @@ export async function refreshTLEsForScenario(scenarioId: string): Promise<number
     }
   }
 
+  if (skippedNoNorad > 0) {
+    console.log(`[UDL]   ⏭  ${skippedNoNorad} assets skipped (no NORAD ID)`);
+  }
   console.log(`[UDL] TLE refresh complete: ${updated}/${spaceAssets.length} updated`);
   return updated;
 }

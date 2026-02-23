@@ -1,38 +1,75 @@
-You are generating MSEL (Master Scenario Event List) injects for a military simulation exercise.
+You are a senior Exercise Control Group (EXCON) planner creating a Master Scenario Events List (MSEL) per CJCSM 3500.03F for a joint military exercise.
 
 CONTEXT:
 - Theater: "INDOPACOM — Western Pacific"
 - Adversary: "People's Republic of China (PRC)"
-- Duration: 14 days
+- Exercise duration: 14 days (2026-03-01T00:00:00Z to 2026-03-15T00:00:00Z)
+- Campaign phases: Phase 0 (Day 1), Phase 1 (Days 2-3), Phase 2 (Days 4-7), Phase 3 (Days 8-11), Phase 4 (Days 12-14)
 
 ORBAT:
-Standard INDOPACOM force package
+Standard INDOPACOM force package: 2x fighter wings (F-35A, F-16C), 1x carrier strike group, 1x destroyer squadron, 1x submarine squadron
 
 SPACE ASSETS:
-GPS III, WGS, SBIRS constellation
+GPS III (6 SVs), WGS (3 SVs), AEHF (2 SVs), MUOS (2 SVs), SBIRS GEO (2 SVs)
 
-Generate 30 MSEL injects spread across the scenario timeline.
-Each inject should be realistic friction that tests decision-making.
+Generate a complete MSEL document in official EXCON format.
 
-Categories:
-- FRICTION: equipment failures, weather delays, logistics problems, maintenance issues
-- INTEL: new intelligence reports, adversary repositioning, SIGINT intercepts, HUMINT tips
-- CRISIS: escalation events, civilian incidents, political constraints, ROE changes
-- SPACE: GPS degradation/jamming, SATCOM interference, debris threats, cyber attacks on space systems
+FORMAT REQUIREMENTS (per CJCSM 3500.03F):
 
-Distribute injects across days with higher density in Phase 2-3 (the most intense period).
+1. Start with a HEADER BLOCK:
+   - Document title: "MASTER SCENARIO EVENTS LIST (MSEL)"
+   - Exercise/Operation name
+   - EXCON issuing authority
+   - Classification
+   - Effective period
+   - References (CJCSM 3500.03F, JP 3-0, JP 5-0)
 
-Return as JSON array:
-[
-  {
-    "triggerDay": 2,
-    "triggerHour": 14,
-    "injectType": "FRICTION",
-    "title": "F-35A Flight Control Software Fault",
-    "description": "388 FW reports 4 aircraft grounded due to flight control software fault requiring TCTO patch. Expected 8-hour repair window.",
-    "impact": "Reduces available DCA sorties by 16% for Day 2 afternoon cycle"
-  }
-]
+2. Then a PIPE-DELIMITED TABLE with these exact column headers:
+SERIAL | DTG | LEVEL | TYPE | MODE | FROM | TO | MESSAGE | EXPECTED RESPONSE | OBJECTIVE | NOTES
 
-Generate diverse, realistic injects. Include at least 2 SPACE injects.
-Return ONLY valid JSON array, no markdown fences, no explanation text.
+Column definitions:
+- SERIAL: Sequential number (001, 002, 003...)
+- DTG: Date-Time Group in military format (DDHHMMz MON YY, e.g., "011000Z MAR 26")
+- LEVEL: MSEL level per CJCSM 3500.03F:
+    STR-N = Strategic National
+    STR-T = Strategic Theater
+    OPR = Operational
+    TAC = Tactical
+- TYPE: Event type:
+    INFORMATION = Intel/SIGINT/HUMINT reports, situational updates
+    ACTION = Equipment failures, weather events, logistics friction
+    DECISION_POINT = Escalation events requiring commander decision
+    CONTINGENCY = Political constraints, ROE changes, civilian incidents
+- MODE: How the inject is delivered to the training audience:
+    MSG_TRAFFIC = Message traffic / operational reporting
+    RADIO = Radio call / voice comms
+    EMAIL = Email / digital message
+    VERBAL = In-person verbal briefing
+    HANDOUT = Written handout / hard copy
+    CHAT = Chat / instant messaging
+- FROM: Originator entity (e.g., "EXCON SimCell", "INDOPACOM J2", "613 AOC", "CSG-5 OPS")
+- TO: Recipient entity (e.g., "JFACC", "JFLCC", "JSpOC", "CFMCC", "JIATF CDR")
+- MESSAGE: The actual inject message as it would be delivered (realistic operational language)
+- EXPECTED RESPONSE: What the training audience should do in response
+- OBJECTIVE: Exercise objective or UJTL task being tested (e.g., "OP 5.1 - Air Superiority", "ST 3.2 - C2")
+- NOTES: Controller guidance, timing flexibility, evaluation criteria
+
+3. Generate 30 injects distributed across the 14-day timeline:
+   - Phase 0 (Day 1): 2-3 injects (shape/posture)
+   - Phase 1 (Days 2-3): 4-5 injects (deterrence)
+   - Phase 2 (Days 4-7): 10-12 injects (highest intensity)
+   - Phase 3 (Days 8-11): 8-10 injects (dominate)
+   - Phase 4 (Days 12-14): 3-5 injects (stabilize)
+
+4. Include these inject categories with roughly this distribution:
+   - INFORMATION: ~30% (SIGINT, HUMINT, ISR imagery, open-source intel)
+   - ACTION: ~30% (equipment failures, weather, logistics, maintenance)
+   - DECISION_POINT: ~20% (escalation events requiring commander decision)
+   - CONTINGENCY: ~20% (political constraints, ROE changes, civilian incidents)
+   - At least 4 must involve space systems (GPS, SATCOM, OPIR, space debris, cyber)
+
+5. Include multiple MSEL levels (STR-T, OPR, TAC).
+
+6. Use realistic military terminology, unit designations, frequency references, and grid coordinates.
+
+Return ONLY the MSEL document text. No JSON. No markdown fences. No explanation text before or after.

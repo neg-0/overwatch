@@ -14,11 +14,13 @@ const { mockCreate, mockPrisma, mockBroadcastProgress, mockBroadcastArtifact } =
       create: vi.fn().mockResolvedValue({ id: 'strat-001', title: 'Test Strategy', content: 'Test content' }),
       findMany: vi.fn().mockResolvedValue([]),
       findFirst: vi.fn().mockResolvedValue(null),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     planningDocument: {
       create: vi.fn().mockResolvedValue({ id: 'plan-001', title: 'Test Planning Doc', content: 'Test content' }),
       findMany: vi.fn().mockResolvedValue([]),
       findFirst: vi.fn().mockResolvedValue(null),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     priorityEntry: {
       create: vi.fn().mockResolvedValue({ id: 'prio-001' }),

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { DocumentReaderModal } from '../components/DocumentReaderModal';
 import { GenerationProgressModal } from '../components/GenerationProgressModal';
 import { useOverwatchStore } from '../store/overwatch-store';
@@ -50,6 +51,10 @@ export function ScenarioSetup() {
     resumeScenarioGeneration,
     activeScenarioId,
     generationProgress,
+    dbConnected,
+    fetchHealth,
+    importScenario,
+    setActiveScenario,
   } = useOverwatchStore();
 
   const [generating, setGenerating] = useState(false);
@@ -58,6 +63,8 @@ export function ScenarioSetup() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showModelPanel, setShowModelPanel] = useState(false);
   const [showProgressModal, setShowProgressModal] = useState(false);
+  const [readyMadeScenarios, setReadyMadeScenarios] = useState<any[]>([]);
+  const [regenerateFromStep, setRegenerateFromStep] = useState<string | undefined>(undefined);
   const [selectedDoc, setSelectedDoc] = useState<{ title: string; docType: string; content: string; effectiveDate?: string } | null>(null);
 
   const [config, setConfig] = useState<ScenarioConfig>({
@@ -82,6 +89,18 @@ export function ScenarioSetup() {
     const detail = await fetchScenarioDetail(id);
     if (detail) setScenarioDetail(detail);
   }, [fetchScenarioDetail]);
+
+  useEffect(() => {
+    fetchHealth();
+
+    // Fetch ready-made scenarios from local disk
+    fetch('/api/scenarios/ready-made')
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) setReadyMadeScenarios(data.data);
+      })
+      .catch(err => console.error('Failed to fetch ready-made scenarios:', err));
+  }, [fetchHealth]);
 
   useEffect(() => {
     if (activeScenarioId) {
@@ -130,6 +149,28 @@ export function ScenarioSetup() {
     }
   };
 
+  const handleLoadReadyMade = async (filename: string) => {
+    try {
+      setGenerating(true);
+      const res = await fetch(`/api/scenarios/ready-made/${encodeURIComponent(filename)}/load`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (data.success && data.data?.id) {
+        setActiveScenario(data.data.id);
+        // setActiveScenario joins the WS room + sets activeScenarioId
+        // The activeScenarioId effect will trigger loadScenarioDetail
+      } else {
+        alert(data.error || 'Failed to load ready-made scenario');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Failed to load ready-made scenario');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   const handleResume = async () => {
     const scenarioId = result?.data?.id || activeScenarioId;
     if (!scenarioId) return;
@@ -146,14 +187,39 @@ export function ScenarioSetup() {
     }
   };
 
+  // Backend step names in pipeline order (mirrors server GENERATION_STEPS)
+  const PIPELINE_STEPS = [
+    'Strategic Context', 'Campaign Plan', 'Theater Bases',
+    'Joint Force ORBAT', 'Space Constellation', 'Planning Documents',
+    'MAAP', 'MSEL Injects',
+  ];
+
   const handleRegenerateStep = async (stepName: string) => {
     const scenarioId = result?.data?.id || activeScenarioId;
     if (!scenarioId) return;
 
+    // Build list of downstream steps that will be destroyed
+    const stepIdx = PIPELINE_STEPS.indexOf(stepName);
+    const downstreamSteps = PIPELINE_STEPS.slice(stepIdx);
+
+    // Show cascade warning
+    const confirmed = window.confirm(
+      `⚠️ Cascading Regeneration Warning\n\n` +
+      `Regenerating "${stepName}" will also regenerate all downstream artifacts:\n\n` +
+      downstreamSteps.map((s, i) => `  ${i === 0 ? '➡️' : '  →'} ${s}`).join('\n') +
+      `\n\nThis action cannot be undone. Existing data for these steps will be permanently replaced.\n\nContinue?`
+    );
+
+    if (!confirmed) return;
+
     try {
       setRegeneratingSteps(prev => ({ ...prev, [stepName]: true }));
+      setRegenerateFromStep(stepName);
+      setShowProgressModal(true);
+      useOverwatchStore.setState({ generationProgress: null, artifactResults: [] });
+
       const encoded = encodeURIComponent(stepName);
-      const res = await fetch(`http://localhost:3001/api/scenarios/${scenarioId}/steps/${encoded}/regenerate`, {
+      const res = await fetch(`/api/scenarios/${scenarioId}/steps/${encoded}/regenerate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ modelOverrides })
@@ -169,9 +235,14 @@ export function ScenarioSetup() {
   const toggleExpand = (section: string) =>
     setExpanded(prev => prev === section ? null : section);
 
-  const isComplete = generationProgress?.status === 'COMPLETE' || scenarioDetail?.generationStatus === 'COMPLETE';
-  const isFailed = generationProgress?.status === 'FAILED' || scenarioDetail?.generationStatus === 'FAILED';
   const isGenerating = generationProgress?.status === 'GENERATING' || generating;
+  const hasLoadedArtifacts = scenarioDetail && (
+    (scenarioDetail.strategies?.length > 0) ||
+    (scenarioDetail.planningDocs?.length > 0) ||
+    (scenarioDetail.units?.length > 0)
+  );
+  const isComplete = generationProgress?.status === 'COMPLETE' || scenarioDetail?.generationStatus === 'COMPLETE' || (!isGenerating && hasLoadedArtifacts);
+  const isFailed = generationProgress?.status === 'FAILED' || scenarioDetail?.generationStatus === 'FAILED';
 
   return (
     <>
@@ -181,6 +252,84 @@ export function ScenarioSetup() {
       </div>
 
       <div className="content-body">
+        {dbConnected === false && (
+          <div style={{
+            background: 'var(--bg-warning)',
+            color: 'var(--accent-warning)',
+            padding: '12px 16px',
+            borderRadius: '6px',
+            marginBottom: '20px',
+            border: '1px solid rgba(234, 179, 8, 0.2)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px'
+          }}>
+            <span style={{ fontSize: '20px' }}>⚠️</span>
+            <div style={{ flex: 1 }}>
+              <strong style={{ display: 'block', fontSize: '14px' }}>Database Offline</strong>
+              <span style={{ fontSize: '13px', opacity: 0.9 }}>
+                Scenarios generated while offline are stored in memory and will be lost on server restart.
+                Use the Export Scenario feature to save your work.
+              </span>
+            </div>
+          </div>
+        )}
+
+        {readyMadeScenarios.length > 0 && !activeScenarioId && !generating && (
+          <div className="card" style={{ marginBottom: '20px' }}>
+            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 className="card-title">Ready-Made Scenarios</h3>
+              <span className="badge badge-warning" style={{ fontSize: '10px' }}>Local Filesystem</span>
+            </div>
+            <div className="card-body">
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '12px' }}>
+                {readyMadeScenarios.map(s => (
+                  <div key={s.filename} style={{
+                    padding: '12px 16px',
+                    background: 'var(--bg-tertiary)',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-subtle)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px',
+                    transition: 'border-color 0.2s, transform 0.2s',
+                  }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = 'var(--accent-primary)';
+                      e.currentTarget.style.transform = 'translateY(-2px)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = 'var(--border-subtle)';
+                      e.currentTarget.style.transform = 'none';
+                    }}>
+                    <div style={{ fontWeight: 600, fontSize: '15px', textTransform: 'capitalize', color: 'var(--text-primary)' }}>
+                      {s.name}
+                    </div>
+                    <button
+                      className="btn"
+                      style={{
+                        padding: '8px',
+                        fontSize: '12px',
+                        marginTop: 'auto',
+                        background: 'var(--accent-primary)',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontWeight: 600
+                      }}
+                      onClick={() => handleLoadReadyMade(s.filename)}
+                      disabled={generating}
+                    >
+                      {generating ? 'Loading...' : '📥 Load Scenario'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
           {/* ─── Configuration Form ─────────────────────────────────── */}
           <div className="card">
@@ -296,13 +445,25 @@ export function ScenarioSetup() {
 
           {/* ─── Right Panel: Progress / Artifacts ─────────────────────── */}
           <div className="card">
-            <div className="card-header">
-              <h3 className="card-title">
-                {isComplete ? 'Generated Artifacts' : isGenerating ? 'Generation Progress' : scenarioDetail ? 'Scenario Artifacts' : 'What Will Be Generated'}
-              </h3>
-              {isComplete && <span className="badge badge-operational">READY</span>}
-              {isFailed && <span className="badge badge-danger">FAILED</span>}
-              {isGenerating && <span className="badge badge-warning">GENERATING</span>}
+            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <h3 className="card-title">
+                  {isComplete ? 'Generated Artifacts' : isGenerating ? 'Generation Progress' : scenarioDetail ? 'Scenario Artifacts' : 'What Will Be Generated'}
+                </h3>
+                {isComplete && <span className="badge badge-operational">READY</span>}
+                {isFailed && <span className="badge badge-danger">FAILED</span>}
+                {isGenerating && <span className="badge badge-warning">GENERATING</span>}
+              </div>
+
+              {scenarioDetail && (
+                <a
+                  href={`/api/scenarios/${scenarioDetail.id}/export`}
+                  className="btn"
+                  style={{ fontSize: '12px', padding: '6px 12px', background: 'var(--bg-tertiary)', textDecoration: 'none' }}
+                >
+                  📥 Export ZIP
+                </a>
+              )}
             </div>
             <div className="card-body">
               {/* ─── Live Progress Bar ────────────────────────────────── */}
@@ -380,6 +541,8 @@ export function ScenarioSetup() {
                     count={scenarioDetail.strategies?.length || 0}
                     expanded={expanded === 'strategies'}
                     onToggle={() => toggleExpand('strategies')}
+                    onRegenerate={() => handleRegenerateStep('Strategic Context')}
+                    isRegenerating={regeneratingSteps['Strategic Context']}
                   >
                     {scenarioDetail.strategies?.map((s: any, i: number) => (
                       <div
@@ -407,6 +570,8 @@ export function ScenarioSetup() {
                     count={scenarioDetail.planningDocs?.length || 0}
                     expanded={expanded === 'planning'}
                     onToggle={() => toggleExpand('planning')}
+                    onRegenerate={() => handleRegenerateStep('Planning Documents')}
+                    isRegenerating={regeneratingSteps['Planning Documents']}
                   >
                     {scenarioDetail.planningDocs?.map((doc: any, i: number) => (
                       <div
@@ -447,15 +612,17 @@ export function ScenarioSetup() {
                     count={scenarioDetail.units?.length || 0}
                     expanded={expanded === 'units'}
                     onToggle={() => toggleExpand('units')}
+                    onRegenerate={() => handleRegenerateStep('Joint Force ORBAT')}
+                    isRegenerating={regeneratingSteps['Joint Force ORBAT']}
                   >
                     {scenarioDetail.units?.map((u: any, i: number) => (
                       <div key={i} style={{ ...artifactDetailStyle, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
-                          <span style={{ fontWeight: 600, fontSize: '13px' }}>{u.name}</span>
-                          <span style={{ marginLeft: '8px', fontSize: '11px', color: 'var(--text-muted)' }}>{u.unitType}</span>
+                          <span style={{ fontWeight: 600, fontSize: '13px' }}>{u.unitName}</span>
+                          <span style={{ marginLeft: '8px', fontSize: '11px', color: 'var(--text-muted)' }}>{u.unitDesignation}</span>
                         </div>
                         <div style={{ display: 'flex', gap: '6px' }}>
-                          <span className={`badge badge-${u.side === 'BLUE' ? 'primary' : 'danger'}`}>{u.side}</span>
+                          <span className={`badge badge-${u.affiliation === 'FRIENDLY' ? 'primary' : 'danger'}`}>{u.affiliation}</span>
                           <span className="badge badge-inactive">{u.assets?.length || 0} assets</span>
                         </div>
                       </div>
@@ -467,6 +634,8 @@ export function ScenarioSetup() {
                     count={scenarioDetail.spaceAssets?.length || 0}
                     expanded={expanded === 'space'}
                     onToggle={() => toggleExpand('space')}
+                    onRegenerate={() => handleRegenerateStep('Space Constellation')}
+                    isRegenerating={regeneratingSteps['Space Constellation']}
                   >
                     {scenarioDetail.spaceAssets?.map((sa: any, i: number) => (
                       <div key={i} style={{ ...artifactDetailStyle, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -479,39 +648,85 @@ export function ScenarioSetup() {
                     ))}
                   </ArtifactSection>
 
-                  {(scenarioDetail.scenarioInjects?.length > 0) && (
-                    <ArtifactSection
-                      icon="💥" title="MSEL Injects"
-                      count={scenarioDetail.scenarioInjects?.length || 0}
-                      expanded={expanded === 'injects'}
-                      onToggle={() => toggleExpand('injects')}
-                      onRegenerate={() => handleRegenerateStep('MSEL Injects')}
-                      isRegenerating={regeneratingSteps['MSEL Injects']}
-                    >
-                      {scenarioDetail.scenarioInjects?.slice(0, 20).map((inj: any, i: number) => (
-                        <div key={i} style={{ ...artifactDetailStyle, display: 'flex', justifyContent: 'space-between' }}>
-                          <span style={{ fontSize: '12px' }}>{inj.title || inj.description?.substring(0, 60)}</span>
-                          <span className="badge badge-warning" style={{ fontSize: '10px' }}>{inj.severity || 'MOD'}</span>
-                        </div>
-                      ))}
-                    </ArtifactSection>
-                  )}
+                  <ArtifactSection
+                    icon="💥" title="MSEL Injects"
+                    count={scenarioDetail.scenarioInjects?.length || 0}
+                    expanded={expanded === 'injects'}
+                    onToggle={() => toggleExpand('injects')}
+                    onRegenerate={() => handleRegenerateStep('MSEL Injects')}
+                    isRegenerating={regeneratingSteps['MSEL Injects']}
+                  >
+                    {scenarioDetail.scenarioInjects?.slice(0, 20).map((inj: any, i: number) => (
+                      <div key={i} style={{ ...artifactDetailStyle, display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: '12px' }}>{inj.title || inj.description?.substring(0, 60)}</span>
+                        <span className="badge badge-warning" style={{ fontSize: '10px' }}>{inj.injectType || 'FRICTION'}</span>
+                      </div>
+                    ))}
+                  </ArtifactSection>
 
-                  {(scenarioDetail.taskingOrders?.length > 0) && (
-                    <ArtifactSection
-                      icon="📋" title="Tasking Orders"
-                      count={scenarioDetail.taskingOrders?.length || 0}
-                      expanded={expanded === 'orders'}
-                      onToggle={() => toggleExpand('orders')}
-                    >
-                      {scenarioDetail.taskingOrders?.slice(0, 20).map((o: any, i: number) => (
-                        <div key={i} style={{ ...artifactDetailStyle, display: 'flex', justifyContent: 'space-between' }}>
-                          <span style={{ fontSize: '12px' }}>{o.orderType} — Day {o.atoCycleDay}</span>
-                          <span className="badge badge-primary" style={{ fontSize: '10px' }}>{o.missions?.length || 0} missions</span>
+                  <ArtifactSection
+                    icon="📋" title="Tasking Orders"
+                    count={scenarioDetail.taskingOrders?.length || 0}
+                    expanded={expanded === 'orders'}
+                    onToggle={() => toggleExpand('orders')}
+                    onRegenerate={() => handleRegenerateStep('MAAP')}
+                    isRegenerating={regeneratingSteps['MAAP']}
+                  >
+                    {scenarioDetail.taskingOrders?.slice(0, 20).map((o: any, i: number) => (
+                      <div key={i} style={{ ...artifactDetailStyle, display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: '12px' }}>{o.orderType} — Day {o.atoDayNumber}</span>
+                        <span className="badge badge-primary" style={{ fontSize: '10px' }}>{o.missionPackages?.flatMap((mp: any) => mp.missions)?.length || 0} missions</span>
+                      </div>
+                    ))}
+                  </ArtifactSection>
+
+                  {/* ─── Next Steps CTA ─── */}
+                  <div style={{
+                    marginTop: '16px', padding: '16px',
+                    background: 'linear-gradient(135deg, rgba(0, 212, 255, 0.08), rgba(168, 85, 247, 0.08))',
+                    border: '1px solid rgba(0, 212, 255, 0.2)',
+                    borderRadius: '10px',
+                  }}>
+                    <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-bright)', marginBottom: '12px' }}>
+                      ✅ Scenario Generated — Next Steps
+                    </div>
+                    <div style={{ display: 'flex', gap: '12px' }}>
+                      <Link
+                        to="/intake"
+                        style={{
+                          flex: 1, display: 'flex', alignItems: 'center', gap: '8px',
+                          padding: '10px 16px', borderRadius: '8px',
+                          background: 'rgba(0, 212, 255, 0.12)', border: '1px solid rgba(0, 212, 255, 0.25)',
+                          color: 'var(--accent-primary)', textDecoration: 'none', fontWeight: 600, fontSize: '13px',
+                        }}
+                      >
+                        <span style={{ fontSize: '18px' }}>📥</span>
+                        <div>
+                          <div>Ingest Documents</div>
+                          <div style={{ fontSize: '11px', fontWeight: 400, color: 'var(--text-muted)', marginTop: '2px' }}>
+                            Extract missions, injects, & priorities
+                          </div>
                         </div>
-                      ))}
-                    </ArtifactSection>
-                  )}
+                      </Link>
+                      <Link
+                        to="/"
+                        style={{
+                          flex: 1, display: 'flex', alignItems: 'center', gap: '8px',
+                          padding: '10px 16px', borderRadius: '8px',
+                          background: 'rgba(168, 85, 247, 0.12)', border: '1px solid rgba(168, 85, 247, 0.25)',
+                          color: '#c084fc', textDecoration: 'none', fontWeight: 600, fontSize: '13px',
+                        }}
+                      >
+                        <span style={{ fontSize: '18px' }}>▶</span>
+                        <div>
+                          <div>Go to Dashboard</div>
+                          <div style={{ fontSize: '11px', fontWeight: 400, color: 'var(--text-muted)', marginTop: '2px' }}>
+                            Start the simulation
+                          </div>
+                        </div>
+                      </Link>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 /* ─── Static Preview (before generation / during generation) */
@@ -558,6 +773,39 @@ export function ScenarioSetup() {
             {isGenerating ? '⏳ Generating Scenario...' : '⚡ Generate Scenario with AI'}
           </button>
 
+          <label
+            className="btn"
+            style={{
+              cursor: 'pointer',
+              padding: '14px 24px',
+              fontSize: '15px',
+              fontWeight: 600,
+              background: 'var(--bg-tertiary)',
+              border: '1px solid var(--border-subtle)',
+              opacity: isGenerating ? 0.6 : 1,
+            }}
+          >
+            📤 Import ZIP
+            <input
+              type="file"
+              accept=".zip"
+              style={{ display: 'none' }}
+              disabled={isGenerating}
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  setGenerating(true);
+                  const res = await importScenario(file);
+                  setGenerating(false);
+                  if (res.success && res.data?.id) {
+                    useOverwatchStore.getState().setActiveScenario(res.data.id);
+                  }
+                  e.target.value = ''; // reset
+                }
+              }}
+            />
+          </label>
+
           {isFailed && (
             <button
               className="btn btn-primary"
@@ -596,13 +844,16 @@ export function ScenarioSetup() {
       </div>
 
       <GenerationProgressModal
-        isOpen={showProgressModal}
+        open={showProgressModal}
         onClose={() => {
           setShowProgressModal(false);
+          setRegenerateFromStep(undefined);
+          setRegeneratingSteps({});
           // Refresh scenario detail when modal closes after completion
           const scenarioId = result?.data?.id || activeScenarioId;
           if (scenarioId) loadScenarioDetail(scenarioId);
         }}
+        resumeFromStep={regenerateFromStep}
       />
 
       {selectedDoc && (
