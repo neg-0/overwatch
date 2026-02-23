@@ -3,6 +3,13 @@ import OpenAI from 'openai';
 import type { Server } from 'socket.io';
 import { config } from '../config.js';
 import prisma from '../db/prisma-client.js';
+import {
+  CLASSIFY_SCHEMA,
+  NORMALIZE_MSEL_SCHEMA,
+  NORMALIZE_ORDER_SCHEMA,
+  NORMALIZE_PLANNING_SCHEMA,
+  NORMALIZE_STRATEGY_SCHEMA,
+} from './llm-schemas.js';
 
 // ─── OpenAI Client ───────────────────────────────────────────────────────────
 
@@ -216,7 +223,7 @@ export async function classifyDocument(rawText: string, sourceHint?: string): Pr
     messages: [{ role: 'user', content: CLASSIFY_PROMPT + hint + truncatedText }],
     reasoning_effort: 'low',
     max_completion_tokens: 4000,
-    response_format: { type: 'json_object' },
+    response_format: { type: 'json_schema' as const, json_schema: CLASSIFY_SCHEMA },
   });
 
   const content = response.choices[0]?.message?.content;
@@ -464,7 +471,16 @@ export async function normalizeDocument(
     messages: [{ role: 'user', content: prompt + rawText }],
     reasoning_effort: 'low',
     max_completion_tokens: 16000,
-    response_format: { type: 'json_object' },
+    response_format: {
+      type: 'json_schema' as const,
+      json_schema: classification.hierarchyLevel === 'STRATEGY'
+        ? NORMALIZE_STRATEGY_SCHEMA
+        : classification.hierarchyLevel === 'PLANNING'
+          ? NORMALIZE_PLANNING_SCHEMA
+          : classification.hierarchyLevel === 'ORDER'
+            ? NORMALIZE_ORDER_SCHEMA
+            : NORMALIZE_MSEL_SCHEMA,
+    },
   });
 
   const content = response.choices[0]?.message?.content;

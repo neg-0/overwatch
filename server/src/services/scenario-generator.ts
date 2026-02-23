@@ -4,6 +4,7 @@ import { v4 as uuid } from 'uuid';
 import { config } from '../config.js';
 import prisma from '../db/prisma-client.js';
 import { broadcastGenerationProgress } from '../websocket/ws-server.js';
+import { ORDER_GENERATOR_SCHEMA } from './llm-schemas.js';
 // NOTE: ingestDocument is no longer called during generation (POC #1 decoupling).
 // The ingest pipeline runs separately — generator produces text only.
 import { callLLMWithRetry, logGenerationAttempt } from './generation-logger.js';
@@ -1380,7 +1381,7 @@ async function generateOrder(
       model: getModel('midRange', modelOverride),
       messages: [{ role: 'user', content: prompt }],
       reasoning_effort: 'medium',
-      response_format: { type: 'json_object' },
+      response_format: { type: 'json_schema' as const, json_schema: ORDER_GENERATOR_SCHEMA },
     });
 
     const rawJson = response.choices[0]?.message?.content || '{}';
