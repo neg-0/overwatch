@@ -1321,6 +1321,43 @@ export async function generateDayOrders(scenarioId: string, atoDay: number, mode
   }, planningDocId, modelOverride);
 }
 
+// ─── Enum normalizers: LLM output → Prisma enum ─────────────────────
+
+const VALID_SUPPORT_TYPES = ['TANKER', 'SEAD', 'ISR', 'EW', 'ESCORT', 'CAP'] as const;
+type SupportTypeEnum = typeof VALID_SUPPORT_TYPES[number];
+
+function normalizeSupportType(raw: string | undefined): SupportTypeEnum {
+  if (!raw) return 'ISR';
+  const upper = raw.toUpperCase().replace(/[^A-Z]/g, '');
+  // Direct match
+  if (VALID_SUPPORT_TYPES.includes(upper as any)) return upper as SupportTypeEnum;
+  // Fuzzy mapping
+  if (upper.includes('SEAD') || upper.includes('SUPPRESS')) return 'SEAD';
+  if (upper.includes('EW') || upper.includes('ELINT') || upper.includes('ESM') || upper.includes('JAMM')) return 'EW';
+  if (upper.includes('ESCORT') || upper.includes('DCA') || upper.includes('FIGHTER')) return 'ESCORT';
+  if (upper.includes('CAP') || upper.includes('COMBAT')) return 'CAP';
+  if (upper.includes('TANK') || upper.includes('REFUEL') || upper.includes('AAR')) return 'TANKER';
+  if (upper.includes('ISR') || upper.includes('RECON') || upper.includes('SURV') || upper.includes('C2') || upper.includes('AWACS')) return 'ISR';
+  return 'ISR'; // safe default
+}
+
+const VALID_WINDOW_TYPES = ['TOT', 'ONSTA', 'OFFSTA', 'REFUEL', 'COVERAGE', 'SUPPRESS', 'TRANSIT'] as const;
+type TimeWindowEnum = typeof VALID_WINDOW_TYPES[number];
+
+function normalizeWindowType(raw: string | undefined): TimeWindowEnum {
+  if (!raw) return 'TOT';
+  const upper = raw.toUpperCase().replace(/[^A-Z]/g, '');
+  if (VALID_WINDOW_TYPES.includes(upper as any)) return upper as TimeWindowEnum;
+  // Fuzzy mapping
+  if (upper.includes('ONSTA') || upper.includes('STATION') || upper.includes('ORBIT')) return 'ONSTA';
+  if (upper.includes('OFFSTA')) return 'OFFSTA';
+  if (upper.includes('REFUEL') || upper.includes('TANK') || upper.includes('AAR')) return 'REFUEL';
+  if (upper.includes('COVER') || upper.includes('CAP')) return 'COVERAGE';
+  if (upper.includes('SUPPRESS') || upper.includes('SEAD')) return 'SUPPRESS';
+  if (upper.includes('TRANSIT') || upper.includes('FERRY') || upper.includes('INGRESS') || upper.includes('EGRESS')) return 'TRANSIT';
+  return 'TOT'; // safe default
+}
+
 async function generateOrder(
   scenarioId: string,
   orderType: 'ATO' | 'MTO' | 'STO',
@@ -1428,7 +1465,7 @@ async function generateOrder(
                 await prisma.timeWindow.create({
                   data: {
                     missionId: dbMission.id,
-                    windowType: tw.windowType || 'TOT',
+                    windowType: normalizeWindowType(tw.windowType),
                     startTime: twStart,
                     endTime: twEnd,
                   },
@@ -1462,7 +1499,7 @@ async function generateOrder(
                 await prisma.supportRequirement.create({
                   data: {
                     missionId: dbMission.id,
-                    supportType: req.supportType || 'ISR',
+                    supportType: normalizeSupportType(req.supportType),
                     details: req.details,
                   },
                 });
