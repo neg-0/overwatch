@@ -72,11 +72,11 @@ describe('Knowledge Graph API', () => {
       expect(missionNodes[0].label).toContain('TEST 01');
     });
 
-    it('creates CONTAINS edges from orders to missions', async () => {
+    it('creates ASSIGNS_MISSION edges from orders to missions', async () => {
       const res = await fetch(`${app.baseUrl}/api/knowledge-graph/${seed.scenarioId}`);
       const body: any = await res.json();
 
-      const containsEdges = body.data.edges.filter((e: any) => e.relationship === 'CONTAINS');
+      const containsEdges = body.data.edges.filter((e: any) => e.relationship === 'ASSIGNS_MISSION');
       expect(containsEdges.length).toBeGreaterThanOrEqual(1);
     });
 

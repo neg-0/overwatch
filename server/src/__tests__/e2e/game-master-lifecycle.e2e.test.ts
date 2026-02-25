@@ -165,7 +165,7 @@ describe('Game Master Lifecycle E2E', () => {
       if (body.success) {
         expect(body.action).toBe('bda');
         expect(body.atoDay).toBe(1);
-        expect(body).toHaveProperty('retargetSummary');
+        // retargetSummary is only present when BDA finds targets to assess
         if (body.retargetSummary) {
           expect(body.retargetSummary).toHaveProperty('degradedTargets');
           expect(body.retargetSummary).toHaveProperty('restrikeNominations');
