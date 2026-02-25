@@ -31,6 +31,7 @@ export async function cleanDatabase(): Promise<void> {
   const prisma = getTestPrisma();
   // Delete in strict dependency order — children before parents
   await prisma.ingestLog.deleteMany();
+  await prisma.simEvent.deleteMany();
   await prisma.positionUpdate.deleteMany();
   await prisma.spaceCoverageWindow.deleteMany();
   await prisma.spaceAllocation.deleteMany();

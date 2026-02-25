@@ -84,13 +84,20 @@ scenarioRoutes.post('/ready-made/:filename/load', async (req, res) => {
 
     const data = JSON.parse(entry.getData().toString('utf8'));
 
-    // Quick and dirty flat insert, mimicking the /import route.
-    const { strategies, planningDocs, units, spaceAssets, scenarioInjects, taskingOrders, _count, ...core } = data;
+    // Use the same import logic as the /import route
+    const {
+      strategies, planningDocs, units, spaceAssets, scenarioInjects, taskingOrders,
+      simEvents, leadershipDecisions, ingestLogs,
+      _count, ...core
+    } = data;
 
     const existing = await prisma.scenario.findUnique({ where: { id: core.id } });
     if (existing) {
       // Wipe existing relations before re-importing to prevent duplicates
       await prisma.scenarioInject.deleteMany({ where: { scenarioId: core.id } });
+      await prisma.simEvent.deleteMany({ where: { scenarioId: core.id } });
+      await prisma.leadershipDecision.deleteMany({ where: { scenarioId: core.id } });
+      await prisma.ingestLog.deleteMany({ where: { scenarioId: core.id } });
       await prisma.spaceAsset.deleteMany({ where: { scenarioId: core.id } });
       await prisma.asset.deleteMany({ where: { unit: { scenarioId: core.id } } });
       await prisma.unit.deleteMany({ where: { scenarioId: core.id } });
@@ -109,18 +116,19 @@ scenarioRoutes.post('/ready-made/:filename/load', async (req, res) => {
 
     // Hydrate all relations (idempotent: skip if already present)
     for (const s of (strategies || [])) {
-      const exists = await prisma.strategyDocument.findUnique({ where: { id: s.id } });
-      if (!exists) await prisma.strategyDocument.create({ data: s });
+      const { scenario: _s, priorities: _p, ...sCore } = s;
+      const exists = await prisma.strategyDocument.findUnique({ where: { id: sCore.id } });
+      if (!exists) await prisma.strategyDocument.create({ data: sCore });
     }
     for (const p of (planningDocs || [])) {
-      const exists = await prisma.planningDocument.findUnique({ where: { id: p.id } });
-      if (!exists) await prisma.planningDocument.create({ data: p });
+      const { scenario: _s, priorities: _p, ...pCore } = p;
+      const exists = await prisma.planningDocument.findUnique({ where: { id: pCore.id } });
+      if (!exists) await prisma.planningDocument.create({ data: pCore });
     }
     for (const u of (units || [])) {
       const { assets, base, scenario, ...unitCore } = u;
       const exists = await prisma.unit.findUnique({ where: { id: unitCore.id } });
       if (!exists) {
-        // Null out baseId if the referenced base doesn't exist
         if (unitCore.baseId) {
           const baseExists = await prisma.base.findUnique({ where: { id: unitCore.baseId } });
           if (!baseExists) unitCore.baseId = null;
@@ -133,7 +141,7 @@ scenarioRoutes.post('/ready-made/:filename/load', async (req, res) => {
       }
     }
     for (const sa of (spaceAssets || [])) {
-      const { scenario: _s, ...saCore } = sa;
+      const { scenario: _s, coverageWindows: _cw, ...saCore } = sa;
       const exists = await prisma.spaceAsset.findUnique({ where: { id: saCore.id } });
       if (!exists) await prisma.spaceAsset.create({ data: saCore });
     }
@@ -143,15 +151,34 @@ scenarioRoutes.post('/ready-made/:filename/load', async (req, res) => {
       if (!exists) await prisma.scenarioInject.create({ data: injCore });
     }
     for (const order of (taskingOrders || [])) {
-      const { missions, scenario: _s, ...orderCore } = order;
+      const { missions, scenario: _s, missionPackages, ...orderCore } = order;
       const exists = await prisma.taskingOrder.findUnique({ where: { id: orderCore.id } });
       if (!exists) {
         await prisma.taskingOrder.create({ data: orderCore });
-        for (const m of (missions || [])) {
-          const { taskingOrder: _to, unit: _u, ...missionCore } = m;
+        // Support both flat missions and nested missionPackages
+        const allMissions = missions || (missionPackages || []).flatMap((pkg: any) => pkg.missions || []);
+        for (const m of (allMissions || [])) {
+          const { taskingOrder: _to, unit: _u, positionUpdates: _pu, spaceNeeds: _sn, targets: _t, waypoints: _w, timeWindows: _tw, supportRequirements: _sr, package: _pkg, ...missionCore } = m;
           await prisma.mission.create({ data: missionCore });
         }
       }
+    }
+    // Import sim events
+    for (const ev of (simEvents || [])) {
+      const { scenario: _s, units: _u, ...evCore } = ev;
+      const exists = await prisma.simEvent.findUnique({ where: { id: evCore.id } });
+      if (!exists) await prisma.simEvent.create({ data: evCore });
+    }
+    // Import leadership decisions
+    for (const ld of (leadershipDecisions || [])) {
+      const exists = await prisma.leadershipDecision.findUnique({ where: { id: ld.id } });
+      if (!exists) await prisma.leadershipDecision.create({ data: ld });
+    }
+    // Import ingest logs
+    for (const il of (ingestLogs || [])) {
+      const { scenario: _s, ...ilCore } = il;
+      const exists = await prisma.ingestLog.findUnique({ where: { id: ilCore.id } });
+      if (!exists) await prisma.ingestLog.create({ data: ilCore });
     }
 
     res.json({ success: true, data: { id: core.id } });

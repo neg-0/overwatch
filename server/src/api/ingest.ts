@@ -88,6 +88,13 @@ export function createIngestRoutes(io: Server) {
       });
     }
 
+    if (documents.length > 20) {
+      return res.status(400).json({
+        success: false,
+        error: `Batch limited to 20 documents per request (received ${documents.length})`,
+      });
+    }
+
     const results: Array<{ index: number; success: boolean; createdId?: string; error?: string }> = [];
 
     for (let i = 0; i < documents.length; i++) {

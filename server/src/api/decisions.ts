@@ -40,6 +40,14 @@ export function createDecisionRoutes(io: Server) {
         rationale,
       } = req.body;
 
+      if (!scenarioId || !decisionType || !description) {
+        return res.status(400).json({
+          success: false,
+          error: 'Missing required fields: scenarioId, decisionType, description',
+          timestamp: new Date().toISOString(),
+        });
+      }
+
       const decision = await prisma.leadershipDecision.create({
         data: {
           scenarioId,
