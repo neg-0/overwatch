@@ -251,7 +251,7 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
     // Position updates
     socket.on('position:update', (data: any) => {
       const positions = new Map(get().positions);
-      positions.set(data.update.missionId, data.update);
+      positions.set(data.missionId, data);
       set({ positions });
     });
 
@@ -276,9 +276,31 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
       set({ spaceGaps: gaps });
     });
 
-    // Space coverage window updates
+    // Space coverage window updates — accumulate per-asset
     socket.on('space:coverage', (data: any) => {
-      set({ coverageWindows: data.windows ?? [] });
+      if (data.windows) {
+        // Full replace when backend sends complete list
+        set({ coverageWindows: data.windows });
+      } else if (data.assetId && data.status) {
+        // Per-asset AOS/LOS event — update coverage area
+        const existing = get().coverageWindows;
+        if (data.status === 'AOS' && data.coverageArea) {
+          set({
+            coverageWindows: [...existing, {
+              spaceAssetId: data.assetId,
+              assetName: data.assetId,
+              capability: '',
+              start: new Date().toISOString(),
+              end: '',
+              elevation: 0,
+              lat: data.coverageArea.centerLat,
+              lon: data.coverageArea.centerLon,
+            }],
+          });
+        } else if (data.status === 'LOS') {
+          set({ coverageWindows: existing.filter(w => w.spaceAssetId !== data.assetId) });
+        }
+      }
     });
 
     // Decision required — from simulation coverage gaps
@@ -292,23 +314,31 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
         receivedAt: new Date().toISOString(),
       };
       set({ pendingDecisions: [...get().pendingDecisions, decision] });
-      const alerts = [...get().alerts, `⚠️ Decision required: ${data.description}`];
+      const alerts = [...get().alerts, `⚠️ Decision required: ${data.description}`].slice(-50);
       set({ alerts });
     });
 
-    // Decision executed
-    socket.on('decision:executed', (data: any) => {
-      // Remove from pending
+    // Decision executed / resolved — handle both event names
+    const handleDecisionDone = (data: any) => {
       set({
-        pendingDecisions: get().pendingDecisions.filter(d => d.eventId !== data.eventId),
-        alerts: [...get().alerts, `Decision executed: ${data.decisionType} — ${data.description}`],
+        pendingDecisions: get().pendingDecisions.filter(d => d.eventId !== (data.eventId || data.decisionId)),
+        alerts: [...get().alerts, `✅ Decision resolved: ${data.decisionType || data.description || 'action'}`].slice(-50),
       });
-    });
+    };
+    socket.on('decision:executed', handleDecisionDone);
+    socket.on('decision:resolved', handleDecisionDone);
 
     // Order published
     socket.on('order:published', (data: any) => {
       console.log('[WS] Order published:', data);
-      const alerts = [...get().alerts, `${data.orderType} Day ${data.day} published`];
+      const alerts = [...get().alerts, `${data.orderType} Day ${data.day} published`].slice(-50);
+      set({ alerts });
+    });
+
+    // Knowledge graph incremental update — trigger page refresh
+    socket.on('graph:update', (data: any) => {
+      console.log(`[WS] Graph update: +${data.addedNodes?.length || 0} nodes, +${data.addedEdges?.length || 0} edges`);
+      const alerts = [...get().alerts, `🔗 KG updated: +${data.addedNodes?.length || 0} nodes`].slice(-50);
       set({ alerts });
     });
 
@@ -691,16 +721,21 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
   // ─── Decision Resolution ────────────────────────────────────────────────
   resolveDecision: async (scenarioId: string, decisionEventId: string, action: string) => {
     try {
+      // The backend expects { decisionId, selectedOption (number) }
+      // `action` from the UI is the option label — find its index from pendingDecisions
+      const pending = get().pendingDecisions.find(d => d.eventId === decisionEventId);
+      const optionIndex = pending?.options.findIndex(o => o.action === action) ?? 0;
+
       const res = await fetch(`/api/game-master/${scenarioId}/decide`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ decisionEventId, action }),
+        body: JSON.stringify({ decisionId: decisionEventId, selectedOption: optionIndex }),
       });
       const data = await res.json();
       if (data.success) {
         set({
           pendingDecisions: get().pendingDecisions.filter(d => d.eventId !== decisionEventId),
-          alerts: [...get().alerts, `✅ Decision resolved: ${action}`],
+          alerts: [...get().alerts, `✅ Decision resolved: ${action}`].slice(-50),
         });
       }
     } catch (err) {

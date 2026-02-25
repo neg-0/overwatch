@@ -610,7 +610,7 @@ scenarioRoutes.get('/:id/export', async (req, res) => {
         strategies: true,
         planningDocs: true,
         units: { include: { assets: true } },
-        spaceAssets: true,
+        spaceAssets: { include: { coverageWindows: true } },
         scenarioInjects: true,
         taskingOrders: {
           include: {
@@ -621,29 +621,41 @@ scenarioRoutes.get('/:id/export', async (req, res) => {
                     waypoints: true,
                     timeWindows: true,
                     spaceNeeds: true,
+                    positionUpdates: { orderBy: { timestamp: 'asc' } },
                   },
                 },
               },
             },
           },
         },
+        simEvents: { orderBy: { simTime: 'asc' } },
       },
     });
 
     if (!scenario) return res.status(404).json({ error: 'Not found' });
 
+    // Grab standalone tables (no Prisma relation to Scenario)
+    const leadershipDecisions = await prisma.leadershipDecision.findMany({
+      where: { scenarioId: req.params.id },
+      orderBy: { createdAt: 'asc' },
+    });
+    const ingestLogs = await prisma.ingestLog.findMany({
+      where: { scenarioId: req.params.id },
+      orderBy: { createdAt: 'asc' },
+    });
+
     const zip = new AdmZip();
-    zip.addFile('scenario.json', Buffer.from(JSON.stringify(scenario, null, 2), 'utf8'));
+    zip.addFile('scenario.json', Buffer.from(JSON.stringify({ ...scenario, leadershipDecisions, ingestLogs }, null, 2), 'utf8'));
 
     // Create a markdown overview
     const md = `# Scenario: ${scenario.name}\n**Theater:** ${scenario.theater}\n**Adversary:** ${scenario.adversary}\n\n${scenario.description}`;
     zip.addFile('overview.md', Buffer.from(md, 'utf8'));
 
     // Add generated documents as readables
-    scenario.strategies.forEach((s: any, idx: number) => {
+    (scenario as any).strategies?.forEach((s: any, idx: number) => {
       zip.addFile(`documents/strategic/${idx + 1}_${s.docType}.md`, Buffer.from(`# ${s.title}\n\n${s.content}`, 'utf8'));
     });
-    scenario.planningDocs.forEach((s: any, idx: number) => {
+    (scenario as any).planningDocs?.forEach((s: any, idx: number) => {
       zip.addFile(`documents/planning/${idx + 1}_${s.docType}.md`, Buffer.from(`# ${s.title}\n\n${s.content}`, 'utf8'));
     });
 
@@ -668,12 +680,19 @@ scenarioRoutes.post('/import', upload.single('file'), async (req, res) => {
     if (!entry) return res.status(400).json({ error: 'Invalid format: missing scenario.json' });
 
     const data = JSON.parse(entry.getData().toString('utf8'));
-    const { strategies, planningDocs, units, spaceAssets, scenarioInjects, taskingOrders, _count, ...core } = data;
+    const {
+      strategies, planningDocs, units, spaceAssets, scenarioInjects, taskingOrders,
+      simEvents, leadershipDecisions, ingestLogs,
+      _count, ...core
+    } = data;
 
     const existing = await prisma.scenario.findUnique({ where: { id: core.id } });
     if (existing) {
       // Wipe existing relations before re-importing to prevent duplicates
       await prisma.scenarioInject.deleteMany({ where: { scenarioId: core.id } });
+      await prisma.simEvent.deleteMany({ where: { scenarioId: core.id } });
+      await prisma.leadershipDecision.deleteMany({ where: { scenarioId: core.id } });
+      await prisma.ingestLog.deleteMany({ where: { scenarioId: core.id } });
       await prisma.spaceAsset.deleteMany({ where: { scenarioId: core.id } });
       await prisma.asset.deleteMany({ where: { unit: { scenarioId: core.id } } });
       await prisma.unit.deleteMany({ where: { scenarioId: core.id } });
@@ -735,6 +754,24 @@ scenarioRoutes.post('/import', upload.single('file'), async (req, res) => {
           await prisma.mission.create({ data: missionCore });
         }
       }
+    }
+
+    // Import sim events
+    for (const ev of (simEvents || [])) {
+      const { scenario: _s, units: _u, ...evCore } = ev;
+      const exists = await prisma.simEvent.findUnique({ where: { id: evCore.id } });
+      if (!exists) await prisma.simEvent.create({ data: evCore });
+    }
+    // Import leadership decisions
+    for (const ld of (leadershipDecisions || [])) {
+      const exists = await prisma.leadershipDecision.findUnique({ where: { id: ld.id } });
+      if (!exists) await prisma.leadershipDecision.create({ data: ld });
+    }
+    // Import ingest logs
+    for (const il of (ingestLogs || [])) {
+      const { scenario: _s, ...ilCore } = il;
+      const exists = await prisma.ingestLog.findUnique({ where: { id: ilCore.id } });
+      if (!exists) await prisma.ingestLog.create({ data: ilCore });
     }
 
     res.json({ success: true, data: { id: core.id } });
