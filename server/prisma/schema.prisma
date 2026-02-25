@@ -617,6 +617,7 @@ model IngestLog {
   parentLinkId    String?  // ID of linked parent document
   extractedCounts Json?    // { missions: 4, waypoints: 12, targets: 3, ... }
   reviewFlagCount Int      @default(0)
+  reviewFlagsJson Json?    // Full review flag details: [{ field, rawValue, confidence, reason }]
   parseTimeMs     Int      // Time taken to classify + normalize + persist
   errorMessage    String?  @db.Text
   createdAt       DateTime @default(now())

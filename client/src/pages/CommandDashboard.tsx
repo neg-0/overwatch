@@ -275,7 +275,7 @@ function DomainBar({ label, count, total, color }: { label: string; count: numbe
 function GameMasterCard({ scenarioId, currentDay }: { scenarioId: string; currentDay: number }) {
   const { socket } = useOverwatchStore();
   const [atoDay, setAtoDay] = useState(currentDay || 1);
-  const [gmLoading, setGmLoading] = useState<'ato' | 'inject' | 'bda' | null>(null);
+  const [gmLoading, setGmLoading] = useState<'ato' | 'inject' | 'bda' | 'maap' | 'mto' | 'sto' | null>(null);
   const [gmLog, setGmLog] = useState<Array<{ time: string; message: string; type: 'success' | 'error' | 'info' }>>([]);
 
   useEffect(() => {
@@ -303,6 +303,10 @@ function GameMasterCard({ scenarioId, currentDay }: { scenarioId: string; curren
       addLog(`BDA Day ${data.atoDay} complete`, 'success');
       setGmLoading(null);
     };
+    const onMaapComplete = (data: any) => {
+      addLog(`MAAP generated — ${data.targetCount || 0} targets`, 'success');
+      setGmLoading(null);
+    };
     const onError = (data: any) => {
       addLog(`${data.action} Day ${data.atoDay} failed: ${data.error}`, 'error');
       setGmLoading(null);
@@ -311,19 +315,21 @@ function GameMasterCard({ scenarioId, currentDay }: { scenarioId: string; curren
     socket.on('gamemaster:ato-complete', onAtoComplete);
     socket.on('gamemaster:inject', onInject);
     socket.on('gamemaster:bda-complete', onBdaComplete);
+    socket.on('gamemaster:maap-complete', onMaapComplete);
     socket.on('gamemaster:error', onError);
 
     return () => {
       socket.off('gamemaster:ato-complete', onAtoComplete);
       socket.off('gamemaster:inject', onInject);
       socket.off('gamemaster:bda-complete', onBdaComplete);
+      socket.off('gamemaster:maap-complete', onMaapComplete);
       socket.off('gamemaster:error', onError);
     };
   }, [socket]);
 
-  const callGM = async (action: 'ato' | 'inject' | 'bda') => {
+  const callGM = async (action: 'ato' | 'inject' | 'bda' | 'maap' | 'mto' | 'sto') => {
     setGmLoading(action);
-    addLog(`${action.toUpperCase()} Day ${atoDay}…`);
+    addLog(`${action.toUpperCase()} ${action === 'maap' ? '' : `Day ${atoDay}`}…`);
     try {
       await fetch(`/api/game-master/${scenarioId}/${action}`, {
         method: 'POST',
@@ -358,6 +364,7 @@ function GameMasterCard({ scenarioId, currentDay }: { scenarioId: string; curren
         </div>
       </div>
       <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        {/* Primary actions */}
         <div style={{ display: 'flex', gap: '8px' }}>
           <button
             className="btn btn-primary"
@@ -382,6 +389,33 @@ function GameMasterCard({ scenarioId, currentDay }: { scenarioId: string; curren
             style={{ flex: 1 }}
           >
             {gmLoading === 'bda' ? '⟳ Running…' : '📊 Run BDA'}
+          </button>
+        </div>
+        {/* Extended actions (MAAP / MTO / STO) */}
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            className="btn btn-secondary"
+            disabled={gmLoading !== null}
+            onClick={() => callGM('maap')}
+            style={{ flex: 1, fontSize: '12px' }}
+          >
+            {gmLoading === 'maap' ? '⟳ Generating…' : '📋 MAAP'}
+          </button>
+          <button
+            className="btn btn-secondary"
+            disabled={gmLoading !== null}
+            onClick={() => callGM('mto')}
+            style={{ flex: 1, fontSize: '12px' }}
+          >
+            {gmLoading === 'mto' ? '⟳ Generating…' : '🚢 MTO'}
+          </button>
+          <button
+            className="btn btn-secondary"
+            disabled={gmLoading !== null}
+            onClick={() => callGM('sto')}
+            style={{ flex: 1, fontSize: '12px' }}
+          >
+            {gmLoading === 'sto' ? '⟳ Generating…' : '🛰️ STO'}
           </button>
         </div>
         {gmLog.length > 0 && (

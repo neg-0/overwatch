@@ -2,7 +2,9 @@ import { Server } from 'socket.io';
 import { config } from '../config.js';
 import prisma from '../db/prisma-client.js';
 import { type CoverageWindow, type GapDetection, checkCoverage, checkFulfillment, detectGaps } from './coverage-calculator.js';
+import { assessBDA, generateATO } from './game-master.js';
 import { generateDayOrders } from './scenario-generator.js';
+import { allocateSpaceResources } from './space-allocator.js';
 import { SpacePosition, approximateGeoPosition, propagateFromTLE } from './space-propagator.js';
 import { refreshTLEsForScenario } from './udl-client.js';
 
@@ -17,6 +19,8 @@ interface SimState {
   compressionRatio: number;
   currentAtoDay: number;
   lastAtoDayGenerated: number;
+  lastBDADay: number;
+  isGenerating: boolean;
   tickInterval: ReturnType<typeof setInterval> | null;
   positionInterval: ReturnType<typeof setInterval> | null;
   coverageCycleCount: number;
@@ -75,6 +79,8 @@ export async function startSimulation(
     compressionRatio: ratio,
     currentAtoDay: 1,
     lastAtoDayGenerated: 0,
+    lastBDADay: 0,
+    isGenerating: false,
     tickInterval: null,
     positionInterval: null,
     coverageCycleCount: 0,
@@ -172,6 +178,9 @@ function startTickLoop(io: Server) {
   currentSim!.tickInterval = setInterval(async () => {
     if (!currentSim || currentSim.status !== 'RUNNING') return;
 
+    // Skip tick processing while Game Master is generating
+    if (currentSim.isGenerating) return;
+
     // Advance sim time by (tickMs * compressionRatio) milliseconds
     const advanceMs = tickMs * currentSim.compressionRatio;
     currentSim.simTime = new Date(currentSim.simTime.getTime() + advanceMs);
@@ -185,22 +194,10 @@ function startTickLoop(io: Server) {
       ) + 1;
       currentSim.currentAtoDay = daysSinceStart;
 
-      // Generate next day's orders when we cross the day boundary
+      // ── Game Master Closed Loop: BDA → ATO → Space Allocation ──────────
       if (daysSinceStart > currentSim.lastAtoDayGenerated) {
-        console.log(`[SIM] Generating orders for ATO Day ${daysSinceStart}...`);
-        try {
-          await generateDayOrders(currentSim.scenarioId, daysSinceStart);
-          if (!currentSim) return; // re-check after await
-          currentSim.lastAtoDayGenerated = daysSinceStart;
-          io.to(`scenario:${currentSim.scenarioId}`).emit('order:published', {
-            event: 'order:published',
-            orderId: `Day ${daysSinceStart}`,
-            orderType: 'ATO',
-            day: daysSinceStart,
-          });
-        } catch (err) {
-          console.error(`[SIM] Failed to generate Day ${daysSinceStart} orders:`, err);
-        }
+        await runGameMasterCycle(io, daysSinceStart);
+        if (!currentSim) return;
       }
 
       // Check sim end
@@ -244,6 +241,159 @@ function startTickLoop(io: Server) {
     if (currentSim) await recordBDA(io);
 
   }, tickMs);
+}
+
+// ─── Game Master Closed-Loop Cycle ───────────────────────────────────────────
+
+/**
+ * Runs the Game Master cycle at ATO day boundaries:
+ *   1. Pause ticks (set isGenerating flag)
+ *   2. Assess BDA for the completed day (day > 1 only)
+ *   3. Generate ATO + allocate space resources for the new day (in parallel)
+ *   4. Resume ticks
+ *
+ * Falls back to the legacy `generateDayOrders` pipeline on LLM failure.
+ */
+async function runGameMasterCycle(io: Server, newDay: number): Promise<void> {
+  if (!currentSim) return;
+
+  const scenarioId = currentSim.scenarioId;
+  const completedDay = newDay - 1;
+
+  // Pause tick processing
+  currentSim.isGenerating = true;
+
+  // Notify frontend
+  io.to(`scenario:${scenarioId}`).emit('gameMaster:generating', {
+    event: 'gameMaster:generating',
+    phase: 'started',
+    newDay,
+    completedDay: completedDay > 0 ? completedDay : null,
+    timestamp: new Date().toISOString(),
+  });
+
+  console.log(`[SIM] Game Master cycle: Day ${completedDay > 0 ? `${completedDay} BDA → ` : ''}Day ${newDay} ATO + allocation`);
+
+  const startMs = Date.now();
+  let usedGameMaster = false;
+
+  try {
+    // Step 1: Assess BDA for the completed day (skip for Day 1 — no missions to assess)
+    if (completedDay > 0 && completedDay > currentSim.lastBDADay) {
+      console.log(`[SIM] Running Game Master BDA for Day ${completedDay}...`);
+      io.to(`scenario:${scenarioId}`).emit('gameMaster:generating', {
+        event: 'gameMaster:generating',
+        phase: 'bda',
+        day: completedDay,
+        timestamp: new Date().toISOString(),
+      });
+
+      try {
+        const bdaResult = await assessBDA(scenarioId, completedDay, io);
+        if (!currentSim) return;
+
+        if (bdaResult.success) {
+          currentSim.lastBDADay = completedDay;
+          console.log(`[SIM] BDA for Day ${completedDay} complete (${bdaResult.durationMs}ms)`);
+        } else {
+          console.warn(`[SIM] BDA for Day ${completedDay} failed: ${bdaResult.error}`);
+        }
+      } catch (err) {
+        console.error(`[SIM] BDA assessment error for Day ${completedDay}:`, err);
+        // Non-fatal: continue to ATO generation even if BDA fails
+      }
+    }
+
+    if (!currentSim) return;
+
+    // Step 2: Generate ATO + allocate space resources in parallel
+    console.log(`[SIM] Running Game Master ATO for Day ${newDay}...`);
+    io.to(`scenario:${scenarioId}`).emit('gameMaster:generating', {
+      event: 'gameMaster:generating',
+      phase: 'ato',
+      day: newDay,
+      timestamp: new Date().toISOString(),
+    });
+
+    const atoResult = await generateATO(scenarioId, newDay, io);
+    if (!currentSim) return;
+
+    if (atoResult.success) {
+      usedGameMaster = true;
+      currentSim.lastAtoDayGenerated = newDay;
+
+      // Now allocate space resources for the new day (needs ATO missions to exist first)
+      console.log(`[SIM] Allocating space resources for Day ${newDay}...`);
+      io.to(`scenario:${scenarioId}`).emit('gameMaster:generating', {
+        event: 'gameMaster:generating',
+        phase: 'allocation',
+        day: newDay,
+        timestamp: new Date().toISOString(),
+      });
+
+      try {
+        const allocReport = await allocateSpaceResources(scenarioId, newDay);
+        if (!currentSim) return;
+
+        io.to(`scenario:${scenarioId}`).emit('allocation:complete', {
+          event: 'allocation:complete',
+          day: newDay,
+          summary: allocReport.summary,
+          timestamp: new Date().toISOString(),
+        });
+
+        console.log(`[SIM] Space allocation for Day ${newDay}: ${allocReport.summary.fulfilled}/${allocReport.summary.totalNeeds} fulfilled, ${allocReport.summary.contention} contention(s)`);
+      } catch (err) {
+        console.error(`[SIM] Space allocation failed for Day ${newDay}:`, err);
+        // Non-fatal: ATO was generated, allocation can be retried
+      }
+
+      io.to(`scenario:${scenarioId}`).emit('order:published', {
+        event: 'order:published',
+        orderId: `Day ${newDay}`,
+        orderType: 'ATO',
+        day: newDay,
+        source: 'game-master',
+      });
+
+      console.log(`[SIM] Game Master ATO for Day ${newDay} complete (${atoResult.durationMs}ms)`);
+    } else {
+      console.warn(`[SIM] Game Master ATO failed for Day ${newDay}: ${atoResult.error}`);
+      throw new Error(`ATO generation failed: ${atoResult.error}`);
+    }
+  } catch (err) {
+    // Fallback: use the legacy generateDayOrders pipeline
+    console.warn(`[SIM] Game Master failed, falling back to generateDayOrders for Day ${newDay}`);
+    try {
+      await generateDayOrders(scenarioId, newDay);
+      if (!currentSim) return;
+      currentSim.lastAtoDayGenerated = newDay;
+
+      io.to(`scenario:${scenarioId}`).emit('order:published', {
+        event: 'order:published',
+        orderId: `Day ${newDay}`,
+        orderType: 'ATO',
+        day: newDay,
+        source: 'fallback',
+      });
+    } catch (fallbackErr) {
+      console.error(`[SIM] Fallback order generation also failed for Day ${newDay}:`, fallbackErr);
+    }
+  } finally {
+    // Resume tick processing
+    if (currentSim) {
+      currentSim.isGenerating = false;
+
+      const durationMs = Date.now() - startMs;
+      io.to(`scenario:${scenarioId}`).emit('gameMaster:complete', {
+        event: 'gameMaster:complete',
+        day: newDay,
+        source: usedGameMaster ? 'game-master' : 'fallback',
+        durationMs,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
 }
 
 // ─── Position Update Loop ────────────────────────────────────────────────────
@@ -494,6 +644,59 @@ async function computeAndBroadcastCoverage(io: Server, spaceAssets: any[]) {
           priority: gap.priority,
         },
       });
+
+      // Surface decision points for CRITICAL/DEGRADED gaps
+      if (gap.severity === 'CRITICAL' || gap.severity === 'DEGRADED') {
+        try {
+          const decisionEvent = await prisma.simEvent.create({
+            data: {
+              scenarioId,
+              eventType: 'DECISION_REQUIRED',
+              targetType: 'SpaceNeed',
+              targetId: gap.missionId,
+              simTime,
+              description: `${gap.severity} coverage gap: ${gap.capabilityType} for mission ${gap.missionId} (${gap.gapStart.toISOString()} — ${gap.gapEnd.toISOString()})`,
+              effectsJson: {
+                gapDetails: {
+                  missionId: gap.missionId,
+                  capabilityType: gap.capabilityType,
+                  gapStart: gap.gapStart.toISOString(),
+                  gapEnd: gap.gapEnd.toISOString(),
+                  severity: gap.severity,
+                  priority: gap.priority,
+                },
+                options: [
+                  { label: 'Accept risk and continue', action: 'ACCEPT_RISK' },
+                  { label: 'Reallocate space assets', action: 'REALLOCATE' },
+                  { label: 'Delay mission until coverage available', action: 'DELAY_MISSION' },
+                  { label: 'Request allied space support', action: 'REQUEST_SUPPORT' },
+                ],
+              },
+            },
+          });
+
+          io.to(`scenario:${scenarioId}`).emit('decision:required', {
+            event: 'decision:required',
+            decisionId: decisionEvent.id,
+            severity: gap.severity,
+            capability: gap.capabilityType,
+            missionId: gap.missionId,
+            gapStart: gap.gapStart.toISOString(),
+            gapEnd: gap.gapEnd.toISOString(),
+            options: [
+              { label: 'Accept risk and continue', action: 'ACCEPT_RISK' },
+              { label: 'Reallocate space assets', action: 'REALLOCATE' },
+              { label: 'Delay mission until coverage available', action: 'DELAY_MISSION' },
+              { label: 'Request allied space support', action: 'REQUEST_SUPPORT' },
+            ],
+            timestamp: simTime.toISOString(),
+          });
+
+          console.log(`[SIM] Decision point surfaced: ${gap.severity} ${gap.capabilityType} gap for ${gap.missionId}`);
+        } catch (err) {
+          console.warn('[SIM] Failed to create decision event:', err);
+        }
+      }
     }
   }
 

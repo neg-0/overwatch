@@ -1113,6 +1113,7 @@ export async function ingestDocument(
       parentLinkId: parentLinkId || null,
       extractedCounts: extracted,
       reviewFlagCount: reviewFlags.length,
+      reviewFlagsJson: reviewFlags.length > 0 ? (reviewFlags as any) : undefined,
       parseTimeMs,
     },
   });

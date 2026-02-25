@@ -30,7 +30,7 @@ function getModel(tier: 'flagship' | 'midRange' | 'fast'): string {
 
 export interface GameMasterResult {
   success: boolean;
-  action: 'ato' | 'inject' | 'bda';
+  action: 'ato' | 'inject' | 'bda' | 'maap';
   atoDay: number;
   generatedText: string;
   ingestResult?: {
@@ -819,5 +819,177 @@ Example: [{"targetName":"IADS Node Alpha","damagePercent":85,"functionalKill":tr
     }
 
     return { success: false, action: 'bda', atoDay, generatedText: '', durationMs, error };
+  }
+}
+
+// ─── Generate MAAP (Master Air Attack Plan) ──────────────────────────────────
+
+const MAAP_PROMPT = `You are a Joint Air Component Commander (JFACC) developing a Master Air Attack Plan (MAAP) for the current phase of operations.
+
+SCENARIO:
+- Theater: {theater}
+- Adversary: {adversary}
+- Phase: {oplanPhase}
+
+STRATEGIC PRIORITIES:
+{priorities}
+
+JIPTL TARGETS:
+{jiptlTargets}
+
+AVAILABLE FORCES:
+Air: {airUnits}
+Maritime: {maritimeUnits}
+Space: {spaceAssets}
+
+ADVERSARY CAPABILITIES:
+{adversarySpaceAssets}
+
+Generate a comprehensive MAAP that translates strategy into air operations. Return as structured JSON matching the provided schema.`;
+
+export async function generateMAAP(
+  scenarioId: string,
+  io?: Server,
+): Promise<GameMasterResult> {
+  const startTime = Date.now();
+  console.log(`[GAME-MASTER] Generating MAAP for scenario ${scenarioId}...`);
+
+  try {
+    const ctx = await buildScenarioContext(scenarioId, 1);
+
+    // Gather JIPTL targets for MAAP context
+    const jiptl = await prisma.planningDocument.findFirst({
+      where: { scenarioId, docType: 'JIPTL' },
+      include: { priorities: { orderBy: { rank: 'asc' }, take: 20 } },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const jiptlTargets = jiptl?.priorities
+      .map(p => `P${p.rank}: ${p.effect} — ${p.description || ''}`)
+      .join('\n') || 'No JIPTL targets established';
+
+    const prompt = MAAP_PROMPT
+      .replace(/\{theater\}/g, ctx.theater)
+      .replace(/\{adversary\}/g, ctx.adversary)
+      .replace(/\{oplanPhase\}/g, ctx.oplanPhase)
+      .replace(/\{priorities\}/g, ctx.priorities)
+      .replace(/\{jiptlTargets\}/g, jiptlTargets)
+      .replace(/\{airUnits\}/g, ctx.airUnits)
+      .replace(/\{maritimeUnits\}/g, ctx.maritimeUnits)
+      .replace(/\{spaceAssets\}/g, ctx.spaceAssets)
+      .replace(/\{adversarySpaceAssets\}/g, ctx.adversarySpaceAssets);
+
+    const llmResult = await callLLMWithRetry({
+      openai,
+      model: getModel('flagship'),
+      messages: [{ role: 'user', content: prompt + '\n\nReturn ONLY valid JSON matching the MAAP structure. No markdown fences.' }],
+      maxTokens: 10000,
+      reasoningEffort: 'medium',
+      minOutputLength: 500,
+      scenarioId,
+      step: 'Game Master',
+      artifact: 'MAAP',
+    });
+
+    const rawJson = llmResult.content
+      .replace(/```json?\n?/g, '')
+      .replace(/```/g, '')
+      .trim();
+    const maapData = JSON.parse(rawJson);
+
+    // Build the MAAP content as readable text for ingest-back
+    const maapText = [
+      `MASTER AIR ATTACK PLAN — ${maapData.title}`,
+      `Classification: ${maapData.classification}`,
+      `Phase: ${maapData.phase}`,
+      `Effective: ${maapData.effectiveDate}`,
+      '',
+      'TARGET PRIORITY LIST:',
+      ...maapData.targetPriorityList.map((t: any) =>
+        `  P${t.rank}: ${t.targetName} (${t.targetCategory}) — ${t.desiredEffect} via ${t.weaponSystem} [${t.priority}]`
+      ),
+      '',
+      'FORCE APPORTIONMENT:',
+      ...maapData.forceApportionment.map((f: any) =>
+        `  ${f.missionType}: ${f.percentAllocation}% (${f.sorties} sorties) — ${f.rationale}`
+      ),
+      '',
+      'AIR COORDINATION MEASURES:',
+      ...maapData.coordinationMeasures.map((m: any) =>
+        `  ${m.measureType}: ${m.name} — ${m.description}${m.coordinates ? ` @ ${m.coordinates}` : ''}`
+      ),
+      '',
+      'COMMANDER\'S GUIDANCE:',
+      maapData.guidance,
+    ].join('\n');
+
+    // Persist as PlanningDocument
+    const stratDoc = await prisma.strategyDocument.findFirst({
+      where: { scenarioId, tier: 5 },  // OPLAN tier
+      orderBy: { createdAt: 'desc' },
+    });
+
+    await prisma.planningDocument.create({
+      data: {
+        scenarioId,
+        title: maapData.title || 'Master Air Attack Plan',
+        docType: 'MAAP',
+        docTier: 4,
+        content: maapText,
+        effectiveDate: new Date(maapData.effectiveDate || new Date()),
+        strategyDocId: stratDoc?.id,
+        sourceFormat: 'GAME_MASTER',
+        confidence: 0.9,
+      },
+    });
+
+    // Ingest back for KG integration
+    const ingestResult = await ingestDocument(
+      scenarioId,
+      maapText,
+      'game-master:maap',
+      io,
+    );
+
+    const durationMs = Date.now() - startTime;
+
+    if (io) {
+      io.to(`scenario:${scenarioId}`).emit('gamemaster:maap-complete', {
+        scenarioId,
+        targetCount: maapData.targetPriorityList.length,
+        durationMs,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    console.log(`[GAME-MASTER] MAAP generated in ${durationMs}ms — ${maapData.targetPriorityList.length} targets, ${maapData.forceApportionment.length} mission types`);
+
+    return {
+      success: true,
+      action: 'maap',
+      atoDay: 0, // MAAP is not day-specific
+      generatedText: maapText,
+      ingestResult: {
+        createdId: ingestResult.createdId,
+        documentType: ingestResult.documentType,
+        confidence: ingestResult.confidence,
+      },
+      durationMs,
+    };
+  } catch (err) {
+    const durationMs = Date.now() - startTime;
+    const error = err instanceof Error ? err.message : String(err);
+    console.error(`[GAME-MASTER] MAAP generation failed: ${error}`);
+
+    if (io) {
+      io.to(`scenario:${scenarioId}`).emit('gamemaster:error', {
+        scenarioId,
+        action: 'maap',
+        error,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    return { success: false, action: 'maap', atoDay: 0, generatedText: '', durationMs, error };
   }
 }

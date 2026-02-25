@@ -94,6 +94,15 @@ export interface SimEvent {
   createdAt: string;
 }
 
+export interface PendingDecision {
+  eventId: string;
+  scenarioId: string;
+  description: string;
+  severity: string;
+  options: Array<{ label: string; action: string }>;
+  receivedAt: string;
+}
+
 export interface ArtifactResult {
   step: string;
   artifact: string;
@@ -127,6 +136,7 @@ interface OverwatchStore {
 
   // Events
   simEvents: SimEvent[];
+  pendingDecisions: PendingDecision[];
 
   // Generation tracking
   generationProgress: {
@@ -163,6 +173,7 @@ interface OverwatchStore {
   fetchSimEvents: (scenarioId: string) => Promise<void>;
   createSimEvent: (event: Omit<SimEvent, 'id' | 'createdAt'>) => Promise<void>;
   fetchScenarioTimeRange: (scenarioId: string) => Promise<void>;
+  resolveDecision: (scenarioId: string, decisionEventId: string, action: string) => Promise<void>;
 
   // Hierarchy + Allocation
   fetchHierarchy: (scenarioId: string) => Promise<void>;
@@ -193,6 +204,7 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
   coverageWindows: [],
   alerts: [],
   simEvents: [],
+  pendingDecisions: [],
   generationProgress: null,
   artifactResults: [],
   hierarchyData: null,
@@ -269,13 +281,28 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
       set({ coverageWindows: data.windows ?? [] });
     });
 
+    // Decision required — from simulation coverage gaps
+    socket.on('decision:required', (data: any) => {
+      const decision: PendingDecision = {
+        eventId: data.eventId,
+        scenarioId: data.scenarioId,
+        description: data.description,
+        severity: data.severity || 'CRITICAL',
+        options: data.options || [],
+        receivedAt: new Date().toISOString(),
+      };
+      set({ pendingDecisions: [...get().pendingDecisions, decision] });
+      const alerts = [...get().alerts, `⚠️ Decision required: ${data.description}`];
+      set({ alerts });
+    });
+
     // Decision executed
     socket.on('decision:executed', (data: any) => {
-      const alerts = [
-        ...get().alerts,
-        `Decision executed: ${data.decisionType} — ${data.description}`,
-      ];
-      set({ alerts });
+      // Remove from pending
+      set({
+        pendingDecisions: get().pendingDecisions.filter(d => d.eventId !== data.eventId),
+        alerts: [...get().alerts, `Decision executed: ${data.decisionType} — ${data.description}`],
+      });
     });
 
     // Order published
@@ -323,8 +350,64 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
       socket.emit('join:scenario', id);
     }
     set({ activeScenarioId: id });
+
+    // Core hydration (existing)
     get().fetchScenarioTimeRange(id);
     get().fetchSimEvents(id);
+
+    // Rehydrate ephemeral state from DB so page refresh doesn't lose everything
+    // Positions — latest per mission for map markers
+    fetch(`/api/scenarios/${id}/positions/latest`)
+      .then(r => r.json())
+      .then(json => {
+        if (json.success && json.data) {
+          const positions = new Map<string, PositionUpdate>();
+          for (const p of json.data) {
+            positions.set(p.missionId, {
+              missionId: p.missionId,
+              callsign: p.callsign,
+              domain: p.domain,
+              latitude: p.latitude,
+              longitude: p.longitude,
+              altitude_ft: p.altitude_ft,
+              heading: p.heading,
+              speed_kts: p.speed_kts,
+              status: p.status,
+              timestamp: p.timestamp,
+            });
+          }
+          set({ positions });
+        }
+      })
+      .catch(() => { });
+
+    // Pending decisions — unresolved decisions that need action
+    fetch(`/api/scenarios/${id}/decisions/pending`)
+      .then(r => r.json())
+      .then(json => {
+        if (json.success && json.data) {
+          const pendingDecisions: PendingDecision[] = json.data.map((d: any) => ({
+            eventId: d.id,
+            scenarioId: d.scenarioId,
+            description: d.description,
+            severity: d.status === 'PROPOSED' ? 'CRITICAL' : 'MODERATE',
+            options: [],
+            receivedAt: d.createdAt,
+          }));
+          set({ pendingDecisions });
+        }
+      })
+      .catch(() => { });
+
+    // Coverage windows — for space domain overlay
+    fetch(`/api/scenarios/${id}/coverage-windows`)
+      .then(r => r.json())
+      .then(json => {
+        if (json.success && json.data) {
+          set({ coverageWindows: json.data });
+        }
+      })
+      .catch(() => { });
   },
 
   fetchScenarios: async () => {
@@ -602,6 +685,26 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
       }
     } catch (err) {
       console.error('[STORE] Failed to fetch allocations:', err);
+    }
+  },
+
+  // ─── Decision Resolution ────────────────────────────────────────────────
+  resolveDecision: async (scenarioId: string, decisionEventId: string, action: string) => {
+    try {
+      const res = await fetch(`/api/game-master/${scenarioId}/decide`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decisionEventId, action }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        set({
+          pendingDecisions: get().pendingDecisions.filter(d => d.eventId !== decisionEventId),
+          alerts: [...get().alerts, `✅ Decision resolved: ${action}`],
+        });
+      }
+    } catch (err) {
+      console.error('[STORE] Failed to resolve decision:', err);
     }
   },
 }));

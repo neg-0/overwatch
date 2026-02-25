@@ -25,6 +25,8 @@ interface GraphEdge {
   source: string;
   target: string;
   relationship: string;
+  weight?: number;
+  confidence?: number;
 }
 
 // D3-compatible versions (d3-force mutates source/target to node refs)
@@ -38,6 +40,8 @@ interface SimNode extends d3.SimulationNodeDatum {
 
 interface SimLink extends d3.SimulationLinkDatum<SimNode> {
   relationship: string;
+  weight?: number;
+  confidence?: number;
 }
 
 // ─── Color + Shape Config ─────────────────────────────────────────────────────
@@ -53,6 +57,16 @@ const NODE_CONFIG: Record<GraphNodeType, { color: string; icon: string }> = {
 };
 
 const NODE_RADIUS = 24;
+
+// Semantic edge type colors
+const EDGE_COLORS: Record<string, string> = {
+  DERIVES_FROM: '#60a5fa',
+  IMPLEMENTS: '#34d399',
+  ALLOCATES: '#fbbf24',
+  TARGETS: '#f87171',
+  SUPPORTS: '#a78bfa',
+  CONFLICTS_WITH: '#fb7185',
+};
 
 // Types that are always visible (relationship graph)
 const CORE_TYPES: Set<GraphNodeType> = new Set(['DOCUMENT', 'PRIORITY', 'MISSION', 'TARGET']);
@@ -74,6 +88,7 @@ export function KnowledgeGraph() {
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState({ nodes: 0, edges: 0 });
   const [showOrbat, setShowOrbat] = useState(false);
+  const [atoDay, setAtoDay] = useState<number | null>(null);
 
   // ─── Fetch Graph Data ────────────────────────────────────────────────────
 
@@ -82,7 +97,10 @@ export function KnowledgeGraph() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/knowledge-graph/${activeScenarioId}`);
+      const url = atoDay != null
+        ? `/api/knowledge-graph/${activeScenarioId}?atoDay=${atoDay}`
+        : `/api/knowledge-graph/${activeScenarioId}`;
+      const res = await fetch(url);
       const json = await res.json();
       if (json.success && json.data) {
         setNodes(json.data.nodes);
@@ -96,11 +114,11 @@ export function KnowledgeGraph() {
     } finally {
       setLoading(false);
     }
-  }, [activeScenarioId]);
+  }, [activeScenarioId, atoDay]);
 
   useEffect(() => {
     fetchGraph();
-  }, [fetchGraph]);
+  }, [fetchGraph, atoDay]);
 
   // ─── WebSocket: Real-time Graph Updates ────────────────────────────────
 
@@ -199,6 +217,8 @@ export function KnowledgeGraph() {
         source: e.source,
         target: e.target,
         relationship: e.relationship,
+        weight: e.weight,
+        confidence: e.confidence,
       }));
 
     // Force simulation — tuned for performance
@@ -220,8 +240,9 @@ export function KnowledgeGraph() {
       .selectAll('line')
       .data(simLinks)
       .join('line')
-      .attr('stroke', 'rgba(255,255,255,0.15)')
-      .attr('stroke-width', 1.5)
+      .attr('stroke', d => EDGE_COLORS[d.relationship] || 'rgba(255,255,255,0.15)')
+      .attr('stroke-width', d => Math.max(1, Math.min(4, (d.weight ?? 0.5) * 3)))
+      .attr('stroke-opacity', d => d.confidence ?? 0.5)
       .attr('marker-end', 'url(#arrowhead)');
 
     // Edge labels
@@ -313,8 +334,9 @@ export function KnowledgeGraph() {
           .attr('r', NODE_RADIUS);
 
         link
-          .attr('stroke', 'rgba(255,255,255,0.15)')
-          .attr('stroke-width', 1.5);
+          .attr('stroke', (l: SimLink) => EDGE_COLORS[l.relationship] || 'rgba(255,255,255,0.15)')
+          .attr('stroke-width', (l: SimLink) => Math.max(1, Math.min(4, (l.weight ?? 0.5) * 3)))
+          .attr('stroke-opacity', (l: SimLink) => l.confidence ?? 0.5);
       });
 
     // Drag behavior
@@ -431,6 +453,24 @@ export function KnowledgeGraph() {
           <button className="kg-refresh-btn" onClick={fetchGraph} disabled={loading}>
             {loading ? '⟳' : '↻'} Refresh
           </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '8px' }}>
+            <label style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>DAY</label>
+            <select
+              value={atoDay ?? 'all'}
+              onChange={e => setAtoDay(e.target.value === 'all' ? null : parseInt(e.target.value))}
+              style={{
+                padding: '4px 8px', fontSize: '11px',
+                background: 'var(--bg-tertiary)', border: '1px solid var(--border)',
+                borderRadius: '4px', color: 'var(--text-bright)',
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
+              <option value="all">All</option>
+              {Array.from({ length: 14 }, (_, i) => (
+                <option key={i + 1} value={i + 1}>Day {i + 1}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 

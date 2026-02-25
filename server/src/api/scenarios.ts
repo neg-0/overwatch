@@ -522,6 +522,85 @@ scenarioRoutes.get('/:id/allocations', async (req, res) => {
   }
 });
 
+// ─── State Rehydration (survives page refresh) ─────────────────────────────
+
+// Latest position per mission — for map markers on reload
+scenarioRoutes.get('/:id/positions/latest', async (req, res) => {
+  try {
+    // Get the most recent position for each mission in this scenario
+    const positions = await prisma.positionUpdate.findMany({
+      where: {
+        mission: {
+          package: { taskingOrder: { scenarioId: req.params.id } },
+        },
+      },
+      orderBy: { timestamp: 'desc' },
+      distinct: ['missionId'],
+      // Only grab the fields the frontend map needs
+      select: {
+        missionId: true,
+        callsign: true,
+        domain: true,
+        latitude: true,
+        longitude: true,
+        altitude_ft: true,
+        heading: true,
+        speed_kts: true,
+        status: true,
+        timestamp: true,
+      },
+    });
+    res.json({ success: true, data: positions, timestamp: new Date().toISOString() });
+  } catch (error) {
+    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+  }
+});
+
+// Unresolved decisions — for pending decision cards on reload
+scenarioRoutes.get('/:id/decisions/pending', async (req, res) => {
+  try {
+    const decisions = await prisma.leadershipDecision.findMany({
+      where: {
+        scenarioId: req.params.id,
+        status: { not: 'EXECUTED' },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json({ success: true, data: decisions, timestamp: new Date().toISOString() });
+  } catch (error) {
+    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+  }
+});
+
+// Coverage windows — for space overlay on reload
+scenarioRoutes.get('/:id/coverage-windows', async (req, res) => {
+  try {
+    const windows = await prisma.spaceCoverageWindow.findMany({
+      where: {
+        spaceAsset: { scenarioId: req.params.id },
+      },
+      include: {
+        spaceAsset: { select: { name: true, constellation: true, capabilities: true } },
+      },
+      orderBy: { startTime: 'asc' },
+    });
+    // Flatten to the shape the store expects
+    const data = windows.map(w => ({
+      spaceAssetId: w.spaceAssetId,
+      assetName: w.spaceAsset.name,
+      capability: w.spaceAsset.capabilities.join(', '),
+      start: w.startTime.toISOString(),
+      end: w.endTime.toISOString(),
+      elevation: w.maxElevation,
+      lat: w.centerLat,
+      lon: w.centerLon,
+    }));
+    res.json({ success: true, data, timestamp: new Date().toISOString() });
+  } catch (error) {
+    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+  }
+});
+
 // Export a scenario as a ZIP
 scenarioRoutes.get('/:id/export', async (req, res) => {
   try {

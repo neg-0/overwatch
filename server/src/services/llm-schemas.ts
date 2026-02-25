@@ -367,3 +367,71 @@ export const ORDER_GENERATOR_SCHEMA = {
     additionalProperties: false,
   },
 };
+
+// ─── Schema 7: MAAP Generator ───────────────────────────────────────────────
+
+export const GENERATE_MAAP_SCHEMA = {
+  name: 'master_air_attack_plan',
+  strict: true,
+  schema: {
+    type: 'object' as const,
+    properties: {
+      title: { type: 'string' as const },
+      classification: { type: 'string' as const },
+      effectiveDate: { type: 'string' as const },
+      phase: { type: 'string' as const },
+      targetPriorityList: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            rank: { type: 'number' as const },
+            targetName: { type: 'string' as const },
+            targetCategory: { type: 'string' as const },
+            desiredEffect: { type: 'string' as const },
+            weaponSystem: { type: 'string' as const },
+            priority: { type: 'string' as const, enum: ['IMMEDIATE', 'PRIORITY', 'ROUTINE'] },
+            justification: { type: 'string' as const },
+          },
+          required: ['rank', 'targetName', 'targetCategory', 'desiredEffect', 'weaponSystem', 'priority', 'justification'],
+          additionalProperties: false,
+        },
+      },
+      forceApportionment: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            missionType: { type: 'string' as const },
+            percentAllocation: { type: 'number' as const },
+            sorties: { type: 'number' as const },
+            rationale: { type: 'string' as const },
+          },
+          required: ['missionType', 'percentAllocation', 'sorties', 'rationale'],
+          additionalProperties: false,
+        },
+      },
+      coordinationMeasures: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            measureType: {
+              type: 'string' as const,
+              enum: ['FSCL', 'KILLBOX', 'ROZ', 'ADIZ', 'CAS_BP', 'TANKER_TRACK', 'AWACS_ORBIT'],
+            },
+            name: { type: 'string' as const },
+            description: { type: 'string' as const },
+            coordinates: { type: ['string', 'null'] as const },
+          },
+          required: ['measureType', 'name', 'description', 'coordinates'],
+          additionalProperties: false,
+        },
+      },
+      guidance: { type: 'string' as const },
+    },
+    required: ['title', 'classification', 'effectiveDate', 'phase', 'targetPriorityList', 'forceApportionment', 'coordinationMeasures', 'guidance'],
+    additionalProperties: false,
+  },
+};
+

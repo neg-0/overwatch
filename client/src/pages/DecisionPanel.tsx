@@ -57,6 +57,8 @@ export function DecisionPanel() {
   const spaceGaps = useOverwatchStore(s => s.spaceGaps);
   const coverageWindows = useOverwatchStore(s => s.coverageWindows);
   const alerts = useOverwatchStore(s => s.alerts);
+  const pendingDecisions = useOverwatchStore(s => s.pendingDecisions);
+  const resolveDecision = useOverwatchStore(s => s.resolveDecision);
 
   const [assessment, setAssessment] = useState<Assessment | null>(null);
   const [coas, setCoas] = useState<COA[]>([]);
@@ -118,28 +120,25 @@ export function DecisionPanel() {
   const executeCOA = useCallback(async (coa: COA) => {
     if (!scenarioId) return;
     try {
-      // Create a decision from the COA
-      const createRes = await fetch('/api/decisions', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+      const res = await fetch(`/api/game-master/${scenarioId}/decide`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          scenarioId, decisionType: coa.actions[0]?.type || 'CONTINGENCY',
+          decisionType: coa.actions[0]?.type || 'CONTINGENCY',
           description: coa.title + ' — ' + coa.description,
-          affectedAssetIds: coa.actions.filter(a => a.targetId).map(a => a.targetId),
-          affectedMissionIds: [],
+          selectedAction: coa.actions[0]?.detail || coa.title,
           rationale: coa.projectedOutcome,
+          affectedAssetIds: coa.actions.filter(a => a.targetId).map(a => a.targetId),
         }),
       });
-      const createJson = await createRes.json();
-      if (!createJson.success) return;
-
-      // Execute the decision
-      await fetch(`/api/decisions/${createJson.data.id}/execute`, { method: 'POST' });
-      setCoas(prev => prev.filter(c => c.id !== coa.id));
-      setImpact(null);
-      setSelectedCoa(null);
-
-      // Refresh assessment
-      setTimeout(fetchAssessment, 1000);
+      const json = await res.json();
+      if (json.success) {
+        setCoas(prev => prev.filter(c => c.id !== coa.id));
+        setImpact(null);
+        setSelectedCoa(null);
+        // Refresh assessment
+        setTimeout(fetchAssessment, 1000);
+      }
     } catch (err) { console.error('[PANEL] Execution failed:', err); }
   }, [scenarioId, fetchAssessment]);
 
@@ -186,6 +185,45 @@ export function DecisionPanel() {
       </div>
 
       <div className="content-body">
+        {/* Pending Decisions from Simulation */}
+        {pendingDecisions.length > 0 && (
+          <div style={{
+            marginBottom: '16px', padding: '12px', borderRadius: '10px',
+            background: 'rgba(255, 71, 87, 0.08)', border: '1px solid rgba(255, 71, 87, 0.25)',
+          }}>
+            <h3 style={{ margin: '0 0 10px', fontSize: '14px', color: 'var(--accent-danger)' }}>
+              ⚠️ Pending Decisions ({pendingDecisions.length})
+            </h3>
+            {pendingDecisions.map(decision => (
+              <div key={decision.eventId} style={{
+                padding: '10px', borderRadius: '8px', marginBottom: '8px',
+                background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <strong style={{ fontSize: '13px' }}>{decision.description}</strong>
+                  <span style={{
+                    fontSize: '10px', padding: '2px 8px', borderRadius: '8px', fontWeight: 700,
+                    background: decision.severity === 'CRITICAL' ? 'rgba(255,71,87,0.2)' : 'rgba(255,165,2,0.2)',
+                    color: decision.severity === 'CRITICAL' ? '#ff4757' : '#ffa502',
+                  }}>{decision.severity}</span>
+                </div>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  {decision.options.map((opt, i) => (
+                    <button
+                      key={i}
+                      className="btn btn-sm btn-secondary"
+                      onClick={() => scenarioId && resolveDecision(scenarioId, decision.eventId, opt.action)}
+                      style={{ fontSize: '11px' }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Tab Navigation */}
         <div style={{ display: 'flex', gap: '4px', marginBottom: '16px' }}>
           {(['situation', 'coa', 'nlq'] as const).map(tab => (

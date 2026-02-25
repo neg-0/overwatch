@@ -10,6 +10,7 @@ export type GraphNodeType =
   | 'BASE'
   | 'TARGET'
   | 'SPACE_ASSET'
+  | 'SPACE_NEED'
   | 'MISSION';
 
 export interface GraphNode {
@@ -24,6 +25,8 @@ export interface GraphEdge {
   source: string;
   target: string;
   relationship: string;
+  weight?: number;
+  confidence?: number;
 }
 
 export interface KnowledgeGraphData {
@@ -33,7 +36,7 @@ export interface KnowledgeGraphData {
 
 // ─── Graph Builder ──────────────────────────────────────────────────────────────
 
-export async function buildKnowledgeGraph(scenarioId: string): Promise<KnowledgeGraphData> {
+export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): Promise<KnowledgeGraphData> {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   const nodeIds = new Set<string>();
@@ -68,7 +71,7 @@ export async function buildKnowledgeGraph(scenarioId: string): Promise<Knowledge
 
     // Doc cascade edge (parent → child)
     if (doc.parentDocId) {
-      addEdge({ source: doc.parentDocId, target: doc.id, relationship: 'DIRECTS' });
+      addEdge({ source: doc.parentDocId, target: doc.id, relationship: 'DERIVES_FROM' });
     }
 
     // Strategy priorities
@@ -80,7 +83,7 @@ export async function buildKnowledgeGraph(scenarioId: string): Promise<Knowledge
         sublabel: `Rank ${p.rank}`,
         meta: { effect: p.effect },
       });
-      addEdge({ source: doc.id, target: p.id, relationship: 'ESTABLISHES' });
+      addEdge({ source: doc.id, target: p.id, relationship: 'ESTABLISHES_PRIORITY', weight: 11 - p.rank });
     }
   }
 
@@ -104,7 +107,7 @@ export async function buildKnowledgeGraph(scenarioId: string): Promise<Knowledge
 
     // Planning doc → strategy doc
     if (doc.strategyDocId) {
-      addEdge({ source: doc.strategyDocId, target: doc.id, relationship: 'DIRECTS' });
+      addEdge({ source: doc.strategyDocId, target: doc.id, relationship: 'IMPLEMENTS' });
     }
 
     // Planning priorities
@@ -116,11 +119,65 @@ export async function buildKnowledgeGraph(scenarioId: string): Promise<Knowledge
         sublabel: `Rank ${p.rank}`,
         meta: { targetId: p.targetId },
       });
-      addEdge({ source: doc.id, target: p.id, relationship: 'ESTABLISHES' });
+      addEdge({ source: doc.id, target: p.id, relationship: 'ESTABLISHES_PRIORITY', weight: 11 - p.rank });
 
       // Trace to strategy priority
       if (p.strategyPriorityId) {
         addEdge({ source: p.strategyPriorityId, target: p.id, relationship: 'DERIVES' });
+      }
+    }
+  }
+
+  // ─── Space Needs (Priority Traceability) ────────────────────────────────────
+
+  const spaceNeeds = await prisma.spaceNeed.findMany({
+    where: {
+      mission: {
+        package: { taskingOrder: { scenarioId } },
+      },
+    },
+    include: {
+      mission: { select: { id: true, callsign: true, missionId: true } },
+      allocations: {
+        include: { spaceAsset: { select: { id: true, name: true } } },
+      },
+    },
+  });
+
+  for (const need of spaceNeeds) {
+    addNode({
+      id: need.id,
+      type: 'SPACE_NEED',
+      label: `${need.capabilityType} Need`,
+      sublabel: need.mission?.callsign || need.mission?.missionId || undefined,
+      meta: {
+        capability: need.capabilityType,
+        fulfilled: need.fulfilled,
+        coverageLat: need.coverageLat,
+        coverageLon: need.coverageLon,
+        startTime: need.startTime.toISOString(),
+        endTime: need.endTime.toISOString(),
+      },
+    });
+
+    // SpaceNeed → Mission
+    if (need.missionId) {
+      addEdge({ source: need.id, target: need.missionId, relationship: 'SUPPORTS_MISSION' });
+    }
+
+    // PriorityEntry → SpaceNeed (traced priority)
+    if (need.priorityEntryId) {
+      addEdge({ source: need.priorityEntryId, target: need.id, relationship: 'REQUIRES' });
+    }
+
+    // SpaceNeed → SpaceAsset (via allocations)
+    for (const alloc of need.allocations) {
+      if (alloc.spaceAssetId) {
+        addEdge({
+          source: need.id,
+          target: alloc.spaceAssetId,
+          relationship: `ALLOCATED_TO${alloc.status ? ` (${alloc.status})` : ''}`,
+        });
       }
     }
   }
@@ -192,7 +249,7 @@ export async function buildKnowledgeGraph(scenarioId: string): Promise<Knowledge
     // Sub-loop: Connect Space Asset to the Missions it is allocated to
     for (const alloc of sa.allocations) {
       if (alloc.spaceNeed?.missionId) {
-        addEdge({ source: sa.id, target: alloc.spaceNeed.missionId, relationship: 'SUPPORTS' });
+        addEdge({ source: sa.id, target: alloc.spaceNeed.missionId, relationship: 'PROVIDES_COVERAGE' });
       }
     }
   }
@@ -200,7 +257,7 @@ export async function buildKnowledgeGraph(scenarioId: string): Promise<Knowledge
   // ─── Tasking Orders → Missions → Targets ────────────────────────────────
 
   const orders = await prisma.taskingOrder.findMany({
-    where: { scenarioId },
+    where: { scenarioId, ...(atoDay != null ? { atoDayNumber: atoDay } : {}) },
     include: {
       missionPackages: {
         include: {
@@ -227,7 +284,7 @@ export async function buildKnowledgeGraph(scenarioId: string): Promise<Knowledge
 
     // Order → planning doc
     if (order.planningDocId) {
-      addEdge({ source: order.planningDocId, target: order.id, relationship: 'TASKS' });
+      addEdge({ source: order.planningDocId, target: order.id, relationship: 'AUTHORIZES' });
     }
 
     for (const pkg of order.missionPackages) {
@@ -241,7 +298,7 @@ export async function buildKnowledgeGraph(scenarioId: string): Promise<Knowledge
         });
 
         // Mission → order
-        addEdge({ source: order.id, target: mission.id, relationship: 'CONTAINS' });
+        addEdge({ source: order.id, target: mission.id, relationship: 'ASSIGNS_MISSION' });
 
         // Mission → unit
         if (mission.unitId) {
@@ -272,7 +329,8 @@ export const knowledgeGraphRoutes = Router();
 
 knowledgeGraphRoutes.get('/:scenarioId', async (req, res) => {
   try {
-    const graph = await buildKnowledgeGraph(req.params.scenarioId);
+    const atoDay = req.query.atoDay ? parseInt(req.query.atoDay as string, 10) : undefined;
+    const graph = await buildKnowledgeGraph(req.params.scenarioId, atoDay);
     res.json({
       success: true,
       data: graph,

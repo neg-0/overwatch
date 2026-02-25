@@ -48,6 +48,15 @@ interface IngestCard {
   completedAt?: number;
 }
 
+interface ReviewFlag {
+  field: string;
+  rawValue: string;
+  confidence: number;
+  reason: string;
+  documentType: string;
+  ingestLogId: string;
+}
+
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 const DOC_TYPE_ICONS: Record<string, string> = {
@@ -149,6 +158,8 @@ export function DocumentIntake() {
   const [sourceHint, setSourceHint] = useState('auto');
   const [submitting, setSubmitting] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [reviewFlags, setReviewFlags] = useState<ReviewFlag[]>([]);
+  const [showFlags, setShowFlags] = useState(false);
 
   // Refs for link lines
   const centerRef = useRef<HTMLDivElement>(null);
@@ -214,6 +225,25 @@ export function DocumentIntake() {
   useEffect(() => {
     fetchDocs();
   }, [fetchDocs]);
+
+  // ─── Fetch Review Flags ─────────────────────────────────────────────────
+
+  const fetchReviewFlags = useCallback(async () => {
+    if (!activeScenarioId) return;
+    try {
+      const res = await fetch(`/api/ingest/review-flags?scenarioId=${activeScenarioId}`);
+      const json = await res.json();
+      if (json.flags) {
+        setReviewFlags(json.flags);
+      }
+    } catch {
+      // silently fail
+    }
+  }, [activeScenarioId]);
+
+  useEffect(() => {
+    fetchReviewFlags();
+  }, [fetchReviewFlags]);
 
   // ─── Compute Entity Matches When Doc Selected ───────────────────────────
 
@@ -389,19 +419,88 @@ export function DocumentIntake() {
     }
   };
 
-  const handleImportSubmit = async () => {
-    let text = importText.trim();
-    if (importFile && !text) {
-      text = await importFile.text();
+  // ─── Batch Ingest All Unprocessed Docs ─────────────────────────────────
+
+  const [batchInProgress, setBatchInProgress] = useState(false);
+
+  const batchIngestAll = async () => {
+    if (!activeScenarioId) return;
+    const unprocessed = docs.filter(d => !d.ingestedAt);
+    if (unprocessed.length === 0) return;
+    setBatchInProgress(true);
+    try {
+      const res = await fetch(`/api/ingest/${activeScenarioId}/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documents: unprocessed.map(d => ({ text: d.content })),
+        }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setToasts(prev => [...prev.slice(-4), `📦 Batch: ${json.results?.length || unprocessed.length} docs queued`]);
+      } else {
+        setToasts(prev => [...prev.slice(-4), `❌ Batch failed: ${json.error || 'Unknown'}`]);
+      }
+    } catch {
+      setToasts(prev => [...prev.slice(-4), '❌ Batch ingest failed']);
+    } finally {
+      setBatchInProgress(false);
     }
-    if (!text) return;
-    await ingestDocument(text, sourceHint);
-    setShowImport(false);
-    setImportText('');
-    setImportFile(null);
+  };
+
+  const handleImportSubmit = async () => {
+    if (!activeScenarioId) return;
+    setSubmitting(true);
+
+    try {
+      // Binary file upload path (PDF, DOCX) — send to server for extraction
+      if (importFile) {
+        const ext = importFile.name.split('.').pop()?.toLowerCase();
+        if (ext === 'pdf' || ext === 'docx') {
+          const formData = new FormData();
+          formData.append('file', importFile);
+          const res = await fetch(`/api/ingest/${activeScenarioId}/upload`, {
+            method: 'POST',
+            body: formData,
+          });
+          const json = await res.json();
+          if (!res.ok) {
+            setToasts(prev => [...prev.slice(-4), `❌ Upload failed: ${json.error || 'Unknown error'}`]);
+          }
+          setShowImport(false);
+          setImportText('');
+          setImportFile(null);
+          return;
+        }
+      }
+
+      // Text path — either pasted text or .txt file
+      let text = importText.trim();
+      if (importFile && !text) {
+        text = await importFile.text();
+      }
+      if (!text) {
+        setSubmitting(false);
+        return;
+      }
+      await ingestDocument(text, sourceHint);
+      setShowImport(false);
+      setImportText('');
+      setImportFile(null);
+    } catch {
+      setToasts(prev => [...prev.slice(-4), '❌ Import failed']);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   // ─── File Drop Handlers ────────────────────────────────────────────────
+
+  const isBinaryFile = (name: string) => {
+    const ext = name.split('.').pop()?.toLowerCase();
+    return ext === 'pdf' || ext === 'docx';
+  };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -409,8 +508,12 @@ export function DocumentIntake() {
     const file = e.dataTransfer.files[0];
     if (file) {
       setImportFile(file);
-      // Read file contents into importText
-      file.text().then(t => setImportText(t));
+      // Only read text for non-binary files
+      if (!isBinaryFile(file.name)) {
+        file.text().then(t => setImportText(t));
+      } else {
+        setImportText(`[${file.name}] — ${(file.size / 1024).toFixed(1)} KB — will be uploaded for server-side extraction`);
+      }
     }
   };
 
@@ -418,7 +521,11 @@ export function DocumentIntake() {
     const file = e.target.files?.[0];
     if (file) {
       setImportFile(file);
-      file.text().then(t => setImportText(t));
+      if (!isBinaryFile(file.name)) {
+        file.text().then(t => setImportText(t));
+      } else {
+        setImportText(`[${file.name}] — ${(file.size / 1024).toFixed(1)} KB — will be uploaded for server-side extraction`);
+      }
     }
   };
 
@@ -537,6 +644,64 @@ export function DocumentIntake() {
           )}
         </div>
       </div>
+
+      {/* ─── Review Flags Banner ──────────────────────────────────── */}
+      {reviewFlags.length > 0 && (
+        <div style={{
+          margin: '0 0 4px',
+          background: 'rgba(245, 158, 11, 0.06)',
+          borderBottom: '1px solid rgba(245, 158, 11, 0.2)',
+        }}>
+          <button
+            onClick={() => setShowFlags(!showFlags)}
+            style={{
+              width: '100%', padding: '8px 16px',
+              background: 'none', border: 'none', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: '8px',
+              fontSize: '12px', fontWeight: 600, color: 'var(--accent-warning)',
+            }}
+          >
+            <span className="review-flags-badge">{reviewFlags.length}</span>
+            Review Flags — fields requiring manual verification
+            <span style={{ marginLeft: 'auto', fontSize: '10px', opacity: 0.6 }}>
+              {showFlags ? '▲ Hide' : '▼ Show'}
+            </span>
+          </button>
+          {showFlags && (
+            <div style={{ padding: '0 16px 12px', maxHeight: '200px', overflowY: 'auto' }}>
+              {reviewFlags.map((flag, i) => (
+                <div key={i} style={{
+                  display: 'flex', alignItems: 'flex-start', gap: '12px',
+                  padding: '8px 0', borderTop: i > 0 ? '1px solid rgba(245, 158, 11, 0.1)' : undefined,
+                  fontSize: '11px',
+                }}>
+                  <span style={{
+                    fontFamily: 'var(--font-mono)', fontWeight: 700,
+                    color: 'var(--accent-warning)', minWidth: '100px',
+                  }}>
+                    {flag.field}
+                  </span>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', flex: 1 }}>
+                    {flag.rawValue}
+                  </span>
+                  <span style={{
+                    fontSize: '10px', color: 'var(--text-muted)',
+                    maxWidth: '200px', lineHeight: 1.4,
+                  }}>
+                    {flag.reason}
+                  </span>
+                  <span style={{
+                    fontSize: '9px', fontFamily: 'var(--font-mono)',
+                    color: 'var(--text-muted)', opacity: 0.6,
+                  }}>
+                    {flag.documentType}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ─── Pipeline Animation (if active) ────────────────────────── */}
       {activeCards.filter(c => c.stage !== 'complete').length > 0 && (
@@ -668,10 +833,28 @@ export function DocumentIntake() {
             )}
           </div>
 
-          {/* Import button */}
+          {/* Import + Batch buttons */}
           <div style={{
             padding: '12px', borderTop: '1px solid var(--border-subtle)',
+            display: 'flex', flexDirection: 'column', gap: '6px',
           }}>
+            {(() => {
+              const unprocessedCount = docs.filter(d => !d.ingestedAt).length;
+              return unprocessedCount > 0 ? (
+                <button
+                  onClick={batchIngestAll}
+                  disabled={batchInProgress || submitting}
+                  style={{
+                    width: '100%', padding: '10px', borderRadius: '8px', border: 'none',
+                    background: 'var(--accent-primary)', color: '#000',
+                    fontSize: '12px', fontWeight: 700, cursor: 'pointer',
+                    transition: 'all 0.2s', opacity: batchInProgress ? 0.7 : 1,
+                  }}
+                >
+                  {batchInProgress ? '⟳ Batching…' : `⚡ Ingest All (${unprocessedCount})`}
+                </button>
+              ) : null;
+            })()}
             <button
               onClick={() => setShowImport(true)}
               style={{
