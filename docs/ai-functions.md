@@ -1,203 +1,155 @@
 # AI Functions Reference
 
-Every AI-powered function in Overwatch, organized by generation phase. Each entry documents the function signature, LLM model used, prompt strategy, output format, fallback behavior, and database writes.
+All AI-powered functions in Overwatch, organized by service. Every function uses the tiered model selection (`flagship` → o3, `midRange` → o4-mini, `fast` → gpt-4o-mini).
 
 ---
 
-## Model Tiers
+## Scenario Generator (`scenario-generator.ts`)
 
-| Tier | Model | Token Budget | Use |
-|---|---|---|---|
-| `flagship` | o3 | 16,000 | Strategic docs (NDS, NMS, JSCP) |
-| `midRange` | o4-mini | 4,000–8,000 | Campaign plans, daily orders, MAAP, MSEL |
-| `fast` | gpt-4o-mini | 2,000 | Real-time advisory, document classification |
+### `generateStrategicContext(scenarioId, theater, adversary, description)`
+**Model**: `flagship` → Generates 5 strategic documents (NDS, NMS, JSCP, CONPLAN, OPLAN) in one pass.
+**Prompt strategy**: Single prompt requesting all 5 tiers with context cascading downstream.
+**Output**: Structured JSON with `documents[]` — each with title, docType, content, authorityLevel, tier, and extracted `priorities[]`.
+**Schema enforcement**: Uses `llm-schemas.ts` strategic context schema.
 
-All calls use `reasoning_effort: 'medium'` to balance quality with speed.
+### `generateCampaignPlan(scenarioId, strategicContext)`
+**Model**: `midRange` → Generates JFC/Component guidance and campaign plan.
+**Context**: Receives full strategic context from upstream documents.
+**Output**: JSON with campaign objectives, phasing, and component guidance.
 
----
+### `generateBases(scenarioId, theater, oplanContent)`
+**Model**: `midRange` → Generates theater-appropriate basing posture.
+**Output**: Array of bases with type, coordinates, ICAO codes, country.
 
-## Scenario Generation Functions
+### `generateORBAT(scenarioId, theater, adversary, bases)`
+**Model**: `midRange` → Generates friendly and adversary Orders of Battle.
+**Context**: Uses extensive `reference-data.ts` (2,270+ lines) with INDOPACOM Blue Force units, adversary forces, and platform catalogs including comms systems.
+**Output**: Array of units with designations, platforms, domain assignment, basing.
 
-### `generateStrategicContext()`
+### `generateSpaceConstellation(scenarioId, theater)`
+**Model**: `midRange` → Generates space constellation (friendly + adversary).
+**Output**: Space assets with TLE data, capabilities, orbital parameters.
 
-| Property | Value |
-|---|---|
-| **Location** | `scenario-generator.ts:54–199` |
-| **Model** | `flagship` |
-| **Calls** | 3 sequential LLM calls (NDS → NMS → JSCP) |
-| **Output** | 3 `StrategyDocument` records |
-| **Fallback** | Placeholder documents if LLM fails |
+### `generatePlanningDocuments(scenarioId, oplanContent)`
+**Model**: `midRange` → Generates JIPTL, ACO, SPINS, and component priority lists.
+**Output**: Planning documents with extracted priorities and traced lineage to strategy.
 
-**Prompt Strategy**: Each document receives the full text of its parent. The NDS prompt receives theater + adversary + description. The NMS prompt receives theater + adversary + the NDS text. The JSCP prompt receives theater + adversary + both NDS and NMS text.
+### `generateMAAP(scenarioId, jiptlContent, oplanContent)`
+**Model**: `midRange` → Generates Master Air Attack Plan.
+**Output**: MAAP with sortie allocation, target-weapon pairing, support packages.
 
-**Key Prompt Instructions**:
-- 800–1200 words per document
-- Memorandum format (TO/FROM/SUBJECT)
-- Return only text, no JSON or markdown fences
+### `generateMSELInjects(scenarioId, oplanPhase, durationDays)`
+**Model**: `midRange` → Generates MSEL events across scenario duration.
+**Output**: Array of injects with trigger day/hour, type, doctrine fields (CJCSM 3500.03F compliant).
 
----
-
-### `generateCampaignPlan()`
-
-| Property | Value |
-|---|---|
-| **Location** | `scenario-generator.ts:226–380` |
-| **Model** | `midRange` |
-| **Calls** | 2 sequential LLM calls (CONPLAN → OPLAN) |
-| **Output** | 2 `StrategyDocument` records |
-| **Fallback** | Placeholder documents |
-
-**Prompt Strategy**: Uses `CAMPAIGN_PLAN_PROMPT` template. The OPLAN prompt instructs the LLM to describe force requirements in narrative prose — unit designations, platforms, quantities, and basing — written as a staff officer would.
-
-**Post-processing**: None. The OPLAN is stored as prose text. ORBAT extraction from this prose is handled separately by the AI ingest engine (Phase 3).
+### `generateDayOrders(scenarioId, atoDay, simContext)`
+**Model**: `midRange` → Generates ATO, MTO, STO for a specific day.
+**Context**: MAAP guidance, OPLAN phase, previous-day BDA/mission summaries.
+**Output**: Structured orders with mission packages, individually parsed into DB entities.
+**Schema enforcement**: Uses `llm-schemas.ts` order generation schemas.
 
 ---
 
-### `generateJointForce()`
+## Game Master (`game-master.ts`)
 
-| Property | Value |
-|---|---|
-| **Location** | `scenario-generator.ts:614–865` |
-| **Model** | None (deterministic reference data) |
-| **Output** | `Unit`, `Asset`, `AssetType` records |
-| **Source** | Reference INDOPACOM ORBAT |
+POC #1 Phase 4 — reads the structured knowledge graph (DB) and generates operational documents on demand. All output is ingested back through the doc-ingest pipeline.
 
-**Not AI-driven.** Uses reference INDOPACOM ORBAT data (7 Blue Force units) to build the joint force. Phase 3 will replace this with AI-based extraction from OPLAN prose via the ingest engine.
+### `generateATO(scenarioId, atoDay, io?)`
+**Model**: `midRange` → Generates a complete Air Tasking Order.
+**Prompt**: Uses `ATO_PROMPT` template with full scenario context, ORBAT, previous ATOs, BDA, and MAAP.
+**Flow**: Generate prose ATO → feed through `classifyAndNormalize()` → persist as `TaskingOrder` + `MissionPackage` + `Mission` entities.
+**Output**: `GameMasterResult` with generated text, ingest result (created ID, mission count, confidence), and duration.
 
-**Platform Comms Catalog**: Creates `AssetType` records with embedded comms systems:
-```typescript
-{
-  commsSystems: [
-    { band: "EHF", system: "AEHF", role: "primary" },
-    { band: "UHF", system: "MUOS", role: "backup" }
-  ],
-  gpsType: "M-CODE",
-  dataLinks: ["LINK16", "MADL"]
-}
-```
+### `generateInject(scenarioId, atoDay, io?)`
+**Model**: `midRange` → Generates context-aware scenario friction.
+**Prompt**: Uses `INJECT_PROMPT` with current ops tempo, active missions, and recent events.
+**Output**: JSON array of injects parsed and persisted as `ScenarioInject` records.
 
----
+### `assessBDA(scenarioId, atoDay, io?)`
+**Model**: `midRange` → Comprehensive Battle Damage Assessment.
+**Prompt**: Uses `BDA_PROMPT` with mission details, target sets, and weapon effectiveness data.
+**Output**: Structured per-target assessment with `damagePercent`, `functionalKill`, `restrikeNeeded`. Updates `PriorityEntry` ranks and nominates re-strikes.
 
-### `generatePlanningDocuments()`
+### `generateMAAP(scenarioId, io?)`
+**Model**: `midRange` → Master Air Attack Plan generation from knowledge graph.
+**Prompt**: Full ORBAT, space constellation, adversary capabilities.
+**Output**: Structured MAAP persisted as `PlanningDocument`.
 
-| Property | Value |
-|---|---|
-| **Location** | `scenario-generator.ts:978–1076` |
-| **Model** | `midRange` |
-| **Calls** | 3 sequential LLM calls (JIPTL → SPINS → ACO) |
-| **Output** | 3 `PlanningDocument` records + `PriorityEntry` records |
-| **Fallback** | Placeholder documents |
-
-**Prompt Strategy**: Uses `PLANNING_DOC_PROMPT` template with strategy priorities extracted from the NDS/NMS/JSCP cascade.
-
-**JIPTL Post-processing**: After generation, the function parses priority entries from the JIPTL content and creates `PriorityEntry` records ranked 1–N.
+### `buildScenarioContext(scenarioId, atoDay)`
+**Helper**: Assembles full scenario context by querying the database (knowledge graph). Pulls: strategy docs, planning docs, ORBAT, space assets, active missions, previous ATOs/BDA, recent injects.
 
 ---
 
-### `generateMAAP()`
+## Decision Advisor (`decision-advisor.ts`)
 
-| Property | Value |
-|---|---|
-| **Location** | `scenario-generator.ts:1125–1212` |
-| **Model** | `midRange` |
-| **Calls** | 1 LLM call |
-| **Output** | 1 `PlanningDocument` (docType: MAAP) |
-| **Fallback** | Placeholder MAAP document |
+### `assessSituation(scenarioId)`
+**Model**: `fast` → Rapid situation assessment.
+**Output**: `{ issues[], opportunities[], risks[], overallThreatLevel, missionReadinessScore }`.
 
-**Prompt Strategy**: Uses `MAAP_PROMPT` which receives OPLAN content, JIPTL priorities, and ORBAT summary. Instructs the LLM to produce:
-1. Target-to-sortie allocation matrix
-2. Force packaging by priority
-3. Campaign phasing alignment
-4. Space support requirements
-5. Flow plan (tanker/AWACS)
-6. Assessment criteria (MOE/MOP)
+### `generateCOAs(scenarioId, assessment)`
+**Model**: `midRange` → Generate courses of action.
+**Context**: Receives situation assessment with identified issues and risks.
+**Output**: Array of COAs with description, resource requirements, risk level, expected outcomes.
 
----
+### `simulateImpact(scenarioId, coaId)`
+**Model**: `fast` → Project impact of a COA.
+**Output**: Impact assessment with affected missions, timeline changes, resource implications.
 
-### `generateMSELInjects()`
-
-| Property | Value |
-|---|---|
-| **Location** | `scenario-generator.ts` |
-| **Model** | `midRange` |
-| **Calls** | 1 LLM call |
-| **Output** | 1 `PlanningDocument` (docType: `MSEL`) |
-
-**Prompt Strategy**: Uses CJCSM 3500.03F-compliant MSEL prompt requesting a pipe-delimited table with 10 columns (SERIAL, DTG, LEVEL, TYPE, MODE, FROM, TO, MESSAGE, EXPECTED RESPONSE, OBJECTIVE, NOTES). Includes theater, adversary, duration, ORBAT summary, and space asset context.
-
-**Output**: Generates a realistic text document stored as a `PlanningDocument`. `ScenarioInject` records are extracted when the document is ingested through the doc-ingest pipeline (`EVENT_LIST` hierarchy level).
+### `handleNLQ(scenarioId, query)`
+**Model**: `fast` → Natural language query against scenario data.
+**Input**: Freeform question (e.g. "Which missions target Priority 1 on Day 3?").
+**Output**: Contextual answer assembled from database queries + LLM interpretation.
 
 ---
 
-## Daily Order Generation Functions
+## Document Ingestion (`doc-ingest.ts`)
 
-### `generateDayOrders()`
-
-| Property | Value |
-|---|---|
-| **Location** | `scenario-generator.ts:1351–1494` |
-| **Model** | — (orchestrator, delegates to `generateOrder`) |
-| **Output** | 3 `TaskingOrder` records (ATO, MTO, STO) per day |
-
-**Context Assembly** (Phase C):
-1. **MAAP Guidance** — first 2000 chars of MAAP document content
-2. **OPLAN Phase** — deterministic day→phase mapping:
-   - Day 1: Phase 0 (Shape)
-   - Days 2–3: Phase 1 (Deter)
-   - Days 4–5: Phase 2 (Seize Initiative)
-   - Days 6–8: Phase 3 (Dominate)
-   - Days 9+: Phase 4 (Stabilize)
-3. **Previous Day BDA** — queries `TaskingOrder → MissionPackage → Mission → MissionTarget` for Day N-1, builds mission summary (max 15 entries)
+### `classifyAndNormalize(scenarioId, rawText, sourceFormat?)`
+**Model**: `fast` → Two-phase LLM classification.
+**Phase 1**: Classify hierarchy level (STRATEGY / PLANNING / ORDER / MSEL) and document type.
+**Phase 2**: Normalize to structured JSON matching the appropriate schema.
+**Schema enforcement**: Uses `llm-schemas.ts` with `response_format: { type: 'json_schema' }`.
+**Output**: Created record ID, document type, confidence, review flags, extracted counts.
 
 ---
 
-### `generateOrder()`
+## Demo Document Generator (`demo-doc-generator.ts`)
 
-| Property | Value |
-|---|---|
-| **Location** | `scenario-generator.ts:1496–1757` |
-| **Model** | `midRange` |
-| **Calls** | 1 LLM call per order |
-| **Output** | 1 `TaskingOrder` + `MissionPackage` + `Mission` + `Waypoint` + `TimeWindow` + `MissionTarget` + `SupportRequirement` + `SpaceNeed` records |
-
-**The workhorse function.** Receives a prompt template (ATO/MTO/STO) and context dictionary, calls the LLM, parses the JSON response, and persists the full mission hierarchy.
-
-**Post-processing**:
-1. Parse JSON from LLM response (strip markdown fences)
-2. Create `TaskingOrder` record
-3. For each mission package: create `MissionPackage`, then for each mission:
-   - Create `Mission` with status `PLANNED`
-   - Create `Waypoint` records with lat/lon/altitude
-   - Create `TimeWindow` records (TOT, ONSTA, etc.)
-   - Create `MissionTarget` records with BE numbers
-   - Create `SupportRequirement` records
-   - Create `SpaceNeed` records
-4. Auto-populate additional `SpaceNeed` from `AssetType.commsSystems`
+### `generateDemoDocument(scenarioId, docType?)`
+**Model**: `fast` (gpt-4o-mini) → Generates realistic training documents.
+**Doc Types**: FRAGORD, INTEL_REPORT, ATO_AMENDMENT, VOCORD, SPINS_UPDATE, SITREP, OPORD_ANNEX.
+**Context**: Assembles current scenario state (active missions, space assets, recent events, ATO day).
+**Output**: Raw military-formatted document text (150–400 words) for use in intake demos.
 
 ---
 
-### `getUnfulfilledSpaceNeeds()`
+## Knowledge Graph Builder (`knowledge-graph.ts`)
 
-| Property | Value |
-|---|---|
-| **Location** | `scenario-generator.ts:1759–1777` |
-| **Model** | None (query only) |
-| **Output** | String summary of unfulfilled space needs |
-
-Queries all `SpaceNeed` records where `fulfilled = false` and formats them as a human-readable list for the STO prompt.
+### `buildKnowledgeGraph(scenarioId, atoDay?)`
+**Pure DB** — no LLM. Queries all scenario entities and builds a graph structure.
+**Node types**: SCENARIO, STRATEGY, PLANNING, ORDER, MISSION, UNIT, SPACE_ASSET, TARGET, INJECT, BASE.
+**Edge types**: Derived from foreign key relationships with relationship labels and confidence scores.
+**Output**: `{ nodes: GraphNode[], edges: GraphEdge[] }`.
 
 ---
 
-## Non-Generation AI Functions (Other Services)
+## Generation Logger (`generation-logger.ts`)
 
-### Decision Advisor (`decision-advisor.ts`)
+### `logGeneration(scenarioId, step, artifact, model, output, duration, retryCount)`
+Persists structured audit records to the `GenerationLog` table. Tracks: model used, prompt/output tokens, character count, duration, retry count, raw output for debugging.
 
-AI-powered course of action (COA) generation and analysis. Evaluates operational situations and recommends leadership decisions.
+---
 
-### Document Ingestion (`doc-ingest.ts`)
+## LLM Schema Enforcement (`llm-schemas.ts`)
 
-LLM-powered document classification and structured extraction. Classifies incoming documents into the hierarchy (strategy/planning/order) and extracts structured fields.
+Centralized JSON schemas used with OpenAI's `response_format: { type: 'json_schema', json_schema: ... }` parameter. Ensures LLM outputs strictly match predefined structures and enum constraints.
 
-### Coverage Calculator (`coverage-calculator.ts`)
-
-Deterministic space coverage window computation. Not AI-powered, but its outputs feed AI-generated STOs.
+### Available Schemas
+- **Classification**: `classifyDocumentSchema` — hierarchy level + document type
+- **Strategic normalization**: Strategy document with priorities
+- **Planning normalization**: Planning doc with priority entries
+- **Order normalization**: Tasking order with mission packages, missions, waypoints, targets
+- **MSEL normalization**: Scenario inject with doctrine fields
+- **ATO generation**: Day-specific ATO structure
+- **MTO generation**: Maritime tasking structure
+- **STO generation**: Space tasking structure

@@ -1,143 +1,111 @@
 # Daily Tasking Cycle
 
+The daily tasking cycle generates operational orders (ATO, MTO, STO) for each simulated day. It has evolved from simple order generation to a closed-loop AI pipeline driven by the Game Master service.
+
 ## Overview
 
-The daily tasking cycle generates Air Tasking Orders (ATO), Maritime Tasking Orders (MTO), and Space Tasking Orders (STO) for each day of the scenario. Starting with Phase C, each day's orders are **context-aware** — they adapt to the current campaign phase, reference MAAP sortie guidance, and react to previous-day mission outcomes.
-
-## Execution Flow
-
 ```mermaid
-sequenceDiagram
-    participant Sim as Simulation Engine
-    participant DayOrders as generateDayOrders()
-    participant DB as Database
-    participant LLM as OpenAI API
-
-    Sim->>DayOrders: generateDayOrders(scenarioId, atoDay)
-    DayOrders->>DB: Query scenario, units, space assets, planning docs
-    DayOrders->>DB: Query MAAP document content
-    DayOrders->>DB: Query OPLAN (StrategyDocument tier 5)
-    DayOrders->>DB: Query Day N-1 TaskingOrders + Missions + Targets
-
-    DayOrders->>DayOrders: Determine OPLAN phase from day number
-    DayOrders->>DayOrders: Build previous-day BDA summary
-
-    DayOrders->>LLM: ATO prompt (with MAAP + phase + BDA)
-    LLM-->>DayOrders: ATO JSON
-    DayOrders->>DB: Persist ATO hierarchy
-
-    DayOrders->>LLM: MTO prompt (with MAAP + phase + BDA)
-    LLM-->>DayOrders: MTO JSON
-    DayOrders->>DB: Persist MTO hierarchy
-
-    DayOrders->>DB: getUnfulfilledSpaceNeeds()
-    DayOrders->>LLM: STO prompt (with unfulfilled needs)
-    LLM-->>DayOrders: STO JSON
-    DayOrders->>DB: Persist STO hierarchy
+graph TB
+    A[Day Boundary Triggered] --> B[BDA Assessment]
+    B --> C[MAAP Guidance Check]
+    C --> D[Context Assembly]
+    D --> E[ATO Generation]
+    E --> F[Doc Ingest Pipeline]
+    F --> G[Structured Data Creation]
+    G --> H[Space Allocation]
+    H --> I[Orders Active]
 ```
 
-## Context Assembly
+## Phase 1: Context Assembly
 
-### MAAP Guidance
+Before generating orders, the system assembles comprehensive context:
 
-The MAAP (Master Air Attack Plan) document is queried from `PlanningDocument` where `docType = 'MAAP'`. The first 2000 characters are injected into ATO/MTO prompts to control sortie allocation per JIPTL priority.
-
-### OPLAN Phase Determination
-
-Campaign phase is determined deterministically from the ATO day number:
-
-| Day Range | Phase | Character |
+| Context Source | Data | Purpose |
 |---|---|---|
-| Day 1 | Phase 0: Shape | Pre-hostility posturing, ISR emphasis, deterrence |
-| Days 2–3 | Phase 1: Deter | Show of force, forward deployment, SEAD/DCA establishment |
-| Days 4–5 | Phase 2: Seize Initiative | Opening strikes, IADS suppression, air superiority |
-| Days 6–8 | Phase 3: Dominate | Sustained operations, deep strike, maritime interdiction |
-| Days 9+ | Phase 4: Stabilize | Exploitation, dynamic targeting, reduced tempo |
+| **MAAP Guidance** | Active MAAP document | Sortie allocation, target priority |
+| **OPLAN Phase** | Current phase from scenario timeline | ROE, objectives for current phase |
+| **Previous Day BDA** | `assessBDA()` results | Restrike nominations, degraded targets |
+| **Previous ATO** | Prior day's tasking order text | Continuity of operations |
+| **ORBAT** | All units with capabilities | Available forces |
+| **Space Assets** | Constellation status | Available space support |
+| **Active Injects** | Unfired MSEL events | Planned friction/crises |
+| **Strategic Priorities** | `StrategyPriority` chain | Top-level objectives driving operations |
 
-### Previous-Day Mission Summary
+## Phase 2: BDA Assessment (`assessBDA`)
 
-For Day 2+, the system queries all `TaskingOrder` records from the previous day with their full mission hierarchy:
+The Game Master evaluates the previous day's results:
 
-```
-TaskingOrder (Day N-1)
-  → MissionPackage[]
-    → Mission[]
-      → MissionTarget[]
-```
+1. **Per-target assessment**: Each target receives `damagePercent`, `functionalKill` (boolean), `restrikeNeeded` (boolean), and `effect` description
+2. **Restrike nominations**: Targets with insufficient damage are flagged for re-attack
+3. **Priority updates**: `PriorityEntry` records are updated based on target degradation — sufficiently degraded targets drop in priority, new targets may be nominated
+4. **Mission effectiveness**: Sorties fragged vs. executed vs. effective rates
 
-Each mission is summarized as:
-```
-VIPER 11 (OCA, F-35Ax4) — Status: PLANNED — Targets: Adversary SAM Battery Alpha
-```
-
-Maximum 15 entries are included to stay within token limits.
-
-## Order Generation
+## Phase 3: Order Generation
 
 ### ATO (Air Tasking Order)
+**Model**: `midRange` (o4-mini)
 
-**Prompt template**: `ATO_PROMPT`
-
-Generates 3–6 mission packages covering:
-- DCA (Defensive Counter Air)
-- OCA (Offensive Counter Air) / Strike
-- SEAD (Suppression of Enemy Air Defenses)
-- CAS (Close Air Support)
-- AI (Air Interdiction)
-- ISR (Intelligence, Surveillance, Reconnaissance)
-- TANKER (Aerial Refueling)
-- C2 (Command and Control / AWACS)
-
-Each mission includes full waypoint routing with lat/lon, TOT windows, target assignments, support requirements, and space capability needs.
+The Game Master generates a complete ATO document:
+1. Builds full scenario context via `buildScenarioContext()`
+2. Generates prose ATO using the `ATO_PROMPT` template
+3. Feeds generated text through `classifyAndNormalize()` (doc-ingest pipeline)
+4. Pipeline creates: `TaskingOrder` → `MissionPackage[]` → `Mission[]` with `Waypoint[]`, `TimeWindow[]`, `MissionTarget[]`, `SupportRequirement[]`, `SpaceNeed[]`
 
 ### MTO (Maritime Tasking Order)
-
-**Prompt template**: `MTO_PROMPT`
-
-Generates 2–4 mission packages covering:
-- ASW patrols
-- Surface warfare
-- Mine countermeasures
-- Carrier strike group operations
-- Escort/sea lane security
-- Maritime ISR
+Generated as part of the day orders with maritime-specific mission types (ASW, MIW, SUW, naval ISR).
 
 ### STO (Space Tasking Order)
+Generated with space-specific tasking (satellite repositioning, coverage windows, link scheduling).
 
-**Prompt template**: `STO_PROMPT`
+## Phase 4: Space Allocation
 
-Generated **after** ATO and MTO to address their unfulfilled space needs. Covers:
-- GPS constellation task allocation
-- SATCOM bandwidth prioritization (AEHF, WGS, MUOS)
-- OPIR/missile warning coverage
-- Space ISR tasking
-- Maintenance windows
+After orders are generated, the Space Allocator resolves resource contention:
+
+1. Gather all `SpaceNeed` records for the ATO day
+2. Match needs against available `SpaceCoverageWindow` entries
+3. Detect contention groups (multiple needs competing for same capability/time/area)
+4. Resolve by priority rank (traced from `PriorityEntry` → `StrategyPriority`)
+5. Create `SpaceAllocation` records with status: FULFILLED, DEGRADED, CONTENTION, or DENIED
+
+## Phase 5: Orders Active
+
+Generated orders become active in the simulation:
+- Missions enter `PLANNED` status
+- Simulation engine begins progression through the mission state machine
+- Positions are interpolated along waypoint tracks
+- Space assets provide coverage per allocated windows
+
+## Closed-Loop Pipeline
+
+The key innovation is the **read → generate → ingest back** loop:
+
+```
+DB (Knowledge Graph) → Game Master → Prose Document → Doc Ingest → Structured Data → DB
+```
+
+This means:
+- The Game Master reads the current state of the world from the database
+- Generates human-readable operational documents
+- Those documents are processed by the same ingestion pipeline used for external documents
+- The result is properly structured data back in the database
+
+This approach ensures consistency between AI-generated and human-authored orders — both flow through the same normalization pipeline.
 
 ## Auto-Populated Space Needs
 
-After each order is generated, the system deterministically creates additional `SpaceNeed` records based on platform communications systems:
+Each generated mission automatically includes space requirements:
 
-| Platform Comms | Generated SpaceNeed |
+| Mission Type | Typical Space Needs |
 |---|---|
-| MUOS | `SATCOM_TACTICAL` |
-| WGS | `SATCOM_WIDEBAND` |
-| AEHF | `SATCOM_PROTECTED` |
-| GPS (any type) | `GPS` |
-| LINK16 | `LINK16` |
+| **Strike (CAS, AI, BAI)** | GPS_MILITARY, SATCOM_PROTECTED, ISR_SPACE |
+| **Air Defense (DCA, OCA)** | OPIR, LINK16, SATCOM_WIDEBAND |
+| **ISR** | SATCOM_WIDEBAND, SDA, DATALINK |
+| **Maritime (ASW, MIW)** | SATCOM_TACTICAL, WEATHER, GPS |
+| **SEAD** | SIGINT_SPACE, EW_SPACE, GPS_MILITARY |
+| **Space Ops** | SDA, SSA, LAUNCH_DETECT, CYBER_SPACE |
 
-This ensures space dependency tracking reflects actual platform capabilities, not just what the LLM includes in its response.
-
-## MSEL Injects
-
-The MSEL is generated as a text document (per CJCSM 3500.03F) during scenario creation (Step 9) and stored as a `PlanningDocument` with docType `MSEL`. When ingested through the doc intake pipeline, `ScenarioInject` records are extracted with full doctrine fields (serial number, DTG, MSEL level, event type, inject mode, from/to entities, expected response, objective tested).
-
-During simulation, injects fire at their scheduled `triggerDay` + `triggerHour`, creating operational friction:
-
-| Type | Examples |
-|---|---|
-| INFORMATION | SIGINT intercept, ISR imagery, adversary repositioning |
-| ACTION | Equipment failure, tanker divert, weather delay, logistics |
-| DECISION_POINT | Escalation events requiring commander decision |
-| CONTINGENCY | Civilian incident, ROE change, political constraint |
-
-Injects influence subsequent day planning through the previous-day context chain — if a GPS jamming inject fires on Day 3, Day 4's ATO should reference the degraded GPS environment.
+Space needs are generated with:
+- `missionCriticality` (CRITICAL → ROUTINE)
+- `fallbackCapability` for graceful degradation
+- `riskIfDenied` — AI-generated risk assessment text
+- `priorityEntryId` — traced back to JIPTL/strategy priority

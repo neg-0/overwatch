@@ -1,124 +1,140 @@
 # Simulation Engine
 
-## Overview
+The simulation engine (`simulation-engine.ts`, ~1,300 lines) manages real-time execution of scenarios with time compression, mission status progression, position interpolation, MSEL inject firing, space coverage computation, and the Game Master AI cycle.
 
-The simulation engine (`simulation-engine.ts`) drives real-time execution of generated scenarios. It advances simulation time, updates platform positions along waypoints, processes MSEL injects, and streams state to the frontend via WebSocket.
+## Architecture
+
+```mermaid
+graph TB
+    subgraph "Simulation Core"
+        A[SimulationState] --> B[Tick Loop]
+        B --> C{Day Boundary?}
+        C -->|Yes| D[Game Master Cycle]
+        C -->|No| E[Continue]
+        D --> E
+        E --> F[Update Missions]
+        F --> G[Fire Injects]
+        G --> H[Record Positions]
+        H --> I[Compute Coverage]
+        I --> J[Stream State via WS]
+    end
+```
 
 ## Time Compression
 
-| Setting | Value | Description |
+The simulation compresses real time into simulated time:
+
+| Ratio | Effect | Use Case |
 |---|---|---|
-| Default Ratio | 720 | 1 real minute = 12 simulated hours |
-| Min Ratio | 1 | Real-time |
-| Max Ratio | 1440 | 1 real minute = 1 simulated day |
+| 60× | 1 real min = 1 sim hr | Detailed tactical view |
+| 360× | 1 real min = 6 sim hrs | Fast operational tempo |
+| 720× | 1 real min = 12 sim hrs | Default — 1 ATO day per 2 min |
+| 1440× | 1 real min = 1 sim day | Rapid overview |
+| 3600× | 1 real min = 2.5 sim days | Sprint through multi-day scenarios |
 
-Configurable per scenario via `SimulationState.compressionRatio`.
+The compression ratio is adjustable on-the-fly via `setSpeed()`.
 
-## Simulation Loop
+## Simulation Lifecycle
 
-```mermaid
-stateDiagram-v2
-    [*] --> IDLE
-    IDLE --> RUNNING : Start
-    RUNNING --> PAUSED : Pause
-    PAUSED --> RUNNING : Resume
-    RUNNING --> STOPPED : Stop
-    PAUSED --> STOPPED : Stop
-    STOPPED --> [*]
+### Start (`startSimulation`)
+1. Query scenario + all artifacts
+2. Find or create `SimulationState` record
+3. Set status = RUNNING, simTime = scenario.startDate
+4. Start the tick interval
 
-    state RUNNING {
-        [*] --> AdvanceTime
-        AdvanceTime --> CheckDayBoundary
-        CheckDayBoundary --> GenerateOrders : New ATO Day
-        CheckDayBoundary --> UpdateMissions : Same Day
-        GenerateOrders --> UpdateMissions
-        UpdateMissions --> FireInjects
-        FireInjects --> RecordBDA
-        RecordBDA --> UpdatePositions
-        UpdatePositions --> StreamState
-        StreamState --> AdvanceTime
-    }
-```
+### Pause / Resume
+- Pause sets status = PAUSED, stops tick interval
+- Resume sets status = RUNNING, restarts tick interval
 
-### 1. Advance Time
-Increments `SimulationState.simTime` based on compression ratio and real elapsed time.
+### Stop
+- Sets status = STOPPED, clears tick interval
 
-### 2. Check Day Boundary
-When `simTime` crosses an ATO day boundary (0000Z), triggers `generateDayOrders()` for the new day. Updates `SimulationState.currentAtoDay`.
+### Seek (`seekTo`)
+- Jump to a specific sim time
+- Useful for reviewing past events or skipping ahead
 
-### 3. Generate Orders
-Calls `generateDayOrders(scenarioId, atoDay)` — see [Daily Tasking Cycle](./daily-tasking.md).
+### Speed Change (`setSpeed`)
+- Adjusts compression ratio without stopping simulation
 
-### 4. Update Missions
-Advances mission status through the lifecycle:
+## Tick Loop
+
+Each tick (runs at ~1s real-time intervals):
+
+1. **Advance time**: `simTime += compressionRatio * tickIntervalMs`
+2. **Check day boundary**: If `currentAtoDay` has changed → trigger Game Master cycle
+3. **Update missions**: Progress mission status through state machine
+4. **Fire injects**: Check for injects matching current day/hour → fire and broadcast
+5. **Record BDA**: Track mission results
+6. **Update positions**: Interpolate positions for active missions along waypoint tracks
+7. **Compute coverage**: Run SGP4 propagation for space assets, detect coverage gaps
+8. **Stream state**: Broadcast all updates via Socket.IO
+
+## Game Master Cycle (`runGameMasterCycle`)
+
+Triggered on ATO day boundaries, the Game Master cycle replaces simple `generateDayOrders()` with a full closed-loop AI pipeline:
+
+1. **Pause simulation** temporarily
+2. **Assess BDA** (`assessBDA()`) — evaluate previous day's mission results
+3. **Generate new ATO** (`generateATO()`) — create next day's air tasking order
+4. **Run space allocation** (`allocateSpaceResources()`) — resolve space resource contention
+5. **Resume simulation** with new orders active
+
+All generated documents are ingested back through the doc-ingest pipeline, creating proper structured data (TaskingOrder → MissionPackage → Mission with Waypoints, Targets, SpaceNeeds).
+
+## Mission Status Progression
+
+Missions transition through states based on elapsed time and waypoint proximity:
+
 ```
 PLANNED → BRIEFED → LAUNCHED → AIRBORNE → ON_STATION → ENGAGED → EGRESSING → RTB → RECOVERED
 ```
 
-Status transitions are time-driven based on waypoint ETAs.
+Branch states: `CANCELLED`, `DIVERTED`, `DELAYED`
 
-### 5. Fire MSEL Injects
+Transitions are driven by:
+- **Time windows**: Mission TOT, on-station, off-station times
+- **Waypoint progress**: Interpolated position along the waypoint track
+- **Inject effects**: MSEL injects can change mission status (e.g., DIVERTED)
 
-`fireScheduledInjects(io)` checks `ScenarioInject` records against the current sim time:
+## Position Interpolation
 
-- Fires injects where `triggerDay <= currentAtoDay` and `triggerHour <= simHour` and `fired = false`
-- Sets `fired = true` and `firedAt = simTime`
-- Applies domain-specific effects:
+Active missions have positions interpolated between waypoints:
 
-| Inject Type | Effect | Target |
-|---|---|---|
-| `SPACE` | Degrades a random operational SpaceAsset → creates `SATELLITE_JAMMED` SimEvent | SpaceAsset |
-| `FRICTION` | Delays a random active mission → creates `MISSION_DELAYED` SimEvent | Mission |
-| `INTEL` | Creates `INTEL_UPDATE` SimEvent (advisory) | Scenario |
-| `CRISIS` | Creates `CRISIS_EVENT` SimEvent (advisory, no asset effect) | Scenario |
+1. Calculate elapsed time since mission launch
+2. Determine current segment (which waypoints the mission is between)
+3. Linear interpolate lat/lon/alt between segment endpoints
+4. Apply heading and speed from segment geometry
 
-- Emits `inject:fired` WebSocket event with full inject details
+Positions are:
+- Persisted as `PositionUpdate` records (time-series)
+- Broadcast via `sim:positions` WebSocket event
 
-### 6. Record BDA
+## Space Coverage Computation (`computeAndBroadcastCoverage`)
 
-`recordBDA(io)` captures battle damage assessment for completed missions:
+Every N ticks, the engine computes satellite coverage:
 
-- Queries missions with status `COMPLETE` that lack a `BDA_RECORDED` SimEvent
-- Creates `BDA_RECORDED` SimEvent with mission callsign, type, and target summary
-- Emits `bda:recorded` WebSocket event with count  
-- BDA records feed back into the next day's `generateDayOrders()` context via `{prevDayBDA}`
+1. **Propagate positions**: Run SGP4 for each `SpaceAsset` with TLE data
+2. **Compute coverage windows**: Calculate elevation angles and line-of-sight
+3. **Detect gaps**: Identify periods/areas with no coverage for required capabilities
+4. **Track contention**: Flag overlapping demands on same capability
+5. **Broadcast**: Send coverage update via `sim:coverage` WebSocket event
 
-### 7. Update Positions
-Interpolates platform positions along waypoint routes based on current sim time. Creates `PositionUpdate` records with:
-- Lat/lon/altitude interpolated between waypoints
-- Heading and speed calculated from segment geometry
-- Current `MissionStatus`
-- Fuel state estimate
+The cycle tracks `coverageCycleCount` and `lastKnownGaps` for efficient incremental updates.
 
-### 8. Stream State
-Broadcasts current state via WebSocket (Socket.IO):
-- Active mission positions
-- Space asset coverage windows
-- Fired injects
-- Simulation clock
+## MSEL Inject Firing
 
-## Space Asset Propagation
+Each tick checks `ScenarioInject` records where `triggerDay == currentAtoDay` and `triggerHour <= currentHour` and `fired == false`:
 
-The `space-propagator.ts` service uses SGP4 orbital mechanics to compute real-time satellite positions from TLE data. Positions feed into `coverage-calculator.ts` which determines ground coverage windows for each capability type.
+1. Mark inject as fired (`fired = true`, `firedAt = simTime`)
+2. Broadcast via `sim:inject` WebSocket event
+3. Apply operational effects (mission diversions, asset status changes, etc.)
 
-## Coverage Calculator
+## Integration Points
 
-`coverage-calculator.ts` computes when each space asset can provide coverage to a given ground location:
-
-- **Line-of-sight** calculation from satellite position to target coordinates
-- **Elevation angle** filtering (minimum useful elevation)
-- **Coverage window** creation with start/end times, max elevation, swath width
-- **Gap analysis** — identifies periods with no coverage for critical capabilities
-
-Results populate `SpaceCoverageWindow` records and feed into STO generation.
-
-## Decision Advisor
-
-`decision-advisor.ts` provides AI-powered decision support:
-
-1. **Situation Assessment** — evaluates current operational picture
-2. **COA Generation** — produces 2–3 courses of action
-3. **Risk Analysis** — identifies risks per COA
-4. **Recommendation** — ranks COAs with rationale
-
-Creates `LeadershipDecision` records in `PROPOSED` status. Users can approve/execute or reject recommendations.
+| System | Integration |
+|---|---|
+| **Game Master** | `runGameMasterCycle()` on day boundaries |
+| **Space Allocator** | `allocateSpaceResources()` per ATO day |
+| **Coverage Calculator** | `computeAndBroadcastCoverage()` per N ticks |
+| **Decision Advisor** | Feeds situation data for AI assessment |
+| **Socket.IO** | Real-time broadcast of all state changes |

@@ -11,9 +11,13 @@ Overwatch is a doctrine-aligned military scenario generation and simulation plat
 | [Scenario Pipeline](./scenario-pipeline.md) | The 9-step `generateFullScenario` pipeline |
 | [AI Functions Reference](./ai-functions.md) | Every AI-powered function, prompts, fallbacks, and model selection |
 | [Daily Tasking Cycle](./daily-tasking.md) | ATO/MTO/STO generation with MAAP guidance and context chaining |
+| [Game Master](./game-master.md) | AI Game Master: on-demand ATO, inject, BDA, and MAAP generation |
 | [Data Model](./data-model.md) | Prisma schema — all models, relationships, and enums |
 | [Simulation Engine](./simulation-engine.md) | Real-time simulation, position updates, and event injection |
+| [Space Operations](./space-operations.md) | Space resource allocation, coverage computation, orbital propagation |
+| [Frontend](./frontend.md) | React client — all 10 pages, Zustand store, WebSocket integration |
 | [API Reference](./api-reference.md) | REST endpoints and WebSocket events |
+| [Roadmap](./roadmap.md) | Phase D & E implementation roadmap |
 
 ## Quick Start
 
@@ -35,6 +39,6 @@ npm run dev
 | **Phase A** | Schema + Doctrine Cascade | ✅ Complete |
 | **Phase B** | AI ORBAT + Campaign Plan | ✅ Complete |
 | **Phase C** | Daily Tasking Cycle | ✅ Complete |
-| **POC #1** | Raw Docs → Knowledge Graph → Wargame | 🔄 In Progress |
-| **Phase D** | TBD | ⏳ Pending |
-| **Phase E** | POC 2 Queries | ⏳ Pending |
+| **POC #1** | Raw Docs → Knowledge Graph → Wargame | ✅ ~80% Complete |
+| **Phase D** | Adversary Modeling & Red Force Autonomy | ⏳ Pending |
+| **Phase E** | Multi-User Collaborative Wargaming | ⏳ Pending |

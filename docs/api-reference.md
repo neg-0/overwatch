@@ -1,245 +1,298 @@
 # API Reference
 
-## Base URL
+Base URL: `http://localhost:3001/api`
 
+All responses follow the format:
+```json
+{ "success": true, "data": {...}, "timestamp": "2026-01-01T00:00:00.000Z" }
 ```
-http://localhost:3001/api
-```
-
-All endpoints return JSON. WebSocket events are broadcast via Socket.IO on the same port.
 
 ---
 
 ## Scenarios
 
-### `POST /api/scenarios/generate`
-
-Triggers full scenario generation (9-step pipeline).
-
-**Request Body**:
-```json
-{
-  "name": "Pacific Shield 2026",
-  "theater": "INDOPACOM — Western Pacific",
-  "adversary": "People's Republic of China (PRC)",
-  "description": "Near-peer conflict over Taiwan Strait",
-  "duration": 10,
-  "compressionRatio": 720
-}
-```
-
-**Response**: `{ "scenarioId": "uuid" }`  
-**Timing**: 2–4 minutes (async — returns immediately, generation runs in background)
-
-### `GET /api/scenarios`
+### `GET /scenarios`
 List all scenarios.
 
-### `GET /api/scenarios/:id`
-Get scenario details with related counts.
+### `GET /scenarios/:id`
+Get scenario detail with all nested artifacts (strategies, planning docs, tasking orders, missions, units, space assets, injects).
 
-### `DELETE /api/scenarios/:id`
-Delete scenario and all related data (cascade).
+### `POST /scenarios/generate`
+Generate a new scenario via the LLM pipeline.
+
+| Body Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | ✅ | Scenario name |
+| `theater` | string | ✅ | Theater of operations |
+| `adversary` | string | ✅ | Primary adversary |
+| `description` | string | ✅ | Scenario description |
+| `duration` | number | | Duration in days (default: 14) |
+| `compressionRatio` | number | | Sim speed (default: 720) |
+| `modelOverrides` | object | | Override AI model tiers: `{ flagship?, midRange?, fast? }` |
+
+Returns immediately with scenario ID. Pipeline runs in background — poll generation status.
+
+### `GET /scenarios/:id/generation-status`
+Lightweight polling endpoint for pipeline progress.
+
+Returns: `{ generationStatus, generationStep, generationProgress, generationError }`
+
+### `DELETE /scenarios/:id`
+Delete a scenario and all related data (cascade).
+
+### `GET /scenarios/:id/export`
+Export scenario as a ZIP file containing the full JSON snapshot.
+
+### `POST /scenarios/upload`
+Upload a scenario ZIP file (multipart form data). Re-imports all entities.
+
+### `GET /scenarios/ready-made`
+List available ready-made scenario ZIP files from the `scenarios/` directory.
+
+### `POST /scenarios/ready-made/:filename/load`
+Load a ready-made scenario into the database. Idempotent — re-imports if scenario ID already exists.
 
 ---
 
-## Orders
+## Tasking Orders
 
-### `POST /api/orders/generate`
-Generate orders for a specific day.
+### `GET /orders/:scenarioId`
+Get all tasking orders for a scenario with nested mission packages and missions.
 
-**Request Body**:
-```json
-{
-  "scenarioId": "uuid",
-  "atoDay": 2
-}
-```
-
-### `GET /api/orders/:scenarioId`
-List all tasking orders for a scenario.
-
-### `GET /api/orders/:scenarioId/:orderType`
-Filter by order type (ATO, MTO, STO).
+### `GET /orders/missions/:scenarioId`
+Get all missions for a scenario with waypoints, time windows, targets, support requirements, and space needs.
 
 ---
 
 ## Missions
 
-### `GET /api/missions/:scenarioId`
-List all missions with their packages and orders.
-
-### `GET /api/missions/:scenarioId/active`
-Get currently active missions (status not RECOVERED, CANCELLED).
-
-### `PATCH /api/missions/:missionId/status`
+### `PATCH /missions/:id/status`
 Update mission status.
 
-**Request Body**:
-```json
-{
-  "status": "LAUNCHED"
-}
-```
-
-### `GET /api/missions/:missionId/positions`
-Get position history for a mission.
+| Body Field | Type | Description |
+|---|---|---|
+| `status` | MissionStatus | New status value |
 
 ---
 
 ## Simulation
 
-### `POST /api/simulation/:scenarioId/start`
-Start simulation for a scenario.
+### `POST /simulation/start`
+Start a new simulation.
 
-### `POST /api/simulation/:scenarioId/pause`
-Pause running simulation.
+| Body Field | Type | Description |
+|---|---|---|
+| `scenarioId` | string | Scenario to simulate |
+| `compressionRatio` | number | Time compression ratio |
 
-### `POST /api/simulation/:scenarioId/resume`
-Resume paused simulation.
+### `POST /simulation/pause`
+Pause the running simulation.
 
-### `POST /api/simulation/:scenarioId/stop`
-Stop simulation (cannot resume).
+### `POST /simulation/resume`
+Resume a paused simulation.
 
-### `GET /api/simulation/:scenarioId/state`
-Get current simulation state (simTime, ATO day, status).
+### `POST /simulation/stop`
+Stop and reset the simulation.
 
-### `PATCH /api/simulation/:scenarioId/compression`
-Update time compression ratio.
+### `POST /simulation/seek`
+Seek to a specific simulation time.
 
-**Request Body**:
+| Body Field | Type | Description |
+|---|---|---|
+| `targetTime` | string (ISO) | Target sim time |
+
+### `POST /simulation/speed`
+Change simulation speed on-the-fly.
+
+| Body Field | Type | Description |
+|---|---|---|
+| `compressionRatio` | number | New compression ratio |
+
+### `GET /simulation/state/:scenarioId`
+Get current simulation state.
+
+---
+
+## Game Master
+
+On-demand AI operations that read the knowledge graph and generate operational documents, ingesting results back into the database automatically.
+
+### `POST /game-master/:scenarioId/ato`
+Generate an ATO for a specific day. Feeds output through doc-ingest pipeline.
+
+| Body Field | Type | Description |
+|---|---|---|
+| `atoDay` | number | ATO day number to generate |
+
+Returns: `GameMasterResult` with generated text, ingested record ID, mission count, duration.
+
+### `POST /game-master/:scenarioId/inject`
+Generate a context-aware MSEL inject. Returns structured inject data persisted to `ScenarioInject`.
+
+| Body Field | Type | Description |
+|---|---|---|
+| `atoDay` | number | ATO day context |
+
+### `POST /game-master/:scenarioId/bda`
+Perform AI BDA assessment. Returns structured damage assessment per target, restrike nominations, and updated priority entries.
+
+| Body Field | Type | Description |
+|---|---|---|
+| `atoDay` | number | ATO day to assess |
+
+### `POST /game-master/:scenarioId/maap`
+Generate a Master Air Attack Plan (MAAP). Returns structured MAAP data ingested into `PlanningDocument`.
+
+---
+
+## Knowledge Graph
+
+### `GET /knowledge-graph/:scenarioId`
+Build and return the knowledge graph for a scenario.
+
+| Query Param | Type | Description |
+|---|---|---|
+| `atoDay` | number? | Filter to specific ATO day |
+
+Returns:
 ```json
 {
-  "compressionRatio": 1440
+  "nodes": [{ "id": "...", "type": "SCENARIO|STRATEGY|PLANNING|ORDER|MISSION|UNIT|SPACE_ASSET|TARGET|INJECT|BASE", "label": "...", "sublabel": "...", "meta": {...} }],
+  "edges": [{ "source": "...", "target": "...", "relationship": "...", "weight": 1.0, "confidence": 0.95 }]
 }
 ```
+
+---
+
+## Timeline
+
+### `GET /timeline/:scenarioId`
+Get timeline/Gantt data for a scenario. Returns missions structured with priority rank, ATO day, space dependencies, and allocation status.
+
+---
+
+## Decision Support
+
+### `GET /decisions/:scenarioId`
+Get all leadership decisions for a scenario.
+
+### `POST /decisions`
+Create a new leadership decision.
+
+| Body Field | Type | Description |
+|---|---|---|
+| `scenarioId` | string | Scenario ID |
+| `decisionType` | string | ASSET_REALLOCATION, PRIORITY_SHIFT, MAINTENANCE_SCHEDULE, CONTINGENCY |
+| `description` | string | Decision description |
+| `affectedAssetIds` | string[] | Impacted asset IDs |
+| `affectedMissionIds` | string[] | Impacted mission IDs |
+| `rationale` | string | Decision rationale |
+
+### `PATCH /decisions/:id`
+Update decision status (PROPOSED → APPROVED → EXECUTED).
+
+---
+
+## AI Advisor
+
+### `POST /advisor/:scenarioId/assess`
+Run comprehensive AI situation assessment. Returns issues, opportunities, risks, and overall threat level.
+
+### `POST /advisor/:scenarioId/coa`
+Generate courses of action based on current situation.
+
+### `POST /advisor/:scenarioId/impact`
+Simulate impact of a specific COA.
+
+| Body Field | Type | Description |
+|---|---|---|
+| `coaId` | string | Course of action to simulate |
+
+### `POST /advisor/:scenarioId/nlq`
+Natural language query against scenario data.
+
+| Body Field | Type | Description |
+|---|---|---|
+| `query` | string | Natural language question (e.g. "What missions target Priority 1?") |
 
 ---
 
 ## Space Assets
 
-### `GET /api/space-assets/:scenarioId`
-List all space assets with capabilities and orbital parameters.
+### `GET /space-assets/:scenarioId`
+Get all space assets for a scenario with coverage windows and allocations.
 
-### `GET /api/space-assets/:scenarioId/coverage`
-Get coverage windows for all space assets.
+### `PATCH /space-assets/:id/status`
+Update space asset status (OPERATIONAL, MAINTENANCE, DEGRADED, LOST).
 
-### `GET /api/space-assets/:scenarioId/needs`
-Get all space needs with fulfillment status.
-
----
-
-## Assets & Units
-
-### `GET /api/assets/:scenarioId`
-List all units with their assets and types.
-
-### `GET /api/assets/:scenarioId/:domain`
-Filter units by domain (AIR, MARITIME, SPACE, LAND).
+### `GET /space-assets/:scenarioId/allocations`
+Get space allocation report for a scenario, including contention analysis.
 
 ---
 
-## Decisions
+## Document Ingestion
 
-### `GET /api/decisions/:scenarioId`
-List all leadership decisions.
+### `POST /ingest`
+Ingest a raw document via LLM classification and normalization.
 
-### `POST /api/decisions/:scenarioId/generate`
-Generate AI-recommended course of action.
+| Body Field | Type | Description |
+|---|---|---|
+| `scenarioId` | string | Target scenario |
+| `rawText` | string | Raw document text |
+| `sourceFormat` | string? | USMTF, OTH_GOLD, MTF_XML, MEMORANDUM, PLAIN_TEXT |
 
-**Request Body**:
-```json
-{
-  "situation": "GPS degradation in sector 7 affecting 3 active missions",
-  "context": "Day 4, Phase 2 — Seize Initiative"
-}
-```
+Pipeline: Classify hierarchy level → Classify document type → Normalize to structured JSON → Persist → Log to IngestLog.
 
-### `PATCH /api/decisions/:decisionId`
-Approve or execute a decision.
-
-**Request Body**:
-```json
-{
-  "status": "APPROVED"
-}
-```
+Returns: Created record ID, document type, confidence, review flags, mission count (if applicable).
 
 ---
 
-## Injects (MSEL)
+## Injects
 
-### `GET /api/injects?scenarioId=&fired=&triggerDay=`
-List MSEL injects for a scenario. Filterable by `fired` (boolean) and `triggerDay` (int).
+### `GET /injects/:scenarioId`
+Get all MSEL injects for a scenario, sorted by day/hour.
 
-### `GET /api/injects/:id`
-Get single inject details.
+### `POST /injects`
+Create a new inject.
 
-### `POST /api/injects`
-Manually create an inject (operator override).
+### `PATCH /injects/:id`
+Update an inject.
 
-**Request Body**:
-```json
-{
-  "scenarioId": "uuid",
-  "triggerDay": 3,
-  "triggerHour": 14,
-  "injectType": "FRICTION",
-  "title": "Engine failure on tanker",
-  "description": "KC-135 SHELL 01 experiences #2 engine failure...",
-  "impact": "CAS package PKGA02 loses refueling support"
-}
-```
-
-### `PATCH /api/injects/:id`
-Update inject properties (triggerDay, triggerHour, injectType, title, description, impact).
-
-### `DELETE /api/injects/:id`
+### `DELETE /injects/:id`
 Delete an inject.
 
 ---
 
 ## Events
 
-### `GET /api/events/:scenarioId`
-List simulation events (space degradation, unit destruction, BDA records, inject effects, etc.).
-
----
-
-## Document Ingestion
-
-### `POST /api/ingest`
-Manually ingest a military document.
-
-**Request Body**:
-```json
-{
-  "scenarioId": "uuid",
-  "rawText": "MEMORANDUM FOR COMMANDER...",
-  "sourceFormat": "MEMORANDUM"
-}
-```
+### `GET /events/:scenarioId`
+Get simulation events for a scenario, sorted by sim time.
 
 ---
 
 ## WebSocket Events
 
-Connect via Socket.IO to receive real-time simulation updates.
+Connection: `ws://localhost:3001` (Socket.IO)
 
 ### Server → Client
 
 | Event | Payload | Description |
 |---|---|---|
-| `simulation:tick` | `{ simTime, atoDay, status }` | Simulation clock update |
-| `sim:positions` | `PositionUpdate[]` | Platform position batch |
-| `inject:fired` | `{ injectId, injectType, title, description, impact, firedAt }` | MSEL inject fired with effect details |
-| `bda:recorded` | `{ count, simTime }` | BDA entries recorded for completed missions |
-| `sim:event` | `SimEvent` | Simulation event occurred |
-| `order:published` | `{ orderId, orderType, day }` | Order generation finished |
-| `sim:decision` | `LeadershipDecision` | New AI recommendation |
+| `sim:tick` | `{ simTime, currentAtoDay, status, compressionRatio }` | Simulation time update (every tick) |
+| `sim:positions` | `PositionUpdate[]` | Batch position updates for all active missions |
+| `sim:inject` | `ScenarioInject` | MSEL inject fired |
+| `sim:coverage` | `{ windows, gaps, timestamp }` | Space coverage update |
+| `sim:gameMasterUpdate` | `{ action, atoDay, status }` | Game Master cycle progress |
+| `sim:dayChange` | `{ newDay, previousDay }` | ATO day boundary crossed |
+| `generation:progress` | `{ scenarioId, step, progress, status }` | Scenario generation updates |
 
 ### Client → Server
 
 | Event | Payload | Description |
 |---|---|---|
-| `sim:join` | `{ scenarioId }` | Subscribe to scenario updates |
-| `sim:leave` | `{ scenarioId }` | Unsubscribe |
+| `sim:start` | `{ scenarioId, compressionRatio }` | Start simulation |
+| `sim:pause` | `{}` | Pause simulation |
+| `sim:resume` | `{}` | Resume simulation |
+| `sim:stop` | `{}` | Stop simulation |
+| `sim:seek` | `{ targetTime }` | Seek to time |
+| `sim:speed` | `{ compressionRatio }` | Change speed |
