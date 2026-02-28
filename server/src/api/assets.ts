@@ -1,18 +1,25 @@
+import type { Affiliation, Domain, SpaceCapabilityType } from '@prisma/client';
 import { Router } from 'express';
 import prisma from '../db/prisma-client.js';
 
 export const assetRoutes = Router();
+
+const validDomains = ['AIR', 'MARITIME', 'SPACE', 'LAND'];
 
 // List all assets (units + their platforms)
 assetRoutes.get('/', async (req, res) => {
   try {
     const { scenarioId, domain, affiliation } = req.query;
 
+    if (domain && !validDomains.includes(String(domain))) {
+      return res.status(400).json({ success: false, error: 'Invalid domain', timestamp: new Date().toISOString() });
+    }
+
     const units = await prisma.unit.findMany({
       where: {
         ...(scenarioId && { scenarioId: String(scenarioId) }),
-        ...(domain && { domain: String(domain) as any }),
-        ...(affiliation && { affiliation: String(affiliation) as any }),
+        ...(domain && { domain: String(domain) as Domain }),
+        ...(affiliation && { affiliation: String(affiliation) as Affiliation }),
       },
       include: {
         assets: { include: { assetType: true } },
@@ -23,7 +30,8 @@ assetRoutes.get('/', async (req, res) => {
 
     res.json({ success: true, data: units, timestamp: new Date().toISOString() });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
@@ -37,7 +45,7 @@ assetRoutes.get('/space', async (req, res) => {
         ...(scenarioId && { scenarioId: String(scenarioId) }),
         ...(status && { status: String(status) }),
         ...(capability && {
-          capabilities: { has: String(capability) as any },
+          capabilities: { has: String(capability) as SpaceCapabilityType },
         }),
       },
       include: {
@@ -64,7 +72,8 @@ assetRoutes.get('/space', async (req, res) => {
 
     res.json({ success: true, data: spaceAssets, timestamp: new Date().toISOString() });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
@@ -103,6 +112,7 @@ assetRoutes.get('/space-needs', async (req, res) => {
 
     res.json({ success: true, data: needs, timestamp: new Date().toISOString() });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });

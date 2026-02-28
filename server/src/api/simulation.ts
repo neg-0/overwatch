@@ -16,7 +16,8 @@ export function createSimulationRoutes(io: import('socket.io').Server) {
   // Get current simulation state
   router.get('/state', async (req, res) => {
     try {
-      const live = getSimState();
+      const { scenarioId: qScenarioId } = req.query;
+      const live = getSimState(qScenarioId ? String(qScenarioId) : undefined);
       if (live) {
         return res.json({
           success: true,
@@ -31,15 +32,15 @@ export function createSimulationRoutes(io: import('socket.io').Server) {
         });
       }
 
-      const { scenarioId } = req.query;
       const sim = await prisma.simulationState.findFirst({
-        where: scenarioId ? { scenarioId: String(scenarioId) } : undefined,
+        where: qScenarioId ? { scenarioId: String(qScenarioId) } : undefined,
         orderBy: { updatedAt: 'desc' },
       });
 
       res.json({ success: true, data: sim, timestamp: new Date().toISOString() });
     } catch (error) {
-      res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+      console.error(error);
+      res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
     }
   });
 
@@ -65,7 +66,8 @@ export function createSimulationRoutes(io: import('socket.io').Server) {
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
-      res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+      console.error(error);
+      res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
     }
   });
 
@@ -78,7 +80,8 @@ export function createSimulationRoutes(io: import('socket.io').Server) {
       }
       res.json({ success: true, data: { status: sim.status }, timestamp: new Date().toISOString() });
     } catch (error) {
-      res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+      console.error(error);
+      res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
     }
   });
 
@@ -91,7 +94,8 @@ export function createSimulationRoutes(io: import('socket.io').Server) {
       }
       res.json({ success: true, data: { status: sim.status }, timestamp: new Date().toISOString() });
     } catch (error) {
-      res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+      console.error(error);
+      res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
     }
   });
 
@@ -104,7 +108,8 @@ export function createSimulationRoutes(io: import('socket.io').Server) {
       }
       res.json({ success: true, data: { status: sim.status }, timestamp: new Date().toISOString() });
     } catch (error) {
-      res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+      console.error(error);
+      res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
     }
   });
 
@@ -114,6 +119,9 @@ export function createSimulationRoutes(io: import('socket.io').Server) {
       const { simTime } = req.body;
       if (!simTime) {
         return res.status(400).json({ success: false, error: 'simTime is required', timestamp: new Date().toISOString() });
+      }
+      if (isNaN(new Date(simTime).getTime())) {
+        return res.status(400).json({ success: false, error: 'simTime is not a valid date', timestamp: new Date().toISOString() });
       }
       const sim = await seekSimulation(new Date(simTime), io);
       if (!sim) {
@@ -129,7 +137,8 @@ export function createSimulationRoutes(io: import('socket.io').Server) {
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
-      res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+      console.error(error);
+      res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
     }
   });
 
@@ -150,7 +159,8 @@ export function createSimulationRoutes(io: import('socket.io').Server) {
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
-      res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+      console.error(error);
+      res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
     }
   });
 

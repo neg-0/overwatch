@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { DocumentReaderModal } from '../components/DocumentReaderModal';
 import { GenerationProgressModal } from '../components/GenerationProgressModal';
-import { useOverwatchStore } from '../store/overwatch-store';
+import { useOverwatchStore, type ModelOverrides } from '../store/overwatch-store';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -14,17 +14,7 @@ interface ScenarioConfig {
   duration: number;
 }
 
-interface ModelOverrides {
-  strategyDocs?: string;
-  campaignPlan?: string;
-  orbat?: string;
-  planningDocs?: string;
-  maap?: string;
-  mselInjects?: string;
-  dailyOrders?: string;
-}
-
-const MODEL_OPTIONS = ['gpt-5.2', 'gpt-5-mini', 'gpt-5-nano', 'gpt-4o', 'gpt-4o-mini'];
+const MODEL_OPTIONS = ['o3-mini', 'gpt-4.1-mini', 'gpt-4.1-nano', 'gpt-4o', 'gpt-4o-mini'];
 
 const ARTIFACT_MODEL_CONFIG: Array<{
   key: keyof ModelOverrides;
@@ -33,13 +23,13 @@ const ARTIFACT_MODEL_CONFIG: Array<{
   defaultTier: string;
   desc: string;
 }> = [
-    { key: 'strategyDocs', label: 'Strategy Documents', icon: '📄', defaultTier: 'gpt-5.2', desc: 'NDS, NMS, JSCP' },
-    { key: 'campaignPlan', label: 'Campaign Plan', icon: '🗺', defaultTier: 'gpt-5.2', desc: 'CONPLAN, OPLAN' },
-    { key: 'orbat', label: 'Joint Force ORBAT', icon: '⚔️', defaultTier: 'gpt-5-mini', desc: 'Units, platforms, assets' },
-    { key: 'planningDocs', label: 'Planning Documents', icon: '🎯', defaultTier: 'gpt-5-mini', desc: 'JIPTL, SPINS, ACO' },
-    { key: 'maap', label: 'MAAP', icon: '✈️', defaultTier: 'gpt-5.2', desc: 'Master Air Attack Plan' },
-    { key: 'mselInjects', label: 'MSEL Injects', icon: '💥', defaultTier: 'gpt-5-mini', desc: 'Friction events' },
-    { key: 'dailyOrders', label: 'Daily Orders', icon: '📋', defaultTier: 'gpt-5-mini', desc: 'ATO, MTO, STO' },
+    { key: 'strategyDocs', label: 'Strategy Documents', icon: '📄', defaultTier: 'o3-mini', desc: 'NDS, NMS, JSCP' },
+    { key: 'campaignPlan', label: 'Campaign Plan', icon: '🗺', defaultTier: 'o3-mini', desc: 'CONPLAN, OPLAN' },
+    { key: 'orbat', label: 'Joint Force ORBAT', icon: '⚔️', defaultTier: 'gpt-4.1-mini', desc: 'Units, platforms, assets' },
+    { key: 'planningDocs', label: 'Planning Documents', icon: '🎯', defaultTier: 'gpt-4.1-mini', desc: 'JIPTL, SPINS, ACO' },
+    { key: 'maap', label: 'MAAP', icon: '✈️', defaultTier: 'o3-mini', desc: 'Master Air Attack Plan' },
+    { key: 'mselInjects', label: 'MSEL Injects', icon: '💥', defaultTier: 'gpt-4.1-mini', desc: 'Friction events' },
+    { key: 'dailyOrders', label: 'Daily Orders', icon: '📋', defaultTier: 'gpt-4.1-mini', desc: 'ATO, MTO, STO' },
   ];
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -55,6 +45,7 @@ export function ScenarioSetup() {
     fetchHealth,
     importScenario,
     setActiveScenario,
+    resetGenerationProgress,
   } = useOverwatchStore();
 
   const [generating, setGenerating] = useState(false);
@@ -138,7 +129,7 @@ export function ScenarioSetup() {
     setScenarioDetail(null);
     setExpanded(null);
     setShowProgressModal(true);
-    useOverwatchStore.setState({ generationProgress: null });
+    resetGenerationProgress();
     try {
       const data = await generateScenario({ ...config, modelOverrides });
       setResult(data);
@@ -176,7 +167,7 @@ export function ScenarioSetup() {
     if (!scenarioId) return;
     setGenerating(true);
     setShowProgressModal(true);
-    useOverwatchStore.setState({ generationProgress: null });
+    resetGenerationProgress();
     try {
       const data = await resumeScenarioGeneration(scenarioId, modelOverrides);
       setResult(data);
@@ -216,7 +207,7 @@ export function ScenarioSetup() {
       setRegeneratingSteps(prev => ({ ...prev, [stepName]: true }));
       setRegenerateFromStep(stepName);
       setShowProgressModal(true);
-      useOverwatchStore.setState({ generationProgress: null, artifactResults: [] });
+      resetGenerationProgress();
 
       const encoded = encodeURIComponent(stepName);
       const res = await fetch(`/api/scenarios/${scenarioId}/steps/${encoded}/regenerate`, {

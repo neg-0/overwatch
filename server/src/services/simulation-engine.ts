@@ -25,14 +25,22 @@ interface SimState {
   positionInterval: ReturnType<typeof setInterval> | null;
   coverageCycleCount: number;
   lastKnownGaps: GapDetection[];
+  tickCount: number;
 }
 
-let currentSim: SimState | null = null;
+const activeSims = new Map<string, SimState>();
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
-export function getSimState(): SimState | null {
-  return currentSim;
+export function getSimState(scenarioId?: string): SimState | null {
+  if (scenarioId) return activeSims.get(scenarioId) || null;
+  // Backwards compat: return first running sim if no scenarioId
+  for (const sim of activeSims.values()) {
+    if (sim.status === 'RUNNING') return sim;
+  }
+  // Return any sim if none running
+  const first = activeSims.values().next();
+  return first.done ? null : first.value;
 }
 
 export async function startSimulation(
@@ -40,7 +48,8 @@ export async function startSimulation(
   io: Server,
   compressionRatio?: number,
 ): Promise<SimState> {
-  if (currentSim?.status === 'RUNNING') {
+  const existingSim = activeSims.get(scenarioId);
+  if (existingSim?.status === 'RUNNING') {
     throw new Error('Simulation already running');
   }
 
@@ -70,7 +79,7 @@ export async function startSimulation(
     ? await prisma.simulationState.update({ where: { id: existing.id }, data: simData })
     : await prisma.simulationState.create({ data: simData });
 
-  currentSim = {
+  const sim: SimState = {
     scenarioId,
     simId: simRecord.id,
     status: 'RUNNING',
@@ -85,7 +94,9 @@ export async function startSimulation(
     positionInterval: null,
     coverageCycleCount: 0,
     lastKnownGaps: [],
+    tickCount: 0,
   };
+  activeSims.set(scenarioId, sim);
 
   console.log(`[SIM] Starting simulation for scenario ${scenarioId} at ${ratio}× compression`);
 
@@ -98,15 +109,15 @@ export async function startSimulation(
 
   // Pre-set lastAtoDayGenerated to prevent the tick loop from
   // also triggering Day 1 order generation (race condition)
-  currentSim.lastAtoDayGenerated = 1;
+  sim.lastAtoDayGenerated = 1;
 
   // Start the tick loop
-  startTickLoop(io);
-  startPositionLoop(io);
+  startTickLoop(scenarioId, io);
+  startPositionLoop(scenarioId, io);
 
   // Generate Day 1 orders (non-blocking to avoid holding up the response)
   generateDayOrders(scenarioId, 1).then(() => {
-    if (currentSim) {
+    if (activeSims.has(scenarioId)) {
       io.to(`scenario:${scenarioId}`).emit('order:published', {
         event: 'order:published',
         orderId: 'Day 1',
@@ -117,65 +128,72 @@ export async function startSimulation(
   }).catch(err => {
     console.error('[SIM] Failed to generate Day 1 orders:', err);
     // Reset so tick loop can retry
-    if (currentSim) currentSim.lastAtoDayGenerated = 0;
+    const s = activeSims.get(scenarioId);
+    if (s) s.lastAtoDayGenerated = 0;
   });
 
-  return currentSim;
+  return sim;
 }
 
-export function pauseSimulation(): SimState | null {
-  if (!currentSim || currentSim.status !== 'RUNNING') return null;
-  currentSim.status = 'PAUSED';
-  clearIntervals();
+export function pauseSimulation(scenarioId?: string): SimState | null {
+  const sim = scenarioId ? activeSims.get(scenarioId) : getSimState();
+  if (!sim || sim.status !== 'RUNNING') return null;
+  sim.status = 'PAUSED';
+  clearIntervals(sim);
 
   prisma.simulationState.update({
-    where: { id: currentSim.simId },
-    data: { status: 'PAUSED', simTime: currentSim.simTime },
+    where: { id: sim.simId },
+    data: { status: 'PAUSED', simTime: sim.simTime },
   }).catch(console.error);
 
-  console.log('[SIM] Paused');
-  return currentSim;
+  console.log(`[SIM] Paused (${sim.scenarioId})`);
+  return sim;
 }
 
-export function resumeSimulation(io: Server): SimState | null {
-  if (!currentSim || currentSim.status !== 'PAUSED') return null;
-  currentSim.status = 'RUNNING';
-  startTickLoop(io);
-  startPositionLoop(io);
+export function resumeSimulation(io: Server, scenarioId?: string): SimState | null {
+  const sim = scenarioId ? activeSims.get(scenarioId) : getSimState();
+  if (!sim || sim.status !== 'PAUSED') return null;
+  sim.status = 'RUNNING';
+  startTickLoop(sim.scenarioId, io);
+  startPositionLoop(sim.scenarioId, io);
 
   prisma.simulationState.update({
-    where: { id: currentSim.simId },
+    where: { id: sim.simId },
     data: { status: 'RUNNING' },
   }).catch(console.error);
 
-  console.log('[SIM] Resumed');
-  return currentSim;
+  console.log(`[SIM] Resumed (${sim.scenarioId})`);
+  return sim;
 }
 
-export function stopSimulation(): SimState | null {
-  if (!currentSim) return null;
-  currentSim.status = 'STOPPED';
-  clearIntervals();
+export function stopSimulation(scenarioId?: string): SimState | null {
+  const sim = scenarioId ? activeSims.get(scenarioId) : getSimState();
+  if (!sim) return null;
+  sim.status = 'STOPPED';
+  clearIntervals(sim);
 
   prisma.simulationState.update({
-    where: { id: currentSim.simId },
-    data: { status: 'STOPPED', simTime: currentSim.simTime },
+    where: { id: sim.simId },
+    data: { status: 'STOPPED', simTime: sim.simTime },
   }).catch(console.error);
 
-  console.log('[SIM] Stopped');
-  const result = { ...currentSim };
-  currentSim = null;
+  console.log(`[SIM] Stopped (${sim.scenarioId})`);
+  const result = { ...sim };
+  activeSims.delete(sim.scenarioId);
   return result;
 }
 
 // ─── Tick Loop ───────────────────────────────────────────────────────────────
 
-function startTickLoop(io: Server) {
-  if (currentSim?.tickInterval) clearInterval(currentSim.tickInterval);
+function startTickLoop(scenarioId: string, io: Server) {
+  const sim = activeSims.get(scenarioId);
+  if (!sim) return;
+  if (sim.tickInterval) clearInterval(sim.tickInterval);
 
   const tickMs = config.sim.tickIntervalMs;
 
-  currentSim!.tickInterval = setInterval(async () => {
+  sim.tickInterval = setInterval(async () => {
+    const currentSim = activeSims.get(scenarioId);
     if (!currentSim || currentSim.status !== 'RUNNING') return;
 
     // Skip tick processing while Game Master is generating
@@ -186,8 +204,8 @@ function startTickLoop(io: Server) {
     currentSim.simTime = new Date(currentSim.simTime.getTime() + advanceMs);
 
     // Calculate ATO day
-    const scenario = await prisma.scenario.findUnique({ where: { id: currentSim.scenarioId } });
-    if (!currentSim || currentSim.status !== 'RUNNING') return; // re-check after await
+    const scenario = await prisma.scenario.findUnique({ where: { id: scenarioId } });
+    if (!activeSims.has(scenarioId) || activeSims.get(scenarioId)!.status !== 'RUNNING') return; // re-check after await
     if (scenario) {
       const daysSinceStart = Math.floor(
         (currentSim.simTime.getTime() - scenario.startDate.getTime()) / (24 * 3600000),
@@ -196,23 +214,23 @@ function startTickLoop(io: Server) {
 
       // ── Game Master Closed Loop: BDA → ATO → Space Allocation ──────────
       if (daysSinceStart > currentSim.lastAtoDayGenerated) {
-        await runGameMasterCycle(io, daysSinceStart);
-        if (!currentSim) return;
+        await runGameMasterCycle(scenarioId, io, daysSinceStart);
+        if (!activeSims.has(scenarioId)) return;
       }
 
       // Check sim end
       if (currentSim.simTime >= scenario.endDate) {
         console.log('[SIM] Scenario end date reached, stopping');
-        stopSimulation();
+        stopSimulation(scenarioId);
         return;
       }
     }
 
     // Re-check after scenario block (may have been stopped)
-    if (!currentSim || currentSim.status !== 'RUNNING') return;
+    if (!activeSims.has(scenarioId) || activeSims.get(scenarioId)!.status !== 'RUNNING') return;
 
     // Broadcast tick
-    io.to(`scenario:${currentSim.scenarioId}`).emit('simulation:tick', {
+    io.to(`scenario:${scenarioId}`).emit('simulation:tick', {
       event: 'simulation:tick',
       simTime: currentSim.simTime.toISOString(),
       realTime: new Date().toISOString(),
@@ -220,8 +238,9 @@ function startTickLoop(io: Server) {
       atoDay: currentSim.currentAtoDay,
     });
 
-    // Update DB periodically (every 10th tick)
-    if (Math.random() < 0.1) {
+    // Update DB deterministically every 10th tick
+    currentSim.tickCount++;
+    if (currentSim.tickCount % 10 === 0) {
       prisma.simulationState.update({
         where: { id: currentSim.simId },
         data: {
@@ -232,13 +251,13 @@ function startTickLoop(io: Server) {
     }
 
     // Progress mission statuses based on time
-    if (currentSim) await advanceMissionStatuses(io);
+    if (activeSims.has(scenarioId)) await advanceMissionStatuses(scenarioId, io);
 
     // Fire scheduled MSEL injects
-    if (currentSim) await fireScheduledInjects(io);
+    if (activeSims.has(scenarioId)) await fireScheduledInjects(scenarioId, io);
 
     // Record BDA for completed missions
-    if (currentSim) await recordBDA(io);
+    if (activeSims.has(scenarioId)) await recordBDA(scenarioId, io);
 
   }, tickMs);
 }
@@ -254,10 +273,10 @@ function startTickLoop(io: Server) {
  *
  * Falls back to the legacy `generateDayOrders` pipeline on LLM failure.
  */
-async function runGameMasterCycle(io: Server, newDay: number): Promise<void> {
+async function runGameMasterCycle(scenarioId: string, io: Server, newDay: number): Promise<void> {
+  const currentSim = activeSims.get(scenarioId);
   if (!currentSim) return;
 
-  const scenarioId = currentSim.scenarioId;
   const completedDay = newDay - 1;
 
   // Pause tick processing
@@ -290,7 +309,7 @@ async function runGameMasterCycle(io: Server, newDay: number): Promise<void> {
 
       try {
         const bdaResult = await assessBDA(scenarioId, completedDay, io);
-        if (!currentSim) return;
+        if (!activeSims.has(scenarioId)) return;
 
         if (bdaResult.success) {
           currentSim.lastBDADay = completedDay;
@@ -304,7 +323,7 @@ async function runGameMasterCycle(io: Server, newDay: number): Promise<void> {
       }
     }
 
-    if (!currentSim) return;
+    if (!activeSims.has(scenarioId)) return;
 
     // Step 2: Generate ATO + allocate space resources in parallel
     console.log(`[SIM] Running Game Master ATO for Day ${newDay}...`);
@@ -316,7 +335,7 @@ async function runGameMasterCycle(io: Server, newDay: number): Promise<void> {
     });
 
     const atoResult = await generateATO(scenarioId, newDay, io);
-    if (!currentSim) return;
+    if (!activeSims.has(scenarioId)) return;
 
     if (atoResult.success) {
       usedGameMaster = true;
@@ -333,7 +352,7 @@ async function runGameMasterCycle(io: Server, newDay: number): Promise<void> {
 
       try {
         const allocReport = await allocateSpaceResources(scenarioId, newDay);
-        if (!currentSim) return;
+        if (!activeSims.has(scenarioId)) return;
 
         io.to(`scenario:${scenarioId}`).emit('allocation:complete', {
           event: 'allocation:complete',
@@ -366,7 +385,7 @@ async function runGameMasterCycle(io: Server, newDay: number): Promise<void> {
     console.warn(`[SIM] Game Master failed, falling back to generateDayOrders for Day ${newDay}`);
     try {
       await generateDayOrders(scenarioId, newDay);
-      if (!currentSim) return;
+      if (!activeSims.has(scenarioId)) return;
       currentSim.lastAtoDayGenerated = newDay;
 
       io.to(`scenario:${scenarioId}`).emit('order:published', {
@@ -381,8 +400,9 @@ async function runGameMasterCycle(io: Server, newDay: number): Promise<void> {
     }
   } finally {
     // Resume tick processing
-    if (currentSim) {
-      currentSim.isGenerating = false;
+    const s = activeSims.get(scenarioId);
+    if (s) {
+      s.isGenerating = false;
 
       const durationMs = Date.now() - startMs;
       io.to(`scenario:${scenarioId}`).emit('gameMaster:complete', {
@@ -398,10 +418,13 @@ async function runGameMasterCycle(io: Server, newDay: number): Promise<void> {
 
 // ─── Position Update Loop ────────────────────────────────────────────────────
 
-function startPositionLoop(io: Server) {
-  if (currentSim?.positionInterval) clearInterval(currentSim.positionInterval);
+function startPositionLoop(scenarioId: string, io: Server) {
+  const sim = activeSims.get(scenarioId);
+  if (!sim) return;
+  if (sim.positionInterval) clearInterval(sim.positionInterval);
 
-  currentSim!.positionInterval = setInterval(async () => {
+  sim.positionInterval = setInterval(async () => {
+    const currentSim = activeSims.get(scenarioId);
     if (!currentSim || currentSim.status !== 'RUNNING') return;
 
     // Get active missions (BRIEFED shows at departure base, LAUNCHED+ shows in-flight)
@@ -411,7 +434,7 @@ function startPositionLoop(io: Server) {
           in: ['BRIEFED', 'LAUNCHED', 'AIRBORNE', 'ON_STATION', 'ENGAGED', 'EGRESSING', 'RTB'],
         },
         package: {
-          taskingOrder: { scenarioId: currentSim.scenarioId },
+          taskingOrder: { scenarioId },
         },
       },
       include: {
@@ -420,13 +443,13 @@ function startPositionLoop(io: Server) {
       },
     });
 
-    if (!currentSim || currentSim.status !== 'RUNNING') return; // re-check after await
+    if (!activeSims.has(scenarioId) || activeSims.get(scenarioId)!.status !== 'RUNNING') return; // re-check after await
 
     for (const mission of activeMissions) {
-      if (!currentSim || !currentSim.simTime) break; // Guard against mid-stop race
+      if (!activeSims.has(scenarioId) || !currentSim.simTime) break; // Guard against mid-stop race
       const pos = interpolatePosition(mission, currentSim.simTime);
       if (pos) {
-        io.to(`scenario:${currentSim.scenarioId}`).emit('position:update', {
+        io.to(`scenario:${scenarioId}`).emit('position:update', {
           event: 'position:update',
           update: {
             missionId: mission.id,
@@ -446,13 +469,13 @@ function startPositionLoop(io: Server) {
 
     // ── Space Asset Propagation ──────────────────────────────────────────
     try {
-      if (!currentSim || !currentSim.simTime) return;
+      if (!activeSims.has(scenarioId) || !currentSim.simTime) return;
       const spaceAssets = await prisma.spaceAsset.findMany({
-        where: { scenarioId: currentSim.scenarioId },
+        where: { scenarioId },
       });
 
       for (const asset of spaceAssets) {
-        if (!currentSim || !currentSim.simTime) break;
+        if (!activeSims.has(scenarioId) || !currentSim.simTime) break;
 
         let position: SpacePosition | null = null;
 
@@ -472,7 +495,7 @@ function startPositionLoop(io: Server) {
         }
 
         if (position) {
-          io.to(`scenario:${currentSim.scenarioId}`).emit('position:update', {
+          io.to(`scenario:${scenarioId}`).emit('position:update', {
             event: 'position:update',
             update: {
               missionId: `space-${asset.id}`,
@@ -489,11 +512,11 @@ function startPositionLoop(io: Server) {
       }
 
       // ── Coverage Computation (every 5th cycle) ──────────────────────────
-      if (!currentSim) return;
+      if (!activeSims.has(scenarioId)) return;
       currentSim.coverageCycleCount = (currentSim.coverageCycleCount || 0) + 1;
 
       if (currentSim.coverageCycleCount % 5 === 0) {
-        await computeAndBroadcastCoverage(io, spaceAssets);
+        await computeAndBroadcastCoverage(scenarioId, io, spaceAssets);
       }
     } catch (err) {
       console.error('[SIM] Space asset propagation error:', err);
@@ -503,10 +526,10 @@ function startPositionLoop(io: Server) {
 
 // ─── Coverage Computation ────────────────────────────────────────────────────
 
-async function computeAndBroadcastCoverage(io: Server, spaceAssets: any[]) {
+async function computeAndBroadcastCoverage(scenarioId: string, io: Server, spaceAssets: any[]) {
+  const currentSim = activeSims.get(scenarioId);
   if (!currentSim || !currentSim.simTime) return;
 
-  const scenarioId = currentSim.scenarioId;
   const simTime = currentSim.simTime;
 
   // Fetch active space needs for this scenario's missions
@@ -548,7 +571,7 @@ async function computeAndBroadcastCoverage(io: Server, spaceAssets: any[]) {
 
     // Check coverage against each space need's coverage point
     for (const need of spaceNeeds) {
-      if (!need.coverageLat || !need.coverageLon) continue;
+      if (need.coverageLat == null || need.coverageLon == null) continue;
       if (!asset.capabilities.includes(need.capabilityType)) continue;
 
       // Only check needs whose time window includes the current simTime
@@ -735,9 +758,8 @@ function interpolatePosition(
 
   // Get time windows to understand mission timeline
   const totWindow = mission.timeWindows?.find((tw: any) => tw.windowType === 'TOT');
-  if (!totWindow) {
-    // Simple linear interpolation along waypoints
-    return linearInterpolate(waypoints, simTime, mission);
+  if (totWindow) {
+    return linearInterpolate(waypoints, simTime, mission, totWindow);
   }
 
   return linearInterpolate(waypoints, simTime, mission);
@@ -747,6 +769,7 @@ function linearInterpolate(
   waypoints: any[],
   simTime: Date,
   mission: any,
+  totWindow?: any,
 ): InterpolatedPosition {
   // Estimate total flight time based on typical speeds
   const speedKts = mission.domain === 'MARITIME' ? 20 : mission.domain === 'AIR' ? 450 : 120;
@@ -754,10 +777,20 @@ function linearInterpolate(
   const totalFlightTimeMs = (totalDistNm / speedKts) * 3600000;
 
   // Determine how far along we are
-  const firstWindow = mission.timeWindows?.[0];
-  const missionStartTime = firstWindow
-    ? new Date(new Date(firstWindow.startTime).getTime() - totalFlightTimeMs * 0.3)
-    : new Date(simTime.getTime() - totalFlightTimeMs * 0.5);
+  // If we have a TOT window, use it to anchor the mission timeline
+  // Otherwise fall back to the mission's creation time or scenario start
+  let missionStartTime: Date;
+  if (totWindow) {
+    missionStartTime = new Date(new Date(totWindow.startTime).getTime() - totalFlightTimeMs * 0.3);
+  } else {
+    const firstWindow = mission.timeWindows?.[0];
+    if (firstWindow) {
+      missionStartTime = new Date(new Date(firstWindow.startTime).getTime() - totalFlightTimeMs * 0.3);
+    } else {
+      // Use mission creation time as a stable anchor instead of simTime
+      missionStartTime = new Date(mission.createdAt || mission.updatedAt || simTime.getTime() - totalFlightTimeMs * 0.5);
+    }
+  }
 
   const elapsed = simTime.getTime() - missionStartTime.getTime();
   const progress = Math.max(0, Math.min(1, elapsed / totalFlightTimeMs));
@@ -801,14 +834,12 @@ function linearInterpolate(
 
 // ─── Mission Status Progression ──────────────────────────────────────────────
 
-async function advanceMissionStatuses(io: Server) {
+async function advanceMissionStatuses(scenarioId: string, io: Server) {
+  const currentSim = activeSims.get(scenarioId);
   if (!currentSim) return;
 
   const simTime = currentSim.simTime;
 
-  // Get planned missions that should now be active
-  if (!currentSim) return; // Guard against mid-stop race
-  const scenarioId = currentSim.scenarioId;
   const missions = await prisma.mission.findMany({
     where: {
       package: {
@@ -869,8 +900,8 @@ async function advanceMissionStatuses(io: Server) {
         data: { status: newStatus },
       });
 
-      if (!currentSim) break; // Guard against mid-stop race
-      io.to(`scenario:${currentSim.scenarioId}`).emit('mission:status', {
+      if (!activeSims.has(scenarioId)) break; // Guard against mid-stop race
+      io.to(`scenario:${scenarioId}`).emit('mission:status', {
         event: 'mission:status',
         missionId: mission.id,
         status: newStatus,
@@ -958,7 +989,10 @@ export { interpolatePosition, linearInterpolate };
 
 // ─── Seek / Speed / Event Functions ──────────────────────────────────────────
 
-export async function seekSimulation(targetTime: Date, io: Server): Promise<SimState | null> {
+export async function seekSimulation(targetTime: Date, io: Server, scenarioId?: string): Promise<SimState | null> {
+  if (isNaN(targetTime.getTime())) throw new Error('Invalid simulation time');
+
+  const currentSim = scenarioId ? activeSims.get(scenarioId) : getSimState();
   if (!currentSim) return null;
 
   const scenario = await prisma.scenario.findUnique({ where: { id: currentSim.scenarioId } });
@@ -998,7 +1032,8 @@ export async function seekSimulation(targetTime: Date, io: Server): Promise<SimS
   return currentSim;
 }
 
-export function setSimSpeed(newRatio: number, io: Server): SimState | null {
+export function setSimSpeed(newRatio: number, io: Server, scenarioId?: string): SimState | null {
+  const currentSim = scenarioId ? activeSims.get(scenarioId) : getSimState();
   if (!currentSim) return null;
 
   currentSim.compressionRatio = newRatio;
@@ -1011,9 +1046,9 @@ export function setSimSpeed(newRatio: number, io: Server): SimState | null {
 
   // Restart loops if running so they pick up the new ratio
   if (currentSim.status === 'RUNNING') {
-    clearIntervals();
-    startTickLoop(io);
-    startPositionLoop(io);
+    clearIntervals(currentSim);
+    startTickLoop(currentSim.scenarioId, io);
+    startPositionLoop(currentSim.scenarioId, io);
   }
 
   // Broadcast updated ratio
@@ -1076,7 +1111,8 @@ export async function applyEventsForTime(scenarioId: string, simTime: Date): Pro
 
 // ─── MSEL Inject Firing ──────────────────────────────────────────────────────
 
-async function fireScheduledInjects(io: Server): Promise<void> {
+async function fireScheduledInjects(scenarioId: string, io: Server): Promise<void> {
+  const currentSim = activeSims.get(scenarioId);
   if (!currentSim || currentSim.status !== 'RUNNING') return;
 
   const simHour = currentSim.simTime.getUTCHours();
@@ -1085,7 +1121,7 @@ async function fireScheduledInjects(io: Server): Promise<void> {
   // Find unfired injects whose trigger time has passed
   const injects = await prisma.scenarioInject.findMany({
     where: {
-      scenarioId: currentSim.scenarioId,
+      scenarioId,
       fired: false,
       OR: [
         { triggerDay: { lt: atoDay } },
@@ -1097,7 +1133,7 @@ async function fireScheduledInjects(io: Server): Promise<void> {
   if (injects.length === 0) return;
 
   for (const inject of injects) {
-    if (!currentSim || currentSim.status !== 'RUNNING') return;
+    if (!activeSims.has(scenarioId) || activeSims.get(scenarioId)!.status !== 'RUNNING') return;
 
     // Mark as fired
     await prisma.scenarioInject.update({
@@ -1113,7 +1149,7 @@ async function fireScheduledInjects(io: Server): Promise<void> {
     }
 
     // Broadcast to clients
-    io.to(`scenario:${currentSim.scenarioId}`).emit('inject:fired', {
+    io.to(`scenario:${scenarioId}`).emit('inject:fired', {
       event: 'inject:fired',
       injectId: inject.id,
       injectType: inject.injectType,
@@ -1130,6 +1166,7 @@ async function fireScheduledInjects(io: Server): Promise<void> {
 }
 
 async function applyInjectEffect(inject: { id: string; scenarioId: string; injectType: string; title: string; description: string }): Promise<void> {
+  const currentSim = activeSims.get(inject.scenarioId);
   if (!currentSim) return;
 
   switch (inject.injectType) {
@@ -1213,14 +1250,15 @@ async function applyInjectEffect(inject: { id: string; scenarioId: string; injec
 
 // ─── BDA Recording ───────────────────────────────────────────────────────────
 
-async function recordBDA(io: Server): Promise<void> {
+async function recordBDA(scenarioId: string, io: Server): Promise<void> {
+  const currentSim = activeSims.get(scenarioId);
   if (!currentSim || currentSim.status !== 'RUNNING') return;
 
   // Find completed missions that haven't been BDA-recorded yet
   // (no SimEvent with type BDA_RECORDED for that mission)
   const completedMissions = await prisma.mission.findMany({
     where: {
-      package: { taskingOrder: { scenarioId: currentSim.scenarioId } },
+      package: { taskingOrder: { scenarioId } },
       status: 'RECOVERED',
     },
     include: { targets: true },
@@ -1231,7 +1269,7 @@ async function recordBDA(io: Server): Promise<void> {
   // Check which already have BDA recorded
   const existingBDA = await prisma.simEvent.findMany({
     where: {
-      scenarioId: currentSim.scenarioId,
+      scenarioId,
       eventType: 'BDA_RECORDED',
     },
     select: { targetId: true },
@@ -1241,7 +1279,7 @@ async function recordBDA(io: Server): Promise<void> {
   let newBdaCount = 0;
   for (const mission of completedMissions) {
     if (recorded.has(mission.id)) continue;
-    if (!currentSim || currentSim.status !== 'RUNNING') return;
+    if (!activeSims.has(scenarioId) || activeSims.get(scenarioId)!.status !== 'RUNNING') return;
 
     const targetSummary = mission.targets.length > 0
       ? mission.targets.map(t => t.targetName || t.id).join(', ')
@@ -1249,7 +1287,7 @@ async function recordBDA(io: Server): Promise<void> {
 
     await prisma.simEvent.create({
       data: {
-        scenarioId: currentSim.scenarioId,
+        scenarioId,
         eventType: 'BDA_RECORDED',
         targetType: 'Mission',
         targetId: mission.id,
@@ -1261,7 +1299,7 @@ async function recordBDA(io: Server): Promise<void> {
   }
 
   if (newBdaCount > 0) {
-    io.to(`scenario:${currentSim.scenarioId}`).emit('bda:recorded', {
+    io.to(`scenario:${scenarioId}`).emit('bda:recorded', {
       event: 'bda:recorded',
       count: newBdaCount,
       simTime: currentSim.simTime.toISOString(),
@@ -1272,27 +1310,30 @@ async function recordBDA(io: Server): Promise<void> {
 
 // ─── Utility ─────────────────────────────────────────────────────────────────
 
-function clearIntervals() {
-  if (currentSim?.tickInterval) {
-    clearInterval(currentSim.tickInterval);
-    currentSim.tickInterval = null;
+function clearIntervals(sim: SimState) {
+  if (sim.tickInterval) {
+    clearInterval(sim.tickInterval);
+    sim.tickInterval = null;
   }
-  if (currentSim?.positionInterval) {
-    clearInterval(currentSim.positionInterval);
-    currentSim.positionInterval = null;
+  if (sim.positionInterval) {
+    clearInterval(sim.positionInterval);
+    sim.positionInterval = null;
   }
 }
 
 // ─── Graceful Shutdown ───────────────────────────────────────────────────────
 
 /**
- * Handle process termination gracefully. Without this, development runners 
- * like TSX or Nodemon will hang forever trying to kill the node process 
+ * Handle process termination gracefully. Without this, development runners
+ * like TSX or Nodemon will hang forever trying to kill the node process
  * because the setIntervals prevent the event loop from naturally emptying.
  */
 function handleShutdown() {
   console.log('[SIM] Shutting down simulation engine cleanly...');
-  clearIntervals();
+  for (const sim of activeSims.values()) {
+    clearIntervals(sim);
+  }
+  activeSims.clear();
 }
 
 process.on('SIGINT', handleShutdown);

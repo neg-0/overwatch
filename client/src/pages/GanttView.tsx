@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useMemo, useEffect, useRef, useState } from 'react';
 import { useOverwatchStore } from '../store/overwatch-store';
 
 interface SpaceDependency {
@@ -28,9 +28,12 @@ interface TimelineData {
 
 export function GanttView() {
   const activeScenarioId = useOverwatchStore((s) => s.activeScenarioId);
+  const simulation = useOverwatchStore((s) => s.simulation);
   const [data, setData] = useState<TimelineData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [domainFilter, setDomainFilter] = useState('ALL');
+  const ganttContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!activeScenarioId) return;
@@ -55,37 +58,83 @@ export function GanttView() {
     return () => { mounted = false; };
   }, [activeScenarioId]);
 
+  // Filter missions by domain
+  const filteredMissions = useMemo(() => {
+    if (!data?.missions) return [];
+    if (domainFilter === 'ALL') return data.missions;
+    const domainMap: Record<string, string> = {
+      'Air Only': 'AIR',
+      'Maritime Only': 'MARITIME',
+      'Space Only': 'SPACE',
+    };
+    const target = domainMap[domainFilter];
+    return target ? data.missions.filter(m => m.domain === target) : data.missions;
+  }, [data, domainFilter]);
+
+  // Compute max ATO day dynamically
+  const maxAtoDay = useMemo(() => {
+    if (!filteredMissions.length) return 5;
+    const maxDay = Math.max(...filteredMissions.map(m => m.atoDay));
+    return Math.max(maxDay, 1);
+  }, [filteredMissions]);
+
+  const dayColumns = useMemo(() => {
+    return Array.from({ length: maxAtoDay }, (_, i) => i + 1);
+  }, [maxAtoDay]);
+
   const priorityGroups = [1, 2, 3, 4, 5].map(level => {
     return {
       level,
       color: ['', '#ef4444', '#f97316', '#eab308', '#22c55e', '#6b7280'][level],
-      missions: data?.missions.filter(m => m.priority === level) || []
+      missions: filteredMissions.filter(m => m.priority === level)
     };
   });
+
+  const handleDomainChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setDomainFilter(e.target.value);
+  };
+
+  const handleZoomToNow = () => {
+    if (!ganttContainerRef.current || !simulation.simTime) return;
+    // Scroll the gantt container to bring the current ATO day into view
+    const currentDay = simulation.currentAtoDay;
+    if (currentDay > 0 && maxAtoDay > 0) {
+      const containerWidth = ganttContainerRef.current.scrollWidth - 250; // minus label column
+      const dayPosition = ((currentDay - 1) / maxAtoDay) * containerWidth;
+      ganttContainerRef.current.scrollTo({ left: Math.max(0, dayPosition - 100), behavior: 'smooth' });
+    }
+  };
+
+  const atoDayDisplay = simulation.currentAtoDay > 0 ? `ATO DAY ${simulation.currentAtoDay}` : 'ATO DAY --';
 
   return (
     <>
       <div className="content-header">
         <h1>Mission Timeline — Gantt View</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span className="sim-ato-day">ATO DAY --</span>
-          <select className="btn btn-sm btn-secondary" style={{ appearance: 'auto', cursor: 'pointer' }}>
+          <span className="sim-ato-day">{atoDayDisplay}</span>
+          <select
+            className="btn btn-sm btn-secondary"
+            style={{ appearance: 'auto', cursor: 'pointer' }}
+            value={domainFilter}
+            onChange={handleDomainChange}
+          >
             <option>All Domains</option>
             <option>Air Only</option>
             <option>Maritime Only</option>
             <option>Space Only</option>
           </select>
-          <button className="btn btn-sm btn-secondary">Zoom to Now</button>
+          <button className="btn btn-sm btn-secondary" onClick={handleZoomToNow}>Zoom to Now</button>
         </div>
       </div>
 
       <div className="content-body" style={{ padding: '16px' }}>
-        <div className="gantt-container" style={{ minHeight: 'calc(100vh - 120px)' }}>
+        <div className="gantt-container" ref={ganttContainerRef} style={{ minHeight: 'calc(100vh - 120px)', overflowX: 'auto' }}>
 
           {loading && <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>Loading timeline data...</div>}
           {error && <div style={{ padding: '2rem', color: '#ef4444' }}>Error: {error}</div>}
 
-          {!loading && !error && data?.missions.length === 0 && (
+          {!loading && !error && filteredMissions.length === 0 && (
             <div className="empty-state" style={{ minHeight: '400px' }}>
               <div className="empty-state-icon">📊</div>
               <div className="empty-state-title">No mission data loaded</div>
@@ -95,15 +144,15 @@ export function GanttView() {
             </div>
           )}
 
-          {!loading && !error && (data?.missions.length || 0) > 0 && (
+          {!loading && !error && filteredMissions.length > 0 && (
             <>
               <div className="gantt-header" style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', marginBottom: '8px', paddingBottom: '8px' }}>
                 <div className="gantt-label" style={{ width: '250px', flexShrink: 0, fontWeight: 700, color: 'var(--text-bright)', fontSize: '11px', paddingLeft: '8px' }}>
                   MISSION / CALLSIGN
                 </div>
                 <div style={{ display: 'flex', flexGrow: 1, borderLeft: '1px solid var(--border-color)' }}>
-                  {[1, 2, 3, 4, 5].map(day => (
-                    <div key={day} style={{ flex: 1, textAlign: 'center', fontSize: '11px', color: 'var(--text-muted)', borderRight: '1px dashed var(--border-color)' }}>
+                  {dayColumns.map(day => (
+                    <div key={day} style={{ flex: 1, textAlign: 'center', fontSize: '11px', color: 'var(--text-muted)', borderRight: '1px dashed var(--border-color)', minWidth: '80px' }}>
                       ATO DAY {day}
                     </div>
                   ))}
@@ -132,8 +181,8 @@ export function GanttView() {
                       <div style={{ display: 'flex', flexGrow: 1, height: '28px', backgroundColor: 'rgba(255,255,255,0.01)', position: 'relative' }}>
                         <div style={{
                           position: 'absolute',
-                          left: `${(mission.atoDay - 1) * 20}%`,
-                          width: '20%',
+                          left: `${((mission.atoDay - 1) / maxAtoDay) * 100}%`,
+                          width: `${(1 / maxAtoDay) * 100}%`,
                           height: '100%',
                           display: 'flex',
                           alignItems: 'center',

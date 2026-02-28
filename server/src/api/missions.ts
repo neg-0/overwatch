@@ -1,18 +1,25 @@
 import type { GanttData, GeoJSONFeatureCollection } from '@overwatch/shared';
+import type { Domain, MissionStatus } from '@prisma/client';
 import { Router } from 'express';
 import prisma from '../db/prisma-client.js';
 
 export const missionRoutes = Router();
+
+const validDomains = ['AIR', 'MARITIME', 'SPACE', 'LAND'];
 
 // List missions with filters
 missionRoutes.get('/', async (req, res) => {
   try {
     const { scenarioId, domain, status, priority, bbox } = req.query;
 
+    if (domain && !validDomains.includes(String(domain))) {
+      return res.status(400).json({ success: false, error: 'Invalid domain', timestamp: new Date().toISOString() });
+    }
+
     const missions = await prisma.mission.findMany({
       where: {
-        ...(domain && { domain: String(domain) as any }),
-        ...(status && { status: String(status) as any }),
+        ...(domain && { domain: String(domain) as Domain }),
+        ...(status && { status: String(status) as MissionStatus }),
         ...(scenarioId && {
           package: {
             taskingOrder: { scenarioId: String(scenarioId) },
@@ -31,54 +38,29 @@ missionRoutes.get('/', async (req, res) => {
         },
       },
       orderBy: { createdAt: 'asc' },
+      take: 100,
     });
 
     res.json({ success: true, data: missions, timestamp: new Date().toISOString() });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
-// Get mission detail
-missionRoutes.get('/:id', async (req, res) => {
-  try {
-    const mission = await prisma.mission.findUnique({
-      where: { id: req.params.id },
-      include: {
-        waypoints: { orderBy: { sequence: 'asc' } },
-        timeWindows: { orderBy: { startTime: 'asc' } },
-        targets: true,
-        supportReqs: true,
-        spaceNeeds: { include: { spaceAsset: true } },
-        unit: true,
-        package: {
-          include: { taskingOrder: true },
-        },
-        positionUpdates: {
-          orderBy: { timestamp: 'desc' },
-          take: 50,
-        },
-      },
-    });
-
-    if (!mission) {
-      return res.status(404).json({ success: false, error: 'Mission not found', timestamp: new Date().toISOString() });
-    }
-    res.json({ success: true, data: mission, timestamp: new Date().toISOString() });
-  } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
-  }
-});
-
-// Get GeoJSON for map view
+// Get GeoJSON for map view — MUST be before /:id to avoid shadowing
 missionRoutes.get('/geojson', async (req, res) => {
   try {
     const { scenarioId, domain, status } = req.query;
 
+    if (domain && !validDomains.includes(String(domain))) {
+      return res.status(400).json({ success: false, error: 'Invalid domain', timestamp: new Date().toISOString() });
+    }
+
     const missions = await prisma.mission.findMany({
       where: {
-        ...(domain && { domain: String(domain) as any }),
-        ...(status && { status: String(status) as any }),
+        ...(domain && { domain: String(domain) as Domain }),
+        ...(status && { status: String(status) as MissionStatus }),
         ...(scenarioId && {
           package: { taskingOrder: { scenarioId: String(scenarioId) } },
         }),
@@ -183,11 +165,12 @@ missionRoutes.get('/geojson', async (req, res) => {
 
     res.json({ success: true, data: collection, timestamp: new Date().toISOString() });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
-// Get Gantt data
+// Get Gantt data — MUST be before /:id to avoid shadowing
 missionRoutes.get('/gantt', async (req, res) => {
   try {
     const { scenarioId } = req.query;
@@ -287,6 +270,39 @@ missionRoutes.get('/gantt', async (req, res) => {
 
     res.json({ success: true, data: ganttData, timestamp: new Date().toISOString() });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
+  }
+});
+
+// Get mission detail — after /geojson and /gantt to avoid shadowing
+missionRoutes.get('/:id', async (req, res) => {
+  try {
+    const mission = await prisma.mission.findUnique({
+      where: { id: req.params.id },
+      include: {
+        waypoints: { orderBy: { sequence: 'asc' } },
+        timeWindows: { orderBy: { startTime: 'asc' } },
+        targets: true,
+        supportReqs: true,
+        spaceNeeds: { include: { spaceAsset: true } },
+        unit: true,
+        package: {
+          include: { taskingOrder: true },
+        },
+        positionUpdates: {
+          orderBy: { timestamp: 'desc' },
+          take: 50,
+        },
+      },
+    });
+
+    if (!mission) {
+      return res.status(404).json({ success: false, error: 'Mission not found', timestamp: new Date().toISOString() });
+    }
+    res.json({ success: true, data: mission, timestamp: new Date().toISOString() });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });

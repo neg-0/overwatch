@@ -10,11 +10,11 @@ export const config = {
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
   nodeEnv: process.env.NODE_ENV || 'development',
 
-  // LLM model tiers
+  // LLM model tiers — defaults to known-valid OpenAI models
   llm: {
-    flagship: process.env.LLM_FLAGSHIP || 'gpt-5.2',
-    midRange: process.env.LLM_MID_RANGE || 'gpt-5-mini',
-    fast: process.env.LLM_FAST || 'gpt-5-nano',
+    flagship: process.env.LLM_FLAGSHIP || 'o3-mini',
+    midRange: process.env.LLM_MID_RANGE || 'gpt-4.1-mini',
+    fast: process.env.LLM_FAST || 'gpt-4.1-nano',
   },
 
   // Simulation defaults
@@ -31,3 +31,11 @@ export const config = {
     baseUrl: process.env.UDL_BASE_URL || 'https://unifieddatalibrary.com/udl',
   },
 };
+
+// Startup validation — warn about missing critical config
+if (!config.openaiApiKey) {
+  console.warn('[config] WARNING: OPENAI_API_KEY is not set — all LLM generation features will fail');
+}
+if (!config.mapboxToken) {
+  console.warn('[config] WARNING: MAPBOX_TOKEN is not set — map features will be unavailable');
+}

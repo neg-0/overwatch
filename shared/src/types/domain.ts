@@ -4,6 +4,7 @@ import {
   Domain,
   MissionStatus,
   OrderType,
+  SimulationStatus,
   SpaceCapabilityType,
   SupportType,
   TimeWindowType,
@@ -66,7 +67,7 @@ export interface StrategyDocument {
   id: string;
   scenarioId: string;
   title: string;
-  docType: 'NMS' | 'CAMPAIGN_PLAN' | 'JFC_GUIDANCE' | 'COMPONENT_GUIDANCE';
+  docType: 'NDS' | 'NMS' | 'JSCP' | 'CONPLAN' | 'OPLAN' | 'CAMPAIGN_PLAN' | 'JFC_GUIDANCE' | 'COMPONENT_GUIDANCE';
   content: string;
   authorityLevel: string;
   effectiveDate: string;
@@ -76,7 +77,7 @@ export interface PlanningDocument {
   id: string;
   scenarioId: string;
   title: string;
-  docType: 'JIPTL' | 'JPEL' | 'COMPONENT_PRIORITY' | 'SPINS' | 'ACO';
+  docType: 'JIPTL' | 'JPEL' | 'COMPONENT_PRIORITY' | 'SPINS' | 'ACO' | 'MAAP';
   content: string;
   effectiveDate: string;
   priorities: PriorityEntry[];
@@ -268,7 +269,7 @@ export interface SpaceCoverageWindow {
 export interface SimulationState {
   id: string;
   scenarioId: string;
-  status: 'IDLE' | 'RUNNING' | 'PAUSED' | 'STOPPED';
+  status: SimulationStatus;
   simTime: string; // current simulated time (ISO 8601)
   realStartTime: string;
   compressionRatio: number; // e.g. 720 = 1 real minute = 12 sim hours

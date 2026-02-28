@@ -107,16 +107,26 @@ export function HierarchyView() {
   }
 
   const data = hierarchyData as any;
-  if (!data) return null;
+  if (!data) {
+    return (
+      <>
+        <div className="content-header"><h1>Document Hierarchy</h1></div>
+        <div className="content-body">
+          <div className="empty-state" style={{ padding: '48px' }}>
+            <div className="empty-state-icon">📑</div>
+            <div className="empty-state-title">No hierarchy data available</div>
+            <div className="empty-state-description">
+              Ingest documents to build the command hierarchy.
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
 
   const strategies = (data.strategies || []) as any[];
   const planningDocs = (data.planningDocs || []) as any[];
   const taskingOrders = (data.taskingOrders || []) as any[];
-
-  // Build a flat list of all strategy priority IDs for trace highlighting
-  const allStratPriorityIds = new Set(
-    strategies.flatMap((s: any) => (s.priorities || []).map((p: any) => p.id))
-  );
 
   return (
     <>

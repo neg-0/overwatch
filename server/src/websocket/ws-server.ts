@@ -11,11 +11,19 @@ export function setupWebSocket(io: SocketIOServer) {
 
     // Join scenario room for targeted broadcasts
     socket.on('join:scenario', (scenarioId: string) => {
+      if (!scenarioId || typeof scenarioId !== 'string' || scenarioId.length === 0 || scenarioId.length > 100) {
+        console.warn(`[WS] ${socket.id} sent invalid scenarioId for join:scenario`);
+        return;
+      }
       socket.join(`scenario:${scenarioId}`);
       console.log(`[WS] ${socket.id} joined scenario:${scenarioId}`);
     });
 
     socket.on('leave:scenario', (scenarioId: string) => {
+      if (!scenarioId || typeof scenarioId !== 'string' || scenarioId.length === 0 || scenarioId.length > 100) {
+        console.warn(`[WS] ${socket.id} sent invalid scenarioId for leave:scenario`);
+        return;
+      }
       socket.leave(`scenario:${scenarioId}`);
       console.log(`[WS] ${socket.id} left scenario:${scenarioId}`);
     });

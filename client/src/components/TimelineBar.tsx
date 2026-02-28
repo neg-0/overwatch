@@ -38,6 +38,9 @@ export function TimelineBar() {
 
   const handleSeek = useCallback((clientX: number) => {
     if (!trackRef.current || !scenarioTimeRange) return;
+    // Don't allow seeking when simulation is idle or stopped
+    const status = useOverwatchStore.getState().simulation.status;
+    if (status === 'IDLE' || status === 'STOPPED') return;
     const rect = trackRef.current.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const targetMs = startMs + ratio * totalMs;

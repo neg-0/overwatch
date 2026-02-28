@@ -9,6 +9,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // ─── Hoisted mocks ────────────────────────────────────────────────────────────
 
 const mockSpaceAllocationCreate = vi.fn();
+const mockSpaceAllocationFindFirst = vi.fn();
+const mockSpaceAllocationUpdate = vi.fn();
 const mockTaskingOrderFindMany = vi.fn();
 const mockSpaceAssetFindMany = vi.fn();
 
@@ -16,7 +18,11 @@ vi.mock('../../db/prisma-client.js', () => ({
   default: {
     taskingOrder: { findMany: (...args: any[]) => mockTaskingOrderFindMany(...args) },
     spaceAsset: { findMany: (...args: any[]) => mockSpaceAssetFindMany(...args) },
-    spaceAllocation: { create: (...args: any[]) => mockSpaceAllocationCreate(...args) },
+    spaceAllocation: {
+      create: (...args: any[]) => mockSpaceAllocationCreate(...args),
+      findFirst: (...args: any[]) => mockSpaceAllocationFindFirst(...args),
+      update: (...args: any[]) => mockSpaceAllocationUpdate(...args),
+    },
   },
 }));
 
@@ -40,6 +46,7 @@ function makeNeedEntry(overrides: Record<string, any> = {}) {
       allocations: [],
     },
     mission: {
+      id: overrides.missionDbId ?? 'msn-db-1',
       missionId: overrides.missionId ?? 'MSN-1',
       callsign: overrides.callsign ?? 'VIPER 11',
     },
@@ -136,10 +143,23 @@ describe('allocateSpaceResources', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     let allocationCounter = 0;
+    // No existing allocation by default (no duplicates)
+    mockSpaceAllocationFindFirst.mockResolvedValue(null);
     mockSpaceAllocationCreate.mockImplementation(({ data }: any) => {
       allocationCounter++;
       return Promise.resolve({
         id: `alloc-${allocationCounter}`,
+        spaceNeedId: data.spaceNeedId,
+        status: data.status,
+        allocatedCapability: data.allocatedCapability,
+        rationale: data.rationale,
+        riskLevel: data.riskLevel,
+        contentionGroup: data.contentionGroup ?? null,
+      });
+    });
+    mockSpaceAllocationUpdate.mockImplementation(({ where, data }: any) => {
+      return Promise.resolve({
+        id: where.id,
         spaceNeedId: data.spaceNeedId,
         status: data.status,
         allocatedCapability: data.allocatedCapability,

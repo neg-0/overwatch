@@ -23,7 +23,7 @@ import { callLLMWithRetry } from './generation-logger.js';
 const openai = new OpenAI({ apiKey: config.openaiApiKey });
 
 function getModel(tier: 'flagship' | 'midRange' | 'fast'): string {
-  return tier === 'flagship' ? 'o3-mini' : tier === 'midRange' ? 'gpt-4.1-mini' : 'gpt-4.1-nano';
+  return config.llm[tier];
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -713,6 +713,14 @@ Example: [{"targetName":"IADS Node Alpha","damagePercent":85,"functionalKill":tr
         for (const assessment of assessments) {
           if (!assessment.targetName || typeof assessment.damagePercent !== 'number') continue;
 
+          // Type guards: LLM may return strings instead of booleans
+          if (typeof assessment.functionalKill !== 'boolean') {
+            assessment.functionalKill = assessment.functionalKill === 'yes' || assessment.functionalKill === true;
+          }
+          if (typeof assessment.restrikeNeeded !== 'boolean') {
+            assessment.restrikeNeeded = assessment.restrikeNeeded === 'yes' || assessment.restrikeNeeded === true;
+          }
+
           // Fuzzy match against mission targets
           const matchedTarget = missionTargets.find(t =>
             t.targetName.toLowerCase().includes(assessment.targetName.toLowerCase()) ||
@@ -923,27 +931,7 @@ export async function generateMAAP(
       maapData.guidance,
     ].join('\n');
 
-    // Persist as PlanningDocument
-    const stratDoc = await prisma.strategyDocument.findFirst({
-      where: { scenarioId, tier: 5 },  // OPLAN tier
-      orderBy: { createdAt: 'desc' },
-    });
-
-    await prisma.planningDocument.create({
-      data: {
-        scenarioId,
-        title: maapData.title || 'Master Air Attack Plan',
-        docType: 'MAAP',
-        docTier: 4,
-        content: maapText,
-        effectiveDate: new Date(maapData.effectiveDate || new Date()),
-        strategyDocId: stratDoc?.id,
-        sourceFormat: 'GAME_MASTER',
-        confidence: 0.9,
-      },
-    });
-
-    // Ingest back for KG integration
+    // Ingest through the doc-ingest pipeline (creates PlanningDocument + audit logs)
     const ingestResult = await ingestDocument(
       scenarioId,
       maapText,

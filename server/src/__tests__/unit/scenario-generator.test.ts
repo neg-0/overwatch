@@ -803,6 +803,9 @@ Target Set: Type 055 Destroyers, Yuzhao-class LPDs`;
 
 
     it('still propagates non-P2025 Prisma errors in updateGenerationStatus', async () => {
+      // Reset update mock to clear any unconsumed "once" entries from previous tests
+      mockPrisma.scenario.update.mockReset();
+      mockPrisma.scenario.update.mockResolvedValue({});
       // Scenario update fails with a non-P2025 error (e.g., connection timeout)
       mockPrisma.scenario.update.mockRejectedValueOnce(
         Object.assign(new Error('Connection timed out'), { code: 'P1001' }),

@@ -70,9 +70,11 @@ timelineRoutes.get('/:scenarioId', async (req, res) => {
 
     res.json({
       success: true,
-      data: timelineData
+      data: timelineData,
+      timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error) });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });

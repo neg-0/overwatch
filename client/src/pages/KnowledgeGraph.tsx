@@ -1,5 +1,6 @@
 import * as d3 from 'd3';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useOverwatchStore } from '../store/overwatch-store';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -89,6 +90,7 @@ export function KnowledgeGraph() {
   const [stats, setStats] = useState({ nodes: 0, edges: 0 });
   const [showOrbat, setShowOrbat] = useState(false);
   const [atoDay, setAtoDay] = useState<number | null>(null);
+  const nodesRef = useRef<GraphNode[]>([]);
 
   // ─── Fetch Graph Data ────────────────────────────────────────────────────
 
@@ -146,6 +148,11 @@ export function KnowledgeGraph() {
       socket.off('graph:update', handleGraphUpdate);
     };
   }, [socket]);
+
+  // Keep nodesRef in sync
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
 
   // ─── Filtered Data ──────────────────────────────────────────────────────
 
@@ -302,7 +309,7 @@ export function KnowledgeGraph() {
 
     // Click handler
     node.on('click', (_event, d) => {
-      const original = nodes.find(n => n.id === d.id) || null;
+      const original = nodesRef.current.find(n => n.id === d.id) || null;
       setSelectedNode(original);
     });
 
@@ -394,7 +401,7 @@ export function KnowledgeGraph() {
     return () => {
       simulation.stop();
     };
-  }, [filteredNodes, filteredEdges, nodes]);
+  }, [filteredNodes, filteredEdges]);
 
   // ─── Empty States ──────────────────────────────────────────────────────
 
@@ -420,9 +427,9 @@ export function KnowledgeGraph() {
           The knowledge graph builds as documents are ingested. Right now only raw ORBAT data exists
           ({orbatCount} units/bases/assets). Ingest your scenario documents to see relationships.
         </p>
-        <a href="/intake" style={{ color: 'var(--accent-primary)', marginTop: '12px', display: 'inline-block' }}>
+        <Link to="/intake" style={{ color: 'var(--accent-primary)', marginTop: '12px', display: 'inline-block' }}>
           📥 Go to Doc Intake →
-        </a>
+        </Link>
       </div>
     );
   }

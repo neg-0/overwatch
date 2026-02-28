@@ -106,7 +106,7 @@ export async function fetchElsetAtEpoch(satNo: number, targetDate: Date): Promis
   }
 
   const dateStr = targetDate.toISOString().split('T')[0]; // YYYY-MM-DD for cache key
-  const cacheKey = getCacheKey(satNo, dateStr);
+  const cacheKey = getCacheKey(satNo, `epoch-${dateStr}`);
   const cached = TLE_CACHE.get(cacheKey);
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
     return cached.data;

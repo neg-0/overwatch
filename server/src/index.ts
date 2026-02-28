@@ -6,7 +6,7 @@ import { config } from './config.js';
 import prisma from './db/prisma-client.js';
 
 declare global {
-  var dbConnected: boolean;
+  var dbConnected: boolean | undefined;
 }
 global.dbConnected = false;
 
@@ -51,14 +51,12 @@ app.get('/api/health', async (_req, res) => {
       success: true,
       data: {
         status: 'healthy',
-        timestamp: new Date().toISOString(),
-        environment: config.nodeEnv,
-        databaseProvider: config.databaseProvider,
         dbConnected: global.dbConnected,
       },
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
+    console.error(error);
     res.status(503).json({
       success: false,
       error: 'Health check failed',
