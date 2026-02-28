@@ -24,7 +24,7 @@ export function createIngestRoutes(io: Server) {
     const file = req.file;
 
     if (!file) {
-      return res.status(400).json({ success: false, error: 'No file uploaded. Use multipart/form-data with a "file" field.' });
+      return res.status(400).json({ success: false, error: 'No file uploaded. Use multipart/form-data with a "file" field.', timestamp: new Date().toISOString() });
     }
 
     try {
@@ -46,6 +46,7 @@ export function createIngestRoutes(io: Server) {
         return res.status(400).json({
           success: false,
           error: `Unsupported file type: .${ext}. Supported: .pdf, .docx, .txt`,
+          timestamp: new Date().toISOString(),
         });
       }
 
@@ -53,6 +54,7 @@ export function createIngestRoutes(io: Server) {
         return res.status(400).json({
           success: false,
           error: `File appears empty or could not be parsed (${extractedText?.length || 0} chars extracted)`,
+          timestamp: new Date().toISOString(),
         });
       }
 
@@ -61,13 +63,13 @@ export function createIngestRoutes(io: Server) {
       const filename = String(file.originalname);
       const sourceHint: string = `upload:${filename}`;
       const result = await ingestDocument(scenarioId, extractedText, sourceHint, io);
-      return res.json({ ...result, filename: file.originalname, extractedChars: extractedText.length });
+      return res.json({ ...result, filename: file.originalname, extractedChars: extractedText.length, timestamp: new Date().toISOString() });
     } catch (err) {
       console.error('[API] File upload ingestion failed:', err);
       return res.status(500).json({
         success: false,
-        error: 'File processing failed',
-        details: err instanceof Error ? err.message : 'Unknown error',
+        error: 'Internal server error',
+        timestamp: new Date().toISOString(),
       });
     }
   });
@@ -85,6 +87,7 @@ export function createIngestRoutes(io: Server) {
       return res.status(400).json({
         success: false,
         error: 'documents must be a non-empty array of { text: string, sourceHint?: string }',
+        timestamp: new Date().toISOString(),
       });
     }
 
@@ -92,6 +95,7 @@ export function createIngestRoutes(io: Server) {
       return res.status(400).json({
         success: false,
         error: `Batch limited to 20 documents per request (received ${documents.length})`,
+        timestamp: new Date().toISOString(),
       });
     }
 
@@ -101,6 +105,11 @@ export function createIngestRoutes(io: Server) {
       const doc = documents[i];
       if (!doc.text || typeof doc.text !== 'string' || doc.text.trim().length === 0) {
         results.push({ index: i, success: false, error: 'Empty or missing text' });
+        continue;
+      }
+
+      if (doc.text.length > 100000) {
+        results.push({ index: i, success: false, error: 'Document text exceeds 100000 character limit' });
         continue;
       }
 
@@ -123,6 +132,7 @@ export function createIngestRoutes(io: Server) {
       succeeded: successCount,
       failed: documents.length - successCount,
       results,
+      timestamp: new Date().toISOString(),
     });
   });
 
@@ -135,22 +145,22 @@ export function createIngestRoutes(io: Server) {
     const { scenarioId, rawText, sourceHint } = req.body;
 
     if (!scenarioId) {
-      return res.status(400).json({ success: false, error: 'scenarioId is required' });
+      return res.status(400).json({ success: false, error: 'scenarioId is required', timestamp: new Date().toISOString() });
     }
 
     if (!rawText || typeof rawText !== 'string' || rawText.trim().length === 0) {
-      return res.status(400).json({ success: false, error: 'rawText is required and must be a non-empty string' });
+      return res.status(400).json({ success: false, error: 'rawText is required and must be a non-empty string', timestamp: new Date().toISOString() });
     }
 
     try {
       const result = await ingestDocument(scenarioId, rawText, sourceHint, io);
-      return res.json(result);
+      return res.json({ ...result, timestamp: new Date().toISOString() });
     } catch (err) {
       console.error('[API] Ingestion failed:', err);
       return res.status(500).json({
         success: false,
-        error: 'Ingestion failed',
-        details: err instanceof Error ? err.message : 'Unknown error',
+        error: 'Internal server error',
+        timestamp: new Date().toISOString(),
       });
     }
   });
@@ -163,7 +173,7 @@ export function createIngestRoutes(io: Server) {
     const { scenarioId } = req.query;
 
     if (!scenarioId || typeof scenarioId !== 'string') {
-      return res.status(400).json({ error: 'scenarioId query param is required' });
+      return res.status(400).json({ success: false, error: 'scenarioId query param is required', timestamp: new Date().toISOString() });
     }
 
     try {
@@ -172,10 +182,10 @@ export function createIngestRoutes(io: Server) {
         orderBy: { createdAt: 'desc' },
         take: 50,
       });
-      return res.json({ logs });
+      return res.json({ success: true, data: logs, timestamp: new Date().toISOString() });
     } catch (err) {
       console.error('[API] Failed to fetch ingest logs:', err);
-      return res.status(500).json({ error: 'Failed to fetch logs' });
+      return res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
     }
   });
 
@@ -187,7 +197,7 @@ export function createIngestRoutes(io: Server) {
     const { scenarioId } = req.query;
 
     if (!scenarioId || typeof scenarioId !== 'string') {
-      return res.status(400).json({ error: 'scenarioId query param is required' });
+      return res.status(400).json({ success: false, error: 'scenarioId query param is required', timestamp: new Date().toISOString() });
     }
 
     try {
@@ -226,10 +236,11 @@ export function createIngestRoutes(io: Server) {
         totalFlags: flags.length,
         documentsWithFlags: logs.length,
         flags,
+        timestamp: new Date().toISOString(),
       });
     } catch (err) {
       console.error('[API] Failed to fetch review flags:', err);
-      return res.status(500).json({ error: 'Failed to fetch review flags' });
+      return res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
     }
   });
 
@@ -242,7 +253,22 @@ export function createIngestRoutes(io: Server) {
     const { scenarioId, intervalMs = 18000 } = req.body;
 
     if (!scenarioId) {
-      return res.status(400).json({ error: 'scenarioId is required' });
+      return res.status(400).json({ success: false, error: 'scenarioId is required', timestamp: new Date().toISOString() });
+    }
+
+    // Guard: limit total active streams
+    if (!activeStreams.has(scenarioId) && activeStreams.size >= 5) {
+      return res.status(409).json({
+        success: false,
+        error: 'Maximum number of active streams reached (5). Stop an existing stream first.',
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // Validate scenarioId exists
+    const scenario = await prisma.scenario.findUnique({ where: { id: scenarioId } });
+    if (!scenario) {
+      return res.status(404).json({ success: false, error: 'Scenario not found', timestamp: new Date().toISOString() });
     }
 
     // Stop existing stream if any
@@ -251,7 +277,10 @@ export function createIngestRoutes(io: Server) {
       activeStreams.delete(scenarioId);
     }
 
-    console.log(`[DEMO-STREAM] Starting auto-stream for scenario ${scenarioId} (every ${intervalMs}ms)`);
+    // Cap intervalMs: min 10s, max 5 minutes
+    const safeIntervalMs = Math.max(Math.min(intervalMs, 300000), 10000);
+
+    console.log(`[DEMO-STREAM] Starting auto-stream for scenario ${scenarioId} (every ${safeIntervalMs}ms)`);
 
     // Start first document immediately
     (async () => {
@@ -271,19 +300,20 @@ export function createIngestRoutes(io: Server) {
       } catch (err) {
         console.error('[DEMO-STREAM] Document generation/ingestion failed:', err);
       }
-    }, Math.max(intervalMs, 10000)); // Min 10s interval
+    }, safeIntervalMs);
 
     activeStreams.set(scenarioId, timer);
 
     io.to(`scenario:${scenarioId}`).emit('demo-stream:started', {
       scenarioId,
-      intervalMs: Math.max(intervalMs, 10000),
+      intervalMs: safeIntervalMs,
     });
 
     return res.json({
       success: true,
       message: 'Auto-stream started',
-      intervalMs: Math.max(intervalMs, 10000),
+      intervalMs: safeIntervalMs,
+      timestamp: new Date().toISOString(),
     });
   });
 
@@ -296,7 +326,7 @@ export function createIngestRoutes(io: Server) {
     const { scenarioId } = req.body;
 
     if (!scenarioId) {
-      return res.status(400).json({ error: 'scenarioId is required' });
+      return res.status(400).json({ success: false, error: 'scenarioId is required', timestamp: new Date().toISOString() });
     }
 
     if (activeStreams.has(scenarioId)) {
@@ -306,10 +336,10 @@ export function createIngestRoutes(io: Server) {
       io.to(`scenario:${scenarioId}`).emit('demo-stream:stopped', { scenarioId });
 
       console.log(`[DEMO-STREAM] Stopped auto-stream for scenario ${scenarioId}`);
-      return res.json({ success: true, message: 'Auto-stream stopped' });
+      return res.json({ success: true, message: 'Auto-stream stopped', timestamp: new Date().toISOString() });
     }
 
-    return res.json({ success: true, message: 'No active stream to stop' });
+    return res.json({ success: true, message: 'No active stream to stop', timestamp: new Date().toISOString() });
   });
 
   /**
@@ -319,7 +349,7 @@ export function createIngestRoutes(io: Server) {
   router.get('/demo-stream/status', (req, res) => {
     const { scenarioId } = req.query;
     const isActive = scenarioId ? activeStreams.has(scenarioId as string) : false;
-    return res.json({ active: isActive });
+    return res.json({ success: true, active: isActive, timestamp: new Date().toISOString() });
   });
 
   return router;

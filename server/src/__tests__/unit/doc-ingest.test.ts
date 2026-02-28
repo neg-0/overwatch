@@ -86,6 +86,10 @@ vi.mock('../../db/prisma-client.js', () => {
     ingestLog: {
       create: vi.fn().mockResolvedValue({ id: 'log-001' }),
     },
+    $transaction: vi.fn().mockImplementation(async (fn: (tx: any) => Promise<any>) => {
+      // The transaction callback receives the same mock prisma as `tx`
+      return fn(mockPrisma);
+    }),
   };
   return { default: mockPrisma };
 });

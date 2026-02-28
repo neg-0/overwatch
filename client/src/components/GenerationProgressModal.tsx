@@ -35,6 +35,20 @@ export function GenerationProgressModal({ open, onClose, resumeFromStep }: Props
     return () => clearInterval(interval);
   }, [open]);
 
+  // Escape key to close when complete or failed
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        const gp = useOverwatchStore.getState().generationProgress;
+        const canClose = gp?.status === 'COMPLETE' || gp?.status === 'FAILED';
+        if (canClose) onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   const currentStep = generationProgress?.step || '';

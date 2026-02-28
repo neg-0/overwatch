@@ -118,7 +118,7 @@ export async function allocateSpaceResources(
   const allocationResults: AllocationReport['allocations'] = [];
 
   for (const group of contentionGroups) {
-    const groupId = `CONT-${group.capability}-${group.needs.length}`;
+    const groupId = `CONT-${group.capability}-${group.needs.map(n => n.need.id.slice(0, 8)).sort().join('-')}`;
 
     if (group.needs.length === 1) {
       // No contention — check if we have coverage
@@ -132,17 +132,36 @@ export async function allocateSpaceResources(
         ),
       );
 
-      const allocation = await prisma.spaceAllocation.create({
-        data: {
-          spaceNeedId: entry.need.id,
-          status: hasAsset ? 'FULFILLED' : 'DENIED',
-          allocatedCapability: hasAsset ? entry.need.capabilityType : null,
-          rationale: hasAsset
-            ? `Asset available for ${entry.need.capabilityType}`
-            : `No operational ${entry.need.capabilityType} asset with coverage window`,
-          riskLevel: hasAsset ? 'LOW' : (entry.need.missionCriticality === 'CRITICAL' ? 'CRITICAL' : 'MODERATE'),
-        },
+      const existingAllocation = await prisma.spaceAllocation.findFirst({
+        where: { spaceNeedId: entry.need.id },
       });
+
+      const status = hasAsset ? 'FULFILLED' : 'DENIED';
+      const allocatedCapability = hasAsset ? entry.need.capabilityType : null;
+      const rationale = hasAsset
+        ? `Asset available for ${entry.need.capabilityType}`
+        : `No operational ${entry.need.capabilityType} asset with coverage window`;
+      const riskLevel = hasAsset ? 'LOW' : (entry.need.missionCriticality === 'CRITICAL' ? 'CRITICAL' : 'MODERATE');
+
+      const allocation = existingAllocation
+        ? await prisma.spaceAllocation.update({
+            where: { id: existingAllocation.id },
+            data: {
+              status: status as any,
+              allocatedCapability: allocatedCapability as any,
+              rationale,
+              riskLevel,
+            },
+          })
+        : await prisma.spaceAllocation.create({
+            data: {
+              spaceNeedId: entry.need.id,
+              status: status as any,
+              allocatedCapability: allocatedCapability as any,
+              rationale,
+              riskLevel,
+            },
+          });
 
       allocationResults.push({
         id: allocation.id,
@@ -202,17 +221,33 @@ export async function allocateSpaceResources(
           riskLevel = entry.need.missionCriticality === 'CRITICAL' ? 'CRITICAL' : 'HIGH';
         }
 
-        const allocation = await prisma.spaceAllocation.create({
-          data: {
-            spaceNeedId: entry.need.id,
-            status: status as any,
-            allocatedCapability: allocatedCapability as any,
-            rationale,
-            riskLevel,
-            contentionGroup: groupId,
-            resolvedAt: new Date(),
-          },
+        const existingContAlloc = await prisma.spaceAllocation.findFirst({
+          where: { spaceNeedId: entry.need.id },
         });
+
+        const allocation = existingContAlloc
+          ? await prisma.spaceAllocation.update({
+              where: { id: existingContAlloc.id },
+              data: {
+                status: status as any,
+                allocatedCapability: allocatedCapability as any,
+                rationale,
+                riskLevel,
+                contentionGroup: groupId,
+                resolvedAt: new Date(),
+              },
+            })
+          : await prisma.spaceAllocation.create({
+              data: {
+                spaceNeedId: entry.need.id,
+                status: status as any,
+                allocatedCapability: allocatedCapability as any,
+                rationale,
+                riskLevel,
+                contentionGroup: groupId,
+                resolvedAt: new Date(),
+              },
+            });
 
         allocationResults.push({
           id: allocation.id,
@@ -227,12 +262,12 @@ export async function allocateSpaceResources(
         contentionCompetitors.push({
           spaceNeedId: entry.need.id,
           missionId: entry.mission.missionId,
-          callsign: entry.mission.callsign,
+          callsign: entry.mission.callsign ?? null,
           priority: entry.need.priority,
-          missionCriticality: entry.need.missionCriticality,
+          missionCriticality: entry.need.missionCriticality ?? 'ESSENTIAL',
           tracedPriorityRank: entry.need.priorityEntry?.strategyPriority?.rank ?? null,
-          fallbackCapability: entry.need.fallbackCapability,
-          riskIfDenied: entry.need.riskIfDenied,
+          fallbackCapability: entry.need.fallbackCapability ?? null,
+          riskIfDenied: entry.need.riskIfDenied ?? null,
         });
       }
 
@@ -275,7 +310,23 @@ export async function allocateSpaceResources(
  * Group space needs that compete for the same capability during overlapping time windows
  */
 export function detectContentionGroups(
-  allNeeds: { need: any; mission: any; packagePriority: number }[],
+  allNeeds: {
+    need: {
+      id: string;
+      capabilityType: string;
+      startTime: Date;
+      endTime: Date;
+      coverageLat?: number | null;
+      coverageLon?: number | null;
+      priority: number;
+      missionCriticality?: string;
+      fallbackCapability?: string | null;
+      riskIfDenied?: string | null;
+      priorityEntry?: { strategyPriority?: { rank: number } | null } | null;
+    };
+    mission: { id: string; missionId: string; callsign?: string | null };
+    packagePriority: number;
+  }[],
 ): { capability: string; timeStart: Date; timeEnd: Date; needs: typeof allNeeds }[] {
   const groups: { capability: string; timeStart: Date; timeEnd: Date; needs: typeof allNeeds }[] = [];
 

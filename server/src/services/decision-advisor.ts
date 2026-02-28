@@ -162,7 +162,7 @@ export async function assessSituation(scenarioId: string): Promise<SituationAsse
   // ── Mission readiness ───────────────────────────────────────────────────
   const readyStatuses = ['PLANNED', 'BRIEFED', 'LAUNCHED', 'AIRBORNE', 'ON_STATION'];
   const atRiskStatuses = ['EGRESSING', 'RTB'];
-  const degradedStatuses = ['ABORTED'];
+  const degradedStatuses = ['CANCELLED', 'DIVERTED'];
 
   const missionReadiness: MissionReadiness = {
     totalMissions: missions.length,
@@ -417,23 +417,20 @@ export async function simulateImpact(
         simulatedGapsResolved += 1;
         break;
       case 'PRIORITY_SHIFT':
-        // Priority shifts don't directly resolve gaps but de-risk higher-priority missions
-        simulatedGapsResolved += 0.5;
+        // Priority shifts resolve 1 gap by reprioritizing resources
+        simulatedGapsResolved += 1;
         break;
       case 'MAINTENANCE_SCHEDULE':
         // Taking assets offline creates new gaps
         simulatedNewGaps += 1;
         break;
       case 'CONTINGENCY':
-        // Contingency plans resolve some gaps at the cost of flexibility
-        simulatedGapsResolved += 1;
-        simulatedNewGaps += 0.5;
+        // Contingency plans resolve 2 gaps but create 1 new gap (reduced flexibility)
+        simulatedGapsResolved += 2;
+        simulatedNewGaps += 1;
         break;
     }
   }
-
-  simulatedGapsResolved = Math.round(simulatedGapsResolved);
-  simulatedNewGaps = Math.round(simulatedNewGaps);
 
   const afterGapped = Math.max(0, beforeCoverage.gapped - simulatedGapsResolved + simulatedNewGaps);
   const afterFulfilled = beforeCoverage.totalNeeds - afterGapped;

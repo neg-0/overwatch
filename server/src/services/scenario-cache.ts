@@ -18,12 +18,12 @@ export interface CachedScenario {
   updatedAt: Date;
 
   // Relations mapped out
-  strategies: any[];
-  planningDocs: any[];
-  taskingOrders: any[];
-  units: any[];
-  spaceAssets: any[];
-  scenarioInjects: any[];
+  strategies: Record<string, unknown>[];
+  planningDocs: Record<string, unknown>[];
+  taskingOrders: Record<string, unknown>[];
+  units: Record<string, unknown>[];
+  spaceAssets: Record<string, unknown>[];
+  scenarioInjects: Record<string, unknown>[];
 }
 
 class ScenarioCache {

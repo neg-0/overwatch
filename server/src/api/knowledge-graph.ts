@@ -58,6 +58,7 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
     where: { scenarioId },
     include: { priorities: true },
     orderBy: { tier: 'asc' },
+    take: 100,
   });
 
   for (const doc of strategies) {
@@ -94,6 +95,7 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
     include: {
       priorities: { include: { strategyPriority: true } },
     },
+    take: 100,
   });
 
   for (const doc of planningDocs) {
@@ -142,6 +144,7 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
         include: { spaceAsset: { select: { id: true, name: true } } },
       },
     },
+    take: 100,
   });
 
   for (const need of spaceNeeds) {
@@ -184,7 +187,7 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
 
   // ─── Bases ─────────────────────────────────────────────────────────────────
 
-  const bases = await prisma.base.findMany({ where: { scenarioId } });
+  const bases = await prisma.base.findMany({ where: { scenarioId }, take: 100 });
 
   for (const base of bases) {
     addNode({
@@ -201,6 +204,7 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
   const units = await prisma.unit.findMany({
     where: { scenarioId },
     include: { assets: { include: { assetType: true } } },
+    take: 100,
   });
 
   for (const unit of units) {
@@ -234,7 +238,8 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
       allocations: {
         include: { spaceNeed: true }
       }
-    }
+    },
+    take: 100,
   });
 
   for (const sa of spaceAssets) {
@@ -270,6 +275,7 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
         },
       },
     },
+    take: 100,
   });
 
   for (const order of orders) {
@@ -337,9 +343,10 @@ knowledgeGraphRoutes.get('/:scenarioId', async (req, res) => {
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
+    console.error(error);
     res.status(500).json({
       success: false,
-      error: String(error),
+      error: 'Internal server error',
       timestamp: new Date().toISOString(),
     });
   }

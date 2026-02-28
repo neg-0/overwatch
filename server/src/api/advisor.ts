@@ -24,7 +24,8 @@ export function createAdvisorRoutes(io: Server) {
       const assessment = await assessSituation(req.params.scenarioId);
       res.json({ success: true, data: assessment, timestamp: new Date().toISOString() });
     } catch (error) {
-      res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+      console.error(error);
+      res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
     }
   });
 
@@ -38,6 +39,15 @@ export function createAdvisorRoutes(io: Server) {
   router.post('/coa/:scenarioId', async (req, res) => {
     try {
       const { additionalContext } = req.body;
+
+      if (additionalContext && typeof additionalContext === 'string' && additionalContext.length > 5000) {
+        return res.status(400).json({
+          success: false,
+          error: 'additionalContext must be 5000 characters or fewer',
+          timestamp: new Date().toISOString(),
+        });
+      }
+
       const assessment = await assessSituation(req.params.scenarioId);
       const coas = await generateCOAs(assessment, additionalContext);
 
@@ -51,7 +61,8 @@ export function createAdvisorRoutes(io: Server) {
 
       res.json({ success: true, data: { assessment, coas }, timestamp: new Date().toISOString() });
     } catch (error) {
-      res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+      console.error(error);
+      res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
     }
   });
 
@@ -72,7 +83,8 @@ export function createAdvisorRoutes(io: Server) {
       const projection = await simulateImpact(req.params.scenarioId, coa);
       res.json({ success: true, data: projection, timestamp: new Date().toISOString() });
     } catch (error) {
-      res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+      console.error(error);
+      res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
     }
   });
 
@@ -90,10 +102,19 @@ export function createAdvisorRoutes(io: Server) {
         return res.status(400).json({ success: false, error: 'Query is required', timestamp: new Date().toISOString() });
       }
 
+      if (typeof query === 'string' && query.length > 5000) {
+        return res.status(400).json({
+          success: false,
+          error: 'Query must be 5000 characters or fewer',
+          timestamp: new Date().toISOString(),
+        });
+      }
+
       const response = await handleNLQ(req.params.scenarioId, query);
       res.json({ success: true, data: response, timestamp: new Date().toISOString() });
     } catch (error) {
-      res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+      console.error(error);
+      res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
     }
   });
 
@@ -114,7 +135,8 @@ export function createAdvisorRoutes(io: Server) {
 
       res.json({ success: true, data: decisions, timestamp: new Date().toISOString() });
     } catch (error) {
-      res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+      console.error(error);
+      res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
     }
   });
 

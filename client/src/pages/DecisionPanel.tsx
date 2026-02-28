@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useOverwatchStore } from '../store/overwatch-store';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -68,6 +68,7 @@ export function DecisionPanel() {
   const [nlqResponse, setNlqResponse] = useState<any>(null);
   const [loading, setLoading] = useState({ assess: false, coa: false, impact: false, nlq: false });
   const [activeTab, setActiveTab] = useState<'situation' | 'coa' | 'nlq'>('situation');
+  const pendingFollowUpRef = useRef<string | null>(null);
 
   const API_BASE = '/api/advisor';
 
@@ -136,8 +137,8 @@ export function DecisionPanel() {
         setCoas(prev => prev.filter(c => c.id !== coa.id));
         setImpact(null);
         setSelectedCoa(null);
-        // Refresh assessment
-        setTimeout(fetchAssessment, 1000);
+        // Refresh assessment directly after decision is applied
+        await fetchAssessment();
       }
     } catch (err) { console.error('[PANEL] Execution failed:', err); }
   }, [scenarioId, fetchAssessment]);
@@ -158,6 +159,14 @@ export function DecisionPanel() {
 
   // Auto-fetch assessment on load
   useEffect(() => { fetchAssessment(); }, [fetchAssessment]);
+
+  // Auto-submit follow-up questions when set via button click
+  useEffect(() => {
+    if (pendingFollowUpRef.current && nlqQuery === pendingFollowUpRef.current) {
+      pendingFollowUpRef.current = null;
+      askQuestion();
+    }
+  }, [nlqQuery, askQuestion]);
 
   // ─── Render ─────────────────────────────────────────────────────────────
 
@@ -239,6 +248,12 @@ export function DecisionPanel() {
         </div>
 
         {/* ── Situation Tab ──────────────────────────────────────────── */}
+        {activeTab === 'situation' && !assessment && (
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '48px', gap: '12px' }}>
+            <div style={{ animation: 'spin 1s linear infinite', fontSize: '20px' }}>⏳</div>
+            <span style={{ color: 'var(--text-muted)', fontSize: '14px' }}>Loading situation assessment...</span>
+          </div>
+        )}
         {activeTab === 'situation' && assessment && (
           <div style={{ display: 'grid', gap: '16px' }}>
             {/* Stats Row */}
@@ -543,7 +558,7 @@ export function DecisionPanel() {
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                       {nlqResponse.suggestedFollowups.map((q: string, i: number) => (
                         <button key={i} className="btn btn-sm btn-secondary"
-                          onClick={() => { setNlqQuery(q); }}
+                          onClick={() => { setNlqQuery(q); pendingFollowUpRef.current = q; }}
                           style={{ fontSize: '12px' }}
                         >
                           {q}

@@ -26,7 +26,7 @@ export interface PlatformSpec {
   dataLinks: string[];
   sensors?: string[];          // e.g. ['AN/APG-81', 'AN/AAQ-37 DAS']
   weapons?: string[];          // e.g. ['AIM-120D', 'GBU-31 JDAM']
-  maxRange_nm?: number;        // combat radius
+  maxRange_nm?: number | null;  // combat radius — null = unlimited (e.g., nuclear-powered)
   maxSpeed_kts?: number;
   crew?: number;
 }
@@ -252,7 +252,7 @@ export const PLATFORM_CATALOG: PlatformSpec[] = [
     gpsType: 'SAASM', dataLinks: ['LINK16'],
     sensors: ['AN/SPN-46 CCA', 'AN/SPS-48E 3D Radar', 'AN/SPS-67(V)3'],
     weapons: ['ESSM', 'RAM', 'Phalanx CIWS'],
-    maxRange_nm: -1, maxSpeed_kts: 31, crew: 5680,  // -1 = unlimited (nuclear)
+    maxRange_nm: null, maxSpeed_kts: 31, crew: 5680,  // null = unlimited (nuclear)
   },
   {
     name: 'SSN (Virginia)', domain: 'MARITIME', category: 'Submarine',
@@ -264,7 +264,7 @@ export const PLATFORM_CATALOG: PlatformSpec[] = [
     gpsType: 'STANDARD', dataLinks: [],
     sensors: ['BYG-1 Combat System', 'TB-29A Towed Array', 'AN/BQQ-10 Sonar'],
     weapons: ['Mk 48 ADCAP Torpedo', 'Tomahawk', 'UGM-84 Harpoon'],
-    maxRange_nm: -1, maxSpeed_kts: 25, crew: 132,    // -1 = unlimited (nuclear)
+    maxRange_nm: null, maxSpeed_kts: 25, crew: 132,    // null = unlimited (nuclear)
   },
 ];
 

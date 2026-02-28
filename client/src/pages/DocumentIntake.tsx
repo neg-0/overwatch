@@ -365,7 +365,7 @@ export function DocumentIntake() {
       setToasts(prev => [...prev.slice(-4), `${getDocIcon(docType)} ${docType} ingested — ${entityCount} entities (${data.parseTimeMs}ms)`]);
       // Mark the doc as ingested locally — no re-fetch, no reorder
       setDocs(prev => prev.map(d =>
-        d.content.length === data.rawTextLength || d.title === data.title
+        (data.id && d.id === data.id) || (data.ingestLogId && d.id === data.ingestLogId) || d.title === data.title
           ? { ...d, ingestedAt: new Date().toISOString() }
           : d,
       ));
@@ -397,7 +397,7 @@ export function DocumentIntake() {
     if (!activeScenarioId || !rawText.trim()) return;
     setSubmitting(true);
     try {
-      await fetch('/api/ingest', {
+      const res = await fetch('/api/ingest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -406,6 +406,11 @@ export function DocumentIntake() {
           sourceHint: hint === 'auto' ? undefined : hint,
         }),
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Ingest failed' }));
+        setToasts(prev => [...prev.slice(-4), `❌ Ingestion failed: ${err.error || 'Unknown error'}`]);
+        return;
+      }
     } catch {
       setToasts(prev => [...prev.slice(-4), '❌ Ingestion failed']);
     } finally {
@@ -467,6 +472,7 @@ export function DocumentIntake() {
           const json = await res.json();
           if (!res.ok) {
             setToasts(prev => [...prev.slice(-4), `❌ Upload failed: ${json.error || 'Unknown error'}`]);
+            return;
           }
           setShowImport(false);
           setImportText('');

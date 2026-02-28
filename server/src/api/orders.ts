@@ -1,3 +1,4 @@
+import type { OrderType } from '@prisma/client';
 import { Router } from 'express';
 import prisma from '../db/prisma-client.js';
 
@@ -8,10 +9,18 @@ orderRoutes.get('/', async (req, res) => {
   try {
     const { scenarioId, orderType, fromDate, toDate } = req.query;
 
+    // Validate date params if provided
+    if (fromDate && isNaN(new Date(String(fromDate)).getTime())) {
+      return res.status(400).json({ success: false, error: 'fromDate is not a valid date', timestamp: new Date().toISOString() });
+    }
+    if (toDate && isNaN(new Date(String(toDate)).getTime())) {
+      return res.status(400).json({ success: false, error: 'toDate is not a valid date', timestamp: new Date().toISOString() });
+    }
+
     const orders = await prisma.taskingOrder.findMany({
       where: {
         ...(scenarioId && { scenarioId: String(scenarioId) }),
-        ...(orderType && { orderType: String(orderType) as any }),
+        ...(orderType && { orderType: String(orderType) as OrderType }),
         ...(fromDate && { effectiveStart: { gte: new Date(String(fromDate)) } }),
         ...(toDate && { effectiveEnd: { lte: new Date(String(toDate)) } }),
       },
@@ -28,7 +37,8 @@ orderRoutes.get('/', async (req, res) => {
 
     res.json({ success: true, data: orders, timestamp: new Date().toISOString() });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
@@ -61,6 +71,7 @@ orderRoutes.get('/:id', async (req, res) => {
     }
     res.json({ success: true, data: order, timestamp: new Date().toISOString() });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });

@@ -494,10 +494,10 @@ export async function normalizeDocument(
   const parsed = JSON.parse(content);
 
   // Extract review flags from the response (order-level and event-list include them inline)
-  const reviewFlags: ReviewFlag[] = parsed.reviewFlags || [];
-  delete parsed.reviewFlags;
+  const { reviewFlags: rawFlags, ...data } = parsed;
+  const reviewFlags: ReviewFlag[] = rawFlags || [];
 
-  return { data: parsed, reviewFlags };
+  return { data, reviewFlags };
 }
 
 // ─── Stage 3: Link & Persist ────────────────────────────────────────────────
@@ -517,7 +517,7 @@ async function findParentStrategyDoc(scenarioId: string, _classification: Classi
   return strategyDocs[0]?.id || null;
 }
 
-async function findParentPlanningDoc(scenarioId: string, classification: ClassifyResult): Promise<{ docId: string | null; matchedPriorities: number[] }> {
+async function findParentPlanningDoc(scenarioId: string): Promise<{ docId: string | null; matchedPriorities: number[] }> {
   // Find planning doc whose priorities best match the order's purpose
   const planningDocs = await prisma.planningDocument.findMany({
     where: { scenarioId },
@@ -676,7 +676,7 @@ async function persistOrder(
   const effectiveEnd = new Date(data.effectiveEnd || new Date(effectiveStart.getTime() + 24 * 60 * 60 * 1000).toISOString());
 
   // Find parent planning doc and match priorities
-  const { docId: planningDocId, matchedPriorities } = await findParentPlanningDoc(scenarioId, classification);
+  const { docId: planningDocId, matchedPriorities } = await findParentPlanningDoc(scenarioId);
 
   // Map order type string to enum value
   const validOrderTypes = ['ATO', 'MTO', 'STO', 'OPORD', 'EXORD', 'FRAGORD', 'ACO', 'SPINS'] as const;
@@ -689,189 +689,195 @@ async function persistOrder(
     ? (data.classification as typeof validClassifications[number])
     : 'UNCLASSIFIED';
 
-  // Create the tasking order
-  const order = await prisma.taskingOrder.create({
-    data: {
-      scenarioId,
-      planningDocId,
-      orderType,
-      orderId: data.orderId || `${orderType}-INGEST-${Date.now()}`,
-      issuingAuthority: data.issuingAuthority || classification.issuingAuthority || 'UNKNOWN',
-      effectiveStart,
-      effectiveEnd,
-      classification: classificationVal,
-      atoDayNumber: data.atoDayNumber || null,
-      rawText,
-      rawFormat: classification.sourceFormat,
-      sourceFormat: classification.sourceFormat,
-      confidence: classification.confidence,
-      ingestedAt: new Date(),
-    },
-  });
-
-  let missionCount = 0;
-  let waypointCount = 0;
-  let targetCount = 0;
-  let spaceNeedCount = 0;
-
-  // Create mission packages and child records
-  for (const pkg of data.missionPackages || []) {
-    const missionPackage = await prisma.missionPackage.create({
+  const result = await prisma.$transaction(async (tx) => {
+    // Create the tasking order
+    const order = await tx.taskingOrder.create({
       data: {
-        taskingOrderId: order.id,
-        packageId: pkg.packageId || `PKG-${Date.now()}`,
-        priorityRank: pkg.priorityRank || 99,
-        missionType: pkg.missionType || 'UNKNOWN',
-        effectDesired: pkg.effectDesired || '',
+        scenarioId,
+        planningDocId,
+        orderType,
+        orderId: data.orderId || `${orderType}-INGEST-${Date.now()}`,
+        issuingAuthority: data.issuingAuthority || classification.issuingAuthority || 'UNKNOWN',
+        effectiveStart,
+        effectiveEnd,
+        classification: classificationVal,
+        atoDayNumber: data.atoDayNumber || null,
+        rawText,
+        rawFormat: classification.sourceFormat,
+        sourceFormat: classification.sourceFormat,
+        confidence: classification.confidence,
+        ingestedAt: new Date(),
       },
     });
 
-    for (const msn of pkg.missions || []) {
-      // Validate domain
-      const validDomains = ['AIR', 'MARITIME', 'SPACE', 'LAND'] as const;
-      const domain = validDomains.includes(msn.domain as any)
-        ? (msn.domain as typeof validDomains[number])
-        : 'AIR';
+    let missionCount = 0;
+    let waypointCount = 0;
+    let targetCount = 0;
+    let spaceNeedCount = 0;
 
-      const mission = await prisma.mission.create({
+    // Create mission packages and child records
+    for (const pkg of data.missionPackages || []) {
+      const missionPackage = await tx.missionPackage.create({
         data: {
-          packageId: missionPackage.id,
-          missionId: msn.missionId || `MSN-${Date.now()}-${missionCount}`,
-          callsign: msn.callsign || null,
-          domain,
-          platformType: msn.platformType || 'UNKNOWN',
-          platformCount: msn.platformCount || 1,
-          missionType: msn.missionType || 'UNKNOWN',
-          status: 'PLANNED',
+          taskingOrderId: order.id,
+          packageId: pkg.packageId || `PKG-${Date.now()}`,
+          priorityRank: pkg.priorityRank || 99,
+          missionType: pkg.missionType || 'UNKNOWN',
+          effectDesired: pkg.effectDesired || '',
         },
       });
-      missionCount++;
 
-      // Waypoints
-      for (const wp of msn.waypoints || []) {
-        const validWaypointTypes = ['DEP', 'IP', 'CP', 'TGT', 'EGR', 'REC', 'ORBIT', 'REFUEL', 'CAP', 'PATROL'] as const;
-        const waypointType = validWaypointTypes.includes(wp.waypointType as any)
-          ? (wp.waypointType as typeof validWaypointTypes[number])
-          : 'CP';
+      for (const msn of pkg.missions || []) {
+        // Validate domain
+        const validDomains = ['AIR', 'MARITIME', 'SPACE', 'LAND'] as const;
+        const domain = validDomains.includes(msn.domain as any)
+          ? (msn.domain as typeof validDomains[number])
+          : 'AIR';
 
-        await prisma.waypoint.create({
+        const mission = await tx.mission.create({
           data: {
-            missionId: mission.id,
-            waypointType,
-            sequence: wp.sequence || waypointCount + 1,
-            latitude: wp.latitude,
-            longitude: wp.longitude,
-            altitude_ft: wp.altitude_ft || null,
-            speed_kts: wp.speed_kts || null,
-            name: wp.name || null,
+            packageId: missionPackage.id,
+            missionId: msn.missionId || `MSN-${Date.now()}-${missionCount}`,
+            callsign: msn.callsign || null,
+            domain,
+            platformType: msn.platformType || 'UNKNOWN',
+            platformCount: msn.platformCount || 1,
+            missionType: msn.missionType || 'UNKNOWN',
+            status: 'PLANNED',
           },
         });
-        waypointCount++;
-      }
+        missionCount++;
 
-      // Time windows
-      for (const tw of msn.timeWindows || []) {
-        const validTimeWindowTypes = ['TOT', 'ONSTA', 'OFFSTA', 'REFUEL', 'COVERAGE', 'SUPPRESS', 'TRANSIT'] as const;
-        const windowType = validTimeWindowTypes.includes(tw.windowType as any)
-          ? (tw.windowType as typeof validTimeWindowTypes[number])
-          : 'TOT';
+        // Waypoints — per-mission sequence counter
+        let missionWpCount = 0;
+        for (const wp of msn.waypoints || []) {
+          const validWaypointTypes = ['DEP', 'IP', 'CP', 'TGT', 'EGR', 'REC', 'ORBIT', 'REFUEL', 'CAP', 'PATROL'] as const;
+          const waypointType = validWaypointTypes.includes(wp.waypointType as any)
+            ? (wp.waypointType as typeof validWaypointTypes[number])
+            : 'CP';
 
-        await prisma.timeWindow.create({
-          data: {
-            missionId: mission.id,
-            windowType,
-            startTime: new Date(tw.start),
-            endTime: tw.end ? new Date(tw.end) : null,
-          },
-        });
-      }
-
-      // Targets
-      for (const tgt of msn.targets || []) {
-        await prisma.missionTarget.create({
-          data: {
-            missionId: mission.id,
-            targetId: tgt.targetId || `TGT-${Date.now()}-${targetCount}`,
-            beNumber: tgt.beNumber || null,
-            targetName: tgt.targetName || 'UNKNOWN',
-            latitude: tgt.latitude,
-            longitude: tgt.longitude,
-            targetCategory: tgt.targetCategory || null,
-            priorityRank: tgt.priorityRank || null,
-            desiredEffect: tgt.desiredEffect || 'NEUTRALIZE',
-            collateralConcern: tgt.collateralConcern || null,
-          },
-        });
-        targetCount++;
-      }
-
-      // Support requirements
-      for (const sr of msn.supportRequirements || []) {
-        const validSupportTypes = ['TANKER', 'SEAD', 'ISR', 'EW', 'ESCORT', 'CAP'] as const;
-        const supportType = validSupportTypes.includes(sr.supportType as any)
-          ? (sr.supportType as typeof validSupportTypes[number])
-          : 'ISR';
-
-        await prisma.supportRequirement.create({
-          data: {
-            missionId: mission.id,
-            supportType,
-            details: sr.details || null,
-          },
-        });
-      }
-
-      // Space needs — with fallback, criticality, and priority traceability
-      for (const sn of msn.spaceNeeds || []) {
-        const validCapTypes = ['GPS', 'GPS_MILITARY', 'SATCOM', 'SATCOM_PROTECTED', 'SATCOM_WIDEBAND', 'SATCOM_TACTICAL', 'OPIR', 'ISR_SPACE', 'EW_SPACE', 'WEATHER', 'PNT', 'LINK16', 'SIGINT_SPACE', 'SDA', 'LAUNCH_DETECT', 'CYBER_SPACE', 'DATALINK', 'SSA'] as const;
-        const capabilityType = validCapTypes.includes(sn.capabilityType as any)
-          ? (sn.capabilityType as typeof validCapTypes[number])
-          : 'GPS';
-
-        const fallbackCapability = sn.fallbackCapability && validCapTypes.includes(sn.fallbackCapability as any)
-          ? (sn.fallbackCapability as typeof validCapTypes[number])
-          : null;
-
-        const validCriticalities = ['CRITICAL', 'ESSENTIAL', 'ENHANCING', 'ROUTINE'] as const;
-        const missionCriticality = validCriticalities.includes(sn.missionCriticality as any)
-          ? (sn.missionCriticality as typeof validCriticalities[number])
-          : 'ESSENTIAL';
-
-        // Trace space need to best-matching priority entry from the parent planning doc
-        let priorityEntryId: string | null = null;
-        if (planningDocId) {
-          // Match by mission priority rank against planning doc priority ranks
-          const matchingPriority = await prisma.priorityEntry.findFirst({
-            where: { planningDocId, rank: pkg.priorityRank || 1 },
+          missionWpCount++;
+          await tx.waypoint.create({
+            data: {
+              missionId: mission.id,
+              waypointType,
+              sequence: wp.sequence || missionWpCount,
+              latitude: wp.latitude,
+              longitude: wp.longitude,
+              altitude_ft: wp.altitude_ft || null,
+              speed_kts: wp.speed_kts || null,
+              name: wp.name || null,
+            },
           });
-          priorityEntryId = matchingPriority?.id || null;
+          waypointCount++;
         }
 
-        await prisma.spaceNeed.create({
-          data: {
-            missionId: mission.id,
-            capabilityType,
-            priority: sn.priority || 5,
-            startTime: effectiveStart,
-            endTime: effectiveEnd,
-            fallbackCapability,
-            missionCriticality,
-            riskIfDenied: sn.riskIfDenied || null,
-            priorityEntryId,
-          },
-        });
-        spaceNeedCount++;
+        // Time windows
+        for (const tw of msn.timeWindows || []) {
+          const validTimeWindowTypes = ['TOT', 'ONSTA', 'OFFSTA', 'REFUEL', 'COVERAGE', 'SUPPRESS', 'TRANSIT'] as const;
+          const windowType = validTimeWindowTypes.includes(tw.windowType as any)
+            ? (tw.windowType as typeof validTimeWindowTypes[number])
+            : 'TOT';
+
+          await tx.timeWindow.create({
+            data: {
+              missionId: mission.id,
+              windowType,
+              startTime: new Date(tw.start),
+              endTime: tw.end ? new Date(tw.end) : null,
+            },
+          });
+        }
+
+        // Targets
+        for (const tgt of msn.targets || []) {
+          await tx.missionTarget.create({
+            data: {
+              missionId: mission.id,
+              targetId: tgt.targetId || `TGT-${Date.now()}-${targetCount}`,
+              beNumber: tgt.beNumber || null,
+              targetName: tgt.targetName || 'UNKNOWN',
+              latitude: tgt.latitude,
+              longitude: tgt.longitude,
+              targetCategory: tgt.targetCategory || null,
+              priorityRank: tgt.priorityRank || null,
+              desiredEffect: tgt.desiredEffect || 'NEUTRALIZE',
+              collateralConcern: tgt.collateralConcern || null,
+            },
+          });
+          targetCount++;
+        }
+
+        // Support requirements
+        for (const sr of msn.supportRequirements || []) {
+          const validSupportTypes = ['TANKER', 'SEAD', 'ISR', 'EW', 'ESCORT', 'CAP'] as const;
+          const supportType = validSupportTypes.includes(sr.supportType as any)
+            ? (sr.supportType as typeof validSupportTypes[number])
+            : 'ISR';
+
+          await tx.supportRequirement.create({
+            data: {
+              missionId: mission.id,
+              supportType,
+              details: sr.details || null,
+            },
+          });
+        }
+
+        // Space needs — with fallback, criticality, and priority traceability
+        for (const sn of msn.spaceNeeds || []) {
+          const validCapTypes = ['GPS', 'GPS_MILITARY', 'SATCOM', 'SATCOM_PROTECTED', 'SATCOM_WIDEBAND', 'SATCOM_TACTICAL', 'OPIR', 'ISR_SPACE', 'EW_SPACE', 'WEATHER', 'PNT', 'LINK16', 'SIGINT_SPACE', 'SDA', 'LAUNCH_DETECT', 'CYBER_SPACE', 'DATALINK', 'SSA'] as const;
+          const capabilityType = validCapTypes.includes(sn.capabilityType as any)
+            ? (sn.capabilityType as typeof validCapTypes[number])
+            : 'GPS';
+
+          const fallbackCapability = sn.fallbackCapability && validCapTypes.includes(sn.fallbackCapability as any)
+            ? (sn.fallbackCapability as typeof validCapTypes[number])
+            : null;
+
+          const validCriticalities = ['CRITICAL', 'ESSENTIAL', 'ENHANCING', 'ROUTINE'] as const;
+          const missionCriticality = validCriticalities.includes(sn.missionCriticality as any)
+            ? (sn.missionCriticality as typeof validCriticalities[number])
+            : 'ESSENTIAL';
+
+          // Trace space need to best-matching priority entry from the parent planning doc
+          let priorityEntryId: string | null = null;
+          if (planningDocId) {
+            // Match by mission priority rank against planning doc priority ranks
+            const matchingPriority = await tx.priorityEntry.findFirst({
+              where: { planningDocId, rank: pkg.priorityRank || 1 },
+            });
+            priorityEntryId = matchingPriority?.id || null;
+          }
+
+          await tx.spaceNeed.create({
+            data: {
+              missionId: mission.id,
+              capabilityType,
+              priority: sn.priority || 5,
+              startTime: effectiveStart,
+              endTime: effectiveEnd,
+              fallbackCapability,
+              missionCriticality,
+              riskIfDenied: sn.riskIfDenied || null,
+              priorityEntryId,
+            },
+          });
+          spaceNeedCount++;
+        }
       }
     }
-  }
 
-  console.log(`  [INGEST] Order created: ${order.orderId} — ${missionCount} missions, ${waypointCount} waypoints, ${targetCount} targets`);
+    return { createdId: order.id, missionCount, waypointCount, targetCount, spaceNeedCount };
+  });
+
+  console.log(`  [INGEST] Order created: ${result.createdId} — ${result.missionCount} missions, ${result.waypointCount} waypoints, ${result.targetCount} targets`);
 
   return {
-    createdId: order.id,
+    createdId: result.createdId,
     parentLinkId: planningDocId || undefined,
     matchedPriorities,
-    extracted: { missionCount, waypointCount, targetCount, spaceNeedCount },
+    extracted: { missionCount: result.missionCount, waypointCount: result.waypointCount, targetCount: result.targetCount, spaceNeedCount: result.spaceNeedCount },
   };
 }
 
@@ -1004,6 +1010,9 @@ export async function ingestDocument(
 
   // Stage 1: Classify
   console.log('[INGEST] Stage 1: Classifying document...');
+  if (rawText.length > 15000) {
+    console.warn(`[doc-ingest] Document truncated from ${rawText.length} to 15000 chars for classification`);
+  }
   const classification = await classifyDocument(rawText, sourceHint);
   console.log(`[INGEST]   → ${classification.hierarchyLevel} / ${classification.documentType} / ${classification.sourceFormat} (${(classification.confidence * 100).toFixed(0)}% confidence)`);
 
@@ -1062,40 +1071,47 @@ export async function ingestDocument(
   let matchedPriorities: number[] = [];
   let extracted: IngestResult['extracted'] = {};
 
-  switch (classification.hierarchyLevel) {
-    case 'STRATEGY': {
-      const result = await persistStrategy(scenarioId, normalized as NormalizedStrategy, rawText, classification);
-      createdId = result.createdId;
-      parentLinkId = result.parentLinkId;
+  try {
+    switch (classification.hierarchyLevel) {
+      case 'STRATEGY': {
+        const result = await persistStrategy(scenarioId, normalized as NormalizedStrategy, rawText, classification);
+        createdId = result.createdId;
+        parentLinkId = result.parentLinkId;
 
-      const stratData = normalized as NormalizedStrategy;
-      extracted.priorityCount = stratData.priorities?.length || 0;
-      break;
-    }
-    case 'PLANNING': {
-      const result = await persistPlanning(scenarioId, normalized as NormalizedPlanning, rawText, classification);
-      createdId = result.createdId;
-      parentLinkId = result.parentLinkId;
-      matchedPriorities = result.matchedPriorities;
+        const stratData = normalized as NormalizedStrategy;
+        extracted.priorityCount = stratData.priorities?.length || 0;
+        break;
+      }
+      case 'PLANNING': {
+        const result = await persistPlanning(scenarioId, normalized as NormalizedPlanning, rawText, classification);
+        createdId = result.createdId;
+        parentLinkId = result.parentLinkId;
+        matchedPriorities = result.matchedPriorities;
 
-      const planData = normalized as NormalizedPlanning;
-      extracted.priorityCount = planData.priorities?.length || 0;
-      break;
+        const planData = normalized as NormalizedPlanning;
+        extracted.priorityCount = planData.priorities?.length || 0;
+        break;
+      }
+      case 'ORDER': {
+        const result = await persistOrder(scenarioId, normalized as NormalizedOrder, rawText, classification);
+        createdId = result.createdId;
+        parentLinkId = result.parentLinkId;
+        matchedPriorities = result.matchedPriorities;
+        extracted = result.extracted;
+        break;
+      }
+      case 'EVENT_LIST': {
+        const result = await persistMSEL(scenarioId, normalized as NormalizedMSEL, rawText, classification);
+        createdId = result.createdId;
+        extracted = result.extracted;
+        break;
+      }
+      default:
+        throw new Error(`Unknown hierarchy level: ${(classification as any).hierarchyLevel}`);
     }
-    case 'ORDER': {
-      const result = await persistOrder(scenarioId, normalized as NormalizedOrder, rawText, classification);
-      createdId = result.createdId;
-      parentLinkId = result.parentLinkId;
-      matchedPriorities = result.matchedPriorities;
-      extracted = result.extracted;
-      break;
-    }
-    case 'EVENT_LIST': {
-      const result = await persistMSEL(scenarioId, normalized as NormalizedMSEL, rawText, classification);
-      createdId = result.createdId;
-      extracted = result.extracted;
-      break;
-    }
+  } catch (persistErr) {
+    console.error(`[INGEST] Persistence failed for ${classification.hierarchyLevel}:`, persistErr);
+    throw persistErr;
   }
 
   const parseTimeMs = Date.now() - startTime;

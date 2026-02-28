@@ -14,7 +14,7 @@ router.get('/', async (req, res) => {
   const { scenarioId } = req.query;
 
   if (!scenarioId || typeof scenarioId !== 'string') {
-    return res.status(400).json({ success: false, error: 'scenarioId is required' });
+    return res.status(400).json({ success: false, error: 'scenarioId is required', timestamp: new Date().toISOString() });
   }
 
   try {
@@ -59,10 +59,10 @@ router.get('/', async (req, res) => {
       };
     });
 
-    return res.json({ success: true, data: assetsWithPositions });
+    return res.json({ success: true, data: assetsWithPositions, timestamp: new Date().toISOString() });
   } catch (err) {
     console.error('[API] Failed to fetch space assets:', err);
-    return res.status(500).json({ success: false, error: 'Failed to fetch space assets' });
+    return res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
@@ -74,15 +74,15 @@ router.post('/refresh-tles', async (req, res) => {
   const scenarioId = (req.query.scenarioId as string) || req.body?.scenarioId;
 
   if (!scenarioId) {
-    return res.status(400).json({ success: false, error: 'scenarioId is required' });
+    return res.status(400).json({ success: false, error: 'scenarioId is required', timestamp: new Date().toISOString() });
   }
 
   try {
     const updated = await refreshTLEsForScenario(scenarioId);
-    return res.json({ success: true, updated });
+    return res.json({ success: true, updated, timestamp: new Date().toISOString() });
   } catch (err) {
     console.error('[API] TLE refresh failed:', err);
-    return res.status(500).json({ success: false, error: 'TLE refresh failed' });
+    return res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 

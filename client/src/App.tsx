@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { NavLink, Route, Routes } from 'react-router-dom';
+import { Link, NavLink, Route, Routes } from 'react-router-dom';
 import { TimelineBar } from './components/TimelineBar';
 import { CommandDashboard } from './pages/CommandDashboard';
 import { DecisionPanel } from './pages/DecisionPanel';
@@ -18,7 +18,7 @@ const STEP_MS = 3600000; // 1 hour in ms
 
 export default function App() {
   const {
-    connect, connected, simulation,
+    connect, connected, simulation, activeScenarioId,
     startSimulation, pauseSimulation, resumeSimulation, stopSimulation, seekTo, setSpeed,
   } = useOverwatchStore();
 
@@ -195,10 +195,9 @@ export default function App() {
               <button
                 className="shuttle-btn shuttle-btn--primary"
                 onClick={() => {
-                  const scenId = useOverwatchStore.getState().activeScenarioId;
-                  if (scenId) startSimulation(scenId);
+                  if (activeScenarioId) startSimulation(activeScenarioId);
                 }}
-                disabled={!useOverwatchStore.getState().activeScenarioId}
+                disabled={!activeScenarioId}
                 title="Start Simulation"
                 style={{ flex: 1 }}
               >
@@ -267,6 +266,13 @@ export default function App() {
           <Route path="/intake" element={<DocumentIntake />} />
           <Route path="/hierarchy" element={<HierarchyView />} />
           <Route path="/graph" element={<KnowledgeGraph />} />
+          <Route path="*" element={
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', gap: '16px', color: 'var(--text-muted)' }}>
+              <div style={{ fontSize: '48px' }}>404</div>
+              <div style={{ fontSize: '18px' }}>Page not found.</div>
+              <Link to="/" style={{ color: 'var(--accent-primary)' }}>Return to dashboard</Link>
+            </div>
+          } />
         </Routes>
       </main>
 

@@ -137,7 +137,19 @@ export function checkCoverage(
   const elevationDeg = elevationRad * (180 / Math.PI);
 
   // Slant range (distance from ground to satellite along line of sight)
-  const slantRangeKm = R * Math.sin(centralAngleRad) / Math.cos(elevationRad);
+  const slantRangeKm = Math.cos(elevationRad) !== 0
+    ? R * Math.sin(centralAngleRad) / Math.cos(elevationRad)
+    : altKm; // fallback to altitude for directly overhead
+  if (!isFinite(slantRangeKm)) {
+    return {
+      inCoverage: false,
+      elevationDeg,
+      slantRangeKm: altKm,
+      subSatLat: satPosition.latitude,
+      subSatLon: satPosition.longitude,
+      altitudeKm: altKm,
+    };
+  }
 
   return {
     inCoverage: elevationDeg >= minElevation,

@@ -21,22 +21,24 @@ export function createGameMasterRoutes(io: Server) {
     const { scenarioId } = req.params;
     const { atoDay } = req.body;
 
-    if (!atoDay || typeof atoDay !== 'number' || atoDay < 1) {
+    if (!atoDay || typeof atoDay !== 'number' || atoDay < 1 || !Number.isInteger(atoDay)) {
       return res.status(400).json({
         success: false,
-        error: 'atoDay is required and must be a positive number',
+        error: 'atoDay is required and must be a positive integer',
+        timestamp: new Date().toISOString(),
       });
     }
 
     try {
       const result = await generateATO(scenarioId, atoDay, io);
       const status = result.success ? 200 : 500;
-      return res.status(status).json(result);
+      return res.status(status).json({ ...result, timestamp: new Date().toISOString() });
     } catch (err) {
       console.error('[API] Game Master ATO failed:', err);
       return res.status(500).json({
         success: false,
-        error: err instanceof Error ? err.message : 'Unknown error',
+        error: 'Internal server error',
+        timestamp: new Date().toISOString(),
       });
     }
   });
@@ -50,22 +52,24 @@ export function createGameMasterRoutes(io: Server) {
     const { scenarioId } = req.params;
     const { atoDay } = req.body;
 
-    if (!atoDay || typeof atoDay !== 'number' || atoDay < 1) {
+    if (!atoDay || typeof atoDay !== 'number' || atoDay < 1 || !Number.isInteger(atoDay)) {
       return res.status(400).json({
         success: false,
-        error: 'atoDay is required and must be a positive number',
+        error: 'atoDay is required and must be a positive integer',
+        timestamp: new Date().toISOString(),
       });
     }
 
     try {
       const result = await generateInject(scenarioId, atoDay, io);
       const status = result.success ? 200 : 500;
-      return res.status(status).json(result);
+      return res.status(status).json({ ...result, timestamp: new Date().toISOString() });
     } catch (err) {
       console.error('[API] Game Master inject failed:', err);
       return res.status(500).json({
         success: false,
-        error: err instanceof Error ? err.message : 'Unknown error',
+        error: 'Internal server error',
+        timestamp: new Date().toISOString(),
       });
     }
   });
@@ -79,22 +83,24 @@ export function createGameMasterRoutes(io: Server) {
     const { scenarioId } = req.params;
     const { atoDay } = req.body;
 
-    if (!atoDay || typeof atoDay !== 'number' || atoDay < 1) {
+    if (!atoDay || typeof atoDay !== 'number' || atoDay < 1 || !Number.isInteger(atoDay)) {
       return res.status(400).json({
         success: false,
-        error: 'atoDay is required and must be a positive number',
+        error: 'atoDay is required and must be a positive integer',
+        timestamp: new Date().toISOString(),
       });
     }
 
     try {
       const result = await assessBDA(scenarioId, atoDay, io);
       const status = result.success ? 200 : 500;
-      return res.status(status).json(result);
+      return res.status(status).json({ ...result, timestamp: new Date().toISOString() });
     } catch (err) {
       console.error('[API] Game Master BDA failed:', err);
       return res.status(500).json({
         success: false,
-        error: err instanceof Error ? err.message : 'Unknown error',
+        error: 'Internal server error',
+        timestamp: new Date().toISOString(),
       });
     }
   });
@@ -109,12 +115,13 @@ export function createGameMasterRoutes(io: Server) {
     try {
       const result = await generateMAAP(scenarioId, io);
       const status = result.success ? 200 : 500;
-      return res.status(status).json(result);
+      return res.status(status).json({ ...result, timestamp: new Date().toISOString() });
     } catch (err) {
       console.error('[API] Game Master MAAP failed:', err);
       return res.status(500).json({
         success: false,
-        error: err instanceof Error ? err.message : 'Unknown error',
+        error: 'Internal server error',
+        timestamp: new Date().toISOString(),
       });
     }
   });
@@ -129,10 +136,11 @@ export function createGameMasterRoutes(io: Server) {
     const { scenarioId } = req.params;
     const { atoDay } = req.body;
 
-    if (!atoDay || typeof atoDay !== 'number' || atoDay < 1) {
+    if (!atoDay || typeof atoDay !== 'number' || atoDay < 1 || !Number.isInteger(atoDay)) {
       return res.status(400).json({
         success: false,
-        error: 'atoDay is required and must be a positive number',
+        error: 'atoDay is required and must be a positive integer',
+        timestamp: new Date().toISOString(),
       });
     }
 
@@ -146,12 +154,13 @@ export function createGameMasterRoutes(io: Server) {
           data: { orderType: 'MTO' },
         });
       }
-      return res.status(result.success ? 200 : 500).json({ ...result, action: 'mto' });
+      return res.status(result.success ? 200 : 500).json({ ...result, action: 'mto', timestamp: new Date().toISOString() });
     } catch (err) {
       console.error('[API] Game Master MTO failed:', err);
       return res.status(500).json({
         success: false,
-        error: err instanceof Error ? err.message : 'Unknown error',
+        error: 'Internal server error',
+        timestamp: new Date().toISOString(),
       });
     }
   });
@@ -165,10 +174,11 @@ export function createGameMasterRoutes(io: Server) {
     const { scenarioId } = req.params;
     const { atoDay } = req.body;
 
-    if (!atoDay || typeof atoDay !== 'number' || atoDay < 1) {
+    if (!atoDay || typeof atoDay !== 'number' || atoDay < 1 || !Number.isInteger(atoDay)) {
       return res.status(400).json({
         success: false,
-        error: 'atoDay is required and must be a positive number',
+        error: 'atoDay is required and must be a positive integer',
+        timestamp: new Date().toISOString(),
       });
     }
 
@@ -180,12 +190,13 @@ export function createGameMasterRoutes(io: Server) {
           data: { orderType: 'STO' },
         });
       }
-      return res.status(result.success ? 200 : 500).json({ ...result, action: 'sto' });
+      return res.status(result.success ? 200 : 500).json({ ...result, action: 'sto', timestamp: new Date().toISOString() });
     } catch (err) {
       console.error('[API] Game Master STO failed:', err);
       return res.status(500).json({
         success: false,
-        error: err instanceof Error ? err.message : 'Unknown error',
+        error: 'Internal server error',
+        timestamp: new Date().toISOString(),
       });
     }
   });
@@ -203,6 +214,7 @@ export function createGameMasterRoutes(io: Server) {
       return res.status(400).json({
         success: false,
         error: 'decisionId (string) and selectedOption (number) are required',
+        timestamp: new Date().toISOString(),
       });
     }
 
@@ -212,7 +224,7 @@ export function createGameMasterRoutes(io: Server) {
       });
 
       if (!decision || decision.scenarioId !== scenarioId) {
-        return res.status(404).json({ success: false, error: 'Decision not found' });
+        return res.status(404).json({ success: false, error: 'Decision not found', timestamp: new Date().toISOString() });
       }
 
       // Parse options from the decision event effectsJson
@@ -222,6 +234,7 @@ export function createGameMasterRoutes(io: Server) {
         return res.status(400).json({
           success: false,
           error: `selectedOption must be 0-${options.length - 1}`,
+          timestamp: new Date().toISOString(),
         });
       }
 
@@ -245,16 +258,16 @@ export function createGameMasterRoutes(io: Server) {
         timestamp: new Date().toISOString(),
       });
 
-      return res.json({ success: true, selectedOption, option: options[selectedOption] });
+      return res.json({ success: true, selectedOption, option: options[selectedOption], timestamp: new Date().toISOString() });
     } catch (err) {
       console.error('[API] Decision resolution failed:', err);
       return res.status(500).json({
         success: false,
-        error: err instanceof Error ? err.message : 'Unknown error',
+        error: 'Internal server error',
+        timestamp: new Date().toISOString(),
       });
     }
   });
 
   return router;
 }
-

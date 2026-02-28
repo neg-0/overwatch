@@ -182,7 +182,13 @@ interface OverwatchStore {
   // Health and Import
   fetchHealth: () => Promise<void>;
   importScenario: (file: File) => Promise<{ success: boolean; data?: { id: string }; error?: string }>;
+
+  // Generation state reset
+  resetGenerationProgress: () => void;
 }
+
+// Module-level AbortController for setActiveScenario race condition prevention
+let activeScenarioAbort: AbortController | null = null;
 
 export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
   // ─── Initial State ───────────────────────────────────────────────────────
@@ -375,6 +381,14 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
 
   // ─── Scenario Management ─────────────────────────────────────────────────
   setActiveScenario: (id: string) => {
+    // Abort any in-flight requests from a previous setActiveScenario call
+    if (activeScenarioAbort) {
+      activeScenarioAbort.abort();
+    }
+    const abortController = new AbortController();
+    activeScenarioAbort = abortController;
+    const signal = abortController.signal;
+
     const socket = get().socket;
     if (socket?.connected) {
       socket.emit('join:scenario', id);
@@ -387,9 +401,10 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
 
     // Rehydrate ephemeral state from DB so page refresh doesn't lose everything
     // Positions — latest per mission for map markers
-    fetch(`/api/scenarios/${id}/positions/latest`)
+    fetch(`/api/scenarios/${id}/positions/latest`, { signal })
       .then(r => r.json())
       .then(json => {
+        if (signal.aborted) return;
         if (json.success && json.data) {
           const positions = new Map<string, PositionUpdate>();
           for (const p of json.data) {
@@ -412,9 +427,10 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
       .catch(() => { });
 
     // Pending decisions — unresolved decisions that need action
-    fetch(`/api/scenarios/${id}/decisions/pending`)
+    fetch(`/api/scenarios/${id}/decisions/pending`, { signal })
       .then(r => r.json())
       .then(json => {
+        if (signal.aborted) return;
         if (json.success && json.data) {
           const pendingDecisions: PendingDecision[] = json.data.map((d: any) => ({
             eventId: d.id,
@@ -430,9 +446,10 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
       .catch(() => { });
 
     // Coverage windows — for space domain overlay
-    fetch(`/api/scenarios/${id}/coverage-windows`)
+    fetch(`/api/scenarios/${id}/coverage-windows`, { signal })
       .then(r => r.json())
       .then(json => {
+        if (signal.aborted) return;
         if (json.success && json.data) {
           set({ coverageWindows: json.data });
         }
@@ -487,22 +504,28 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
 
   generateScenario: async (config: GenerateScenarioConfig) => {
     set({ artifactResults: [] }); // Clear previous results
-    const res = await fetch('/api/scenarios/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config),
-    });
-    const data = await res.json();
-    if (data.success) {
-      const socket = get().socket;
-      if (socket?.connected) {
-        socket.emit('join:scenario', data.data.id);
+    try {
+      const res = await fetch('/api/scenarios/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+      const data = await res.json();
+      if (data.success) {
+        const socket = get().socket;
+        if (socket?.connected) {
+          socket.emit('join:scenario', data.data.id);
+        }
+        set({ activeScenarioId: data.data.id });
+        get().fetchScenarios();
+        get().fetchScenarioTimeRange(data.data.id);
       }
-      set({ activeScenarioId: data.data.id });
-      get().fetchScenarios();
-      get().fetchScenarioTimeRange(data.data.id);
+      return data;
+    } catch (err) {
+      console.error('[STORE] Failed to generate scenario:', err);
+      set({ generationProgress: null });
+      throw err;
     }
-    return data;
   },
 
   deleteScenario: async (id: string) => {
@@ -719,6 +742,11 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
   },
 
   // ─── Decision Resolution ────────────────────────────────────────────────
+  // ─── Generation State Reset ─────────────────────────────────────────────
+  resetGenerationProgress: () => {
+    set({ generationProgress: null, artifactResults: [] });
+  },
+
   resolveDecision: async (scenarioId: string, decisionEventId: string, action: string) => {
     try {
       // The backend expects { decisionId, selectedOption (number) }

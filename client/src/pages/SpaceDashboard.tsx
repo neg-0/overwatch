@@ -76,9 +76,9 @@ export function SpaceDashboard() {
 
   const report = allocationReport as any;
   const isSimActive = simulation.status === 'RUNNING' || simulation.status === 'PAUSED';
-  const allocations = isSimActive ? (report?.allocations || []) : [];
-  const contentions = isSimActive ? (report?.contentionEvents || []) : [];
-  const summary = isSimActive ? (report?.summary || {}) : {};
+  const allocations = report?.allocations || [];
+  const contentions = report?.contentionEvents || [];
+  const summary = report?.summary || {};
 
   // Filter by capability if selected
   const filteredAllocations = selectedCapability
@@ -113,15 +113,17 @@ export function SpaceDashboard() {
             }}
           />
           <span style={{ width: 1, height: 20, background: 'var(--border)' }} />
-          {Object.entries(CAPABILITY_LABELS).slice(0, 8).map(([key]) => (
-            <button
-              key={key}
-              className={`btn btn-sm ${selectedCapability === key ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setSelectedCapability(selectedCapability === key ? null : key)}
-            >
-              {key}
-            </button>
-          ))}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', maxHeight: '80px', overflowY: 'auto' }}>
+            {Object.entries(CAPABILITY_LABELS).map(([key]) => (
+              <button
+                key={key}
+                className={`btn btn-sm ${selectedCapability === key ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setSelectedCapability(selectedCapability === key ? null : key)}
+              >
+                {key}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

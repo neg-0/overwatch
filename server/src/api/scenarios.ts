@@ -8,7 +8,7 @@ import prisma from '../db/prisma-client.js';
 import { generateFullScenario } from '../services/scenario-generator.js';
 import { allocateSpaceResources } from '../services/space-allocator.js';
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 export const scenarioRoutes = Router();
 
@@ -26,10 +26,12 @@ scenarioRoutes.get('/', async (_req, res) => {
           },
         },
       },
+      take: 100,
     });
     res.json({ success: true, data: scenarios, timestamp: new Date().toISOString() });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
@@ -56,9 +58,10 @@ scenarioRoutes.get('/ready-made', (req, res) => {
         // could add size or modified date here if desired
       }));
 
-    res.json({ success: true, data: files });
+    res.json({ success: true, data: files, timestamp: new Date().toISOString() });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error) });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
@@ -71,7 +74,7 @@ scenarioRoutes.post('/ready-made/:filename/load', async (req, res) => {
     const filePath = path.join(dir, safeFilename);
 
     if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ success: false, error: 'Scenario file not found' });
+      return res.status(404).json({ success: false, error: 'Scenario file not found', timestamp: new Date().toISOString() });
     }
 
     const zipBuffer = fs.readFileSync(filePath);
@@ -79,7 +82,7 @@ scenarioRoutes.post('/ready-made/:filename/load', async (req, res) => {
     const entry = zip.getEntry('scenario.json');
 
     if (!entry) {
-      return res.status(400).json({ success: false, error: 'Invalid format: missing scenario.json' });
+      return res.status(400).json({ success: false, error: 'Invalid format: missing scenario.json', timestamp: new Date().toISOString() });
     }
 
     const data = JSON.parse(entry.getData().toString('utf8'));
@@ -181,9 +184,10 @@ scenarioRoutes.post('/ready-made/:filename/load', async (req, res) => {
       if (!exists) await prisma.ingestLog.create({ data: ilCore });
     }
 
-    res.json({ success: true, data: { id: core.id } });
+    res.json({ success: true, data: { id: core.id }, timestamp: new Date().toISOString() });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error) });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
@@ -237,7 +241,8 @@ scenarioRoutes.get('/:id', async (req, res) => {
     }
     res.json({ success: true, data: scenario, timestamp: new Date().toISOString() });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
@@ -259,7 +264,8 @@ scenarioRoutes.get('/:id/generation-status', async (req, res) => {
     }
     res.json({ success: true, data: scenario, timestamp: new Date().toISOString() });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
@@ -272,7 +278,8 @@ scenarioRoutes.get('/:id/generation-logs', async (req, res) => {
     });
     res.json({ success: true, data: logs, timestamp: new Date().toISOString() });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
@@ -286,7 +293,7 @@ scenarioRoutes.post('/generate', async (req, res) => {
       return res.status(400).json({ success: false, error: 'name is required and must be a non-empty string', timestamp: new Date().toISOString() });
     }
     const safeDuration = Math.max(1, Math.min(Number(duration) || 14, 90));
-    const safeCompression = Number(compressionRatio) || 720;
+    const safeCompression = Math.max(1, Math.min(Number(compressionRatio) || 720, 10000));
 
     // Create the scenario record first — generator works against this ID
     const scenario = await prisma.scenario.create({
@@ -326,7 +333,8 @@ scenarioRoutes.post('/generate', async (req, res) => {
       console.error(`[SCENARIO] Background generation failed: ${scenario.id}`, err);
     });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
@@ -383,7 +391,8 @@ scenarioRoutes.post('/:id/resume', async (req, res) => {
       console.error(`[SCENARIO] Resume generation failed: ${scenario.id}`, err);
     });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
@@ -447,7 +456,8 @@ scenarioRoutes.post('/:id/steps/:step/regenerate', async (req, res) => {
       console.error(`[SCENARIO] Step regeneration failed: ${scenario.id} / ${decodedStep}`, err);
     });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
@@ -516,7 +526,8 @@ scenarioRoutes.get('/:id/hierarchy', async (req, res) => {
 
     res.json({ success: true, data: scenario, timestamp: new Date().toISOString() });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
@@ -545,7 +556,8 @@ scenarioRoutes.get('/:id/allocations', async (req, res) => {
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
@@ -576,10 +588,12 @@ scenarioRoutes.get('/:id/positions/latest', async (req, res) => {
         status: true,
         timestamp: true,
       },
+      take: 100,
     });
     res.json({ success: true, data: positions, timestamp: new Date().toISOString() });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
@@ -595,7 +609,8 @@ scenarioRoutes.get('/:id/decisions/pending', async (req, res) => {
     });
     res.json({ success: true, data: decisions, timestamp: new Date().toISOString() });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
@@ -610,6 +625,7 @@ scenarioRoutes.get('/:id/coverage-windows', async (req, res) => {
         spaceAsset: { select: { name: true, constellation: true, capabilities: true } },
       },
       orderBy: { startTime: 'asc' },
+      take: 100,
     });
     // Flatten to the shape the store expects
     const data = windows.map(w => ({
@@ -624,7 +640,8 @@ scenarioRoutes.get('/:id/coverage-windows', async (req, res) => {
     }));
     res.json({ success: true, data, timestamp: new Date().toISOString() });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
@@ -659,7 +676,7 @@ scenarioRoutes.get('/:id/export', async (req, res) => {
       },
     });
 
-    if (!scenario) return res.status(404).json({ error: 'Not found' });
+    if (!scenario) return res.status(404).json({ success: false, error: 'Not found', timestamp: new Date().toISOString() });
 
     // Grab standalone tables (no Prisma relation to Scenario)
     const leadershipDecisions = await prisma.leadershipDecision.findMany({
@@ -693,18 +710,19 @@ scenarioRoutes.get('/:id/export', async (req, res) => {
     res.set('Content-Disposition', `attachment; filename="scenario_${safeName}.zip"`);
     res.send(buffer);
   } catch (error) {
-    res.status(500).json({ error: String(error) });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
 // Import a scenario from a ZIP
 scenarioRoutes.post('/import', upload.single('file'), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: 'No zip file provided' });
+    if (!req.file) return res.status(400).json({ success: false, error: 'No zip file provided', timestamp: new Date().toISOString() });
 
     const zip = new AdmZip(req.file.buffer);
     const entry = zip.getEntry('scenario.json');
-    if (!entry) return res.status(400).json({ error: 'Invalid format: missing scenario.json' });
+    if (!entry) return res.status(400).json({ success: false, error: 'Invalid format: missing scenario.json', timestamp: new Date().toISOString() });
 
     const data = JSON.parse(entry.getData().toString('utf8'));
     const {
@@ -801,9 +819,10 @@ scenarioRoutes.post('/import', upload.single('file'), async (req, res) => {
       if (!exists) await prisma.ingestLog.create({ data: ilCore });
     }
 
-    res.json({ success: true, data: { id: core.id } });
+    res.json({ success: true, data: { id: core.id }, timestamp: new Date().toISOString() });
   } catch (error) {
-    res.status(500).json({ error: String(error) });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
@@ -813,6 +832,7 @@ scenarioRoutes.delete('/:id', async (req, res) => {
     await prisma.scenario.delete({ where: { id: req.params.id } });
     res.json({ success: true, timestamp: new Date().toISOString() });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });

@@ -164,7 +164,8 @@ export async function callLLMWithRetry(params: {
 
       // Too short — log retry and try again
       if (attempt < maxRetries) {
-        console.warn(`  [LLM] ${artifact} too short (${content.length} < ${minOutputLength}), retrying with ${escalatedTokens + 2000} tokens...`);
+        const nextAttemptTokens = maxTokens + ((attempt + 1) * 4000);
+        console.warn(`  [LLM] ${artifact} too short (${content.length} < ${minOutputLength}), retrying with ${nextAttemptTokens} tokens...`);
         await logGenerationAttempt({
           scenarioId,
           step,

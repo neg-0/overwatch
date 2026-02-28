@@ -228,7 +228,7 @@ describe('Decision Advisor', () => {
         { status: 'BRIEFED', id: 'm-2' },
         { status: 'AIRBORNE', id: 'm-3' },
         { status: 'RTB', id: 'm-4' },
-        { status: 'ABORTED', id: 'm-5' },
+        { status: 'CANCELLED', id: 'm-5' },
       ]);
 
       const result = await assessSituation('scen-001');
@@ -236,7 +236,7 @@ describe('Decision Advisor', () => {
       expect(result.missionReadiness.totalMissions).toBe(5);
       expect(result.missionReadiness.ready).toBe(3); // PLANNED, BRIEFED, AIRBORNE
       expect(result.missionReadiness.atRisk).toBe(1); // RTB
-      expect(result.missionReadiness.degraded).toBe(1); // ABORTED
+      expect(result.missionReadiness.degraded).toBe(1); // CANCELLED
     });
 
     it('identifies degraded asset issues', async () => {
@@ -426,7 +426,7 @@ describe('Decision Advisor', () => {
       expect(impact.newGapsCreated).toBe(1);
     });
 
-    it('calculates CONTINGENCY as gap resolved + partial new gap', async () => {
+    it('calculates CONTINGENCY as 2 gaps resolved + 1 new gap', async () => {
       const coa = makeCOA({
         actions: [
           { type: 'CONTINGENCY', targetId: 'sat-1', targetName: 'SAT-1', detail: 'Backup plan' },
@@ -435,8 +435,8 @@ describe('Decision Advisor', () => {
 
       const impact = await simulateImpact('scen-001', coa);
 
-      expect(impact.gapsResolved).toBe(1);
-      expect(impact.newGapsCreated).toBe(1); // 0.5 rounds to 1
+      expect(impact.gapsResolved).toBe(2);
+      expect(impact.newGapsCreated).toBe(1);
     });
 
     it('keeps gapped floor at 0', async () => {
@@ -469,8 +469,8 @@ describe('Decision Advisor', () => {
         actions: [{ type: 'PRIORITY_SHIFT', targetId: 'x', targetName: 'X', detail: '' }],
       });
 
-      // PRIORITY_SHIFT resolves 0.5 → rounds to 1 gap resolved, so net actually positive
-      // Need a scenario where gaps resolved = 0
+      // PRIORITY_SHIFT resolves 1 gap, but with all needs fulfilled there are 0 gapped
+      // So resolving gaps has no effect on an already fully-covered scenario
       mockPrisma.spaceNeed.findMany.mockResolvedValue([
         { id: 'sn-1', fulfilled: true, capabilityType: 'ISR', priority: 3, missionId: 'm-1', mission: { missionId: 'm-1', callsign: 'A' } },
       ]);

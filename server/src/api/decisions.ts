@@ -2,6 +2,8 @@ import { Router } from 'express';
 import type { Server } from 'socket.io';
 import prisma from '../db/prisma-client.js';
 
+const validDecisionTypes = ['ASSET_REALLOCATION', 'PRIORITY_SHIFT', 'MAINTENANCE_SCHEDULE', 'CONTINGENCY'];
+
 /**
  * Decision routes — now a factory so we can emit WebSocket events
  * when a leadership decision is executed (the STO feedback loop).
@@ -20,11 +22,13 @@ export function createDecisionRoutes(io: Server) {
           ...(status && { status: String(status) }),
         },
         orderBy: { createdAt: 'desc' },
+        take: 100,
       });
 
       res.json({ success: true, data: decisions, timestamp: new Date().toISOString() });
     } catch (error) {
-      res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+      console.error(error);
+      res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
     }
   });
 
@@ -48,6 +52,14 @@ export function createDecisionRoutes(io: Server) {
         });
       }
 
+      if (!validDecisionTypes.includes(decisionType)) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid decisionType. Must be one of: ${validDecisionTypes.join(', ')}`,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
       const decision = await prisma.leadershipDecision.create({
         data: {
           scenarioId,
@@ -62,7 +74,8 @@ export function createDecisionRoutes(io: Server) {
 
       res.status(201).json({ success: true, data: decision, timestamp: new Date().toISOString() });
     } catch (error) {
-      res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+      console.error(error);
+      res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
     }
   });
 
@@ -70,13 +83,30 @@ export function createDecisionRoutes(io: Server) {
 
   router.post('/:id/execute', async (req, res) => {
     try {
-      const decision = await prisma.leadershipDecision.update({
-        where: { id: req.params.id },
+      // Atomic update: only transition PROPOSED → EXECUTED to prevent double-execute
+      const updated = await prisma.leadershipDecision.updateMany({
+        where: { id: req.params.id, status: 'PROPOSED' },
         data: {
           status: 'EXECUTED',
           executedAt: new Date(),
         },
       });
+
+      if (updated.count === 0) {
+        // Distinguish between not found and wrong status
+        const exists = await prisma.leadershipDecision.findUnique({ where: { id: req.params.id } });
+        if (!exists) {
+          return res.status(404).json({ success: false, error: 'Decision not found', timestamp: new Date().toISOString() });
+        }
+        return res.status(400).json({
+          success: false,
+          error: `Cannot execute — status is "${exists.status}", expected "PROPOSED"`,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      // Re-fetch the full decision for downstream processing
+      const decision = await prisma.leadershipDecision.findUniqueOrThrow({ where: { id: req.params.id } });
 
       // ── 1. Apply the decision effects ────────────────────────────────────
       const effects = await applyDecision(decision);
@@ -101,7 +131,8 @@ export function createDecisionRoutes(io: Server) {
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
-      res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+      console.error(error);
+      res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
     }
   });
 
@@ -157,7 +188,8 @@ export function createDecisionRoutes(io: Server) {
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
-      res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+      console.error(error);
+      res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
     }
   });
 

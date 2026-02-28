@@ -4,6 +4,11 @@ export enum OrderType {
   ATO = 'ATO',
   MTO = 'MTO',
   STO = 'STO',
+  OPORD = 'OPORD',
+  EXORD = 'EXORD',
+  FRAGORD = 'FRAGORD',
+  ACO = 'ACO',
+  SPINS = 'SPINS',
 }
 
 export enum Domain {
@@ -62,12 +67,23 @@ export enum SupportType {
 
 export enum SpaceCapabilityType {
   GPS = 'GPS',
+  GPS_MILITARY = 'GPS_MILITARY',
   SATCOM = 'SATCOM',
+  SATCOM_PROTECTED = 'SATCOM_PROTECTED',
+  SATCOM_WIDEBAND = 'SATCOM_WIDEBAND',
+  SATCOM_TACTICAL = 'SATCOM_TACTICAL',
   OPIR = 'OPIR',
   ISR_SPACE = 'ISR_SPACE',
   EW_SPACE = 'EW_SPACE',
   WEATHER = 'WEATHER',
   PNT = 'PNT',
+  LINK16 = 'LINK16',
+  SIGINT_SPACE = 'SIGINT_SPACE',
+  SDA = 'SDA',
+  LAUNCH_DETECT = 'LAUNCH_DETECT',
+  CYBER_SPACE = 'CYBER_SPACE',
+  DATALINK = 'DATALINK',
+  SSA = 'SSA',
 }
 
 export enum Affiliation {

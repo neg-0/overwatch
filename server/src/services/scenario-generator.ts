@@ -657,7 +657,9 @@ export async function generateFullScenario({
   modelOverrides = {},
   resumeFromStep = undefined,
 }: GenerateScenarioOptions): Promise<string> {
-  const startDate = new Date('2026-03-01T00:00:00Z');
+  // Read startDate from the scenario record instead of hardcoding
+  const scenarioRecord = await prisma.scenario.findUnique({ where: { id: scenarioId }, select: { startDate: true, endDate: true } });
+  const startDate = scenarioRecord?.startDate || new Date('2026-03-01T00:00:00Z');
   const endDate = new Date(startDate.getTime() + duration * 24 * 3600000);
 
   // Determine which step to start from (for resume)
@@ -739,6 +741,10 @@ async function generateSpaceConstellation(scenarioId: string) {
 }
 
 async function generatePlanningDocuments(scenarioId: string, theater: string, adversary: string, modelOverride?: string) {
+  // Read scenario start date for effectiveDate
+  const scenarioForDate = await prisma.scenario.findUnique({ where: { id: scenarioId }, select: { startDate: true } });
+  const effectiveDateForDocs = scenarioForDate?.startDate || new Date('2026-03-01T00:00:00Z');
+
   // Clear existing planning docs for this step
   await prisma.planningDocument.deleteMany({ where: { scenarioId, docType: { in: ['JIPTL', 'SPINS', 'ACO'] } } });
 
@@ -819,7 +825,7 @@ Format with sections covering:
             title: `[Placeholder] ${doc.docType} `,
             docType: doc.docType,
             content: docText || `[PLACEHOLDER] ${doc.docType} generation returned minimal content.`,
-            effectiveDate: new Date('2026-03-01T00:00:00Z'),
+            effectiveDate: effectiveDateForDocs,
           },
         });
         continue;
@@ -833,7 +839,7 @@ Format with sections covering:
           title: doc.docType,
           docType: doc.docType,
           content: docText,
-          effectiveDate: new Date('2026-03-01T00:00:00Z'),
+          effectiveDate: effectiveDateForDocs,
         },
       });
       console.log(`  [PLANNING] Created ${doc.docType} (${docText.length} chars)`);
@@ -856,7 +862,7 @@ Format with sections covering:
           title: `[Placeholder] ${doc.docType} `,
           docType: doc.docType,
           content: `[PLACEHOLDER] ${doc.docType} document generation failed.`,
-          effectiveDate: new Date('2026-03-01T00:00:00Z'),
+          effectiveDate: effectiveDateForDocs,
         },
       });
     }

@@ -34,6 +34,10 @@ const TRAIL_COLORS: Record<string, string> = {
   SPACE: '#c084fc',
 };
 
+// ─── XSS Escape Helper ──────────────────────────────────────────────────────
+
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function MapView() {
@@ -243,6 +247,12 @@ export function MapView() {
     positions.forEach((pos, missionId) => {
       if (!activeDomains.has(pos.domain)) return;
 
+      // Filter by affiliation
+      if (affiliation !== 'ALL') {
+        const posAffiliation = (pos as any).affiliation || 'FRIENDLY';
+        if (posAffiliation !== affiliation) return;
+      }
+
       // Guard against LLM hallucinations that output invalid MapBox coordinates
       const isValidCoord = typeof pos.latitude === 'number' && !isNaN(pos.latitude) && pos.latitude >= -90 && pos.latitude <= 90 &&
         typeof pos.longitude === 'number' && !isNaN(pos.longitude) && pos.longitude >= -180 && pos.longitude <= 180;
@@ -276,10 +286,10 @@ export function MapView() {
           .setHTML(`
             <div style="padding: 8px; font-family: var(--font-mono); font-size: 12px;">
               <div style="font-weight: 700; margin-bottom: 4px; color: ${color};">
-                ${pos.callsign || missionId.slice(0, 8)}
+                ${esc(pos.callsign || missionId.slice(0, 8))}
               </div>
-              <div>Domain: ${pos.domain}</div>
-              <div>Status: ${pos.status}</div>
+              <div>Domain: ${esc(pos.domain)}</div>
+              <div>Status: ${esc(pos.status)}</div>
               ${pos.altitude_ft ? `<div>Alt: ${pos.altitude_ft.toLocaleString()} ft</div>` : ''}
               ${pos.heading != null ? `<div>Hdg: ${pos.heading.toFixed(0)}°</div>` : ''}
               ${pos.speed_kts ? `<div>Spd: ${pos.speed_kts} kts</div>` : ''}
@@ -305,7 +315,7 @@ export function MapView() {
 
     // Update breadcrumb trails
     updateTrails();
-  }, [positions, activeDomains, updateTrails]);
+  }, [positions, activeDomains, affiliation, updateTrails]);
 
   // ─── Domain Toggle ──────────────────────────────────────────────────────────
 

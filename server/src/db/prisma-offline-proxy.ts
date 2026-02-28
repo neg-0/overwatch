@@ -40,10 +40,7 @@ class OfflineDB {
     const coll = this.getCollection(model);
     let count = 0;
     Object.values(coll).forEach((record) => {
-      let matches = true;
-      if (args.where) {
-        matches = Object.keys(args.where).every(k => record[k] === args.where[k]);
-      }
+      const matches = args.where ? this.matchesWhere(record, args.where) : true;
       if (matches) {
         coll[record.id] = { ...record, ...args.data, updatedAt: new Date() };
         count++;
@@ -62,16 +59,35 @@ class OfflineDB {
     return Promise.resolve(match || null);
   }
 
-  findFirst(model: string, args: any) {
-    const coll = this.getCollection(model);
-    const keys = Object.keys(args.where || {});
-    let values = Object.values(coll).filter((r) => keys.every((k) => {
-      if (typeof args.where[k] === 'object' && args.where[k] !== null) {
-        // handle simplified nesting like { some: { id } } if needed, skipping for broad mock
+  private matchesWhere(record: any, where: any): boolean {
+    return Object.keys(where).every((k) => {
+      const val = where[k];
+      if (val === null || val === undefined) {
+        return record[k] == null;
+      }
+      if (typeof val === 'object' && !Array.isArray(val)) {
+        // Handle Prisma operators: { in: [...] }, { not: ... }, { gte: ... }, etc.
+        if ('in' in val) return val.in.includes(record[k]);
+        if ('not' in val) return record[k] !== val.not;
+        if ('gte' in val) return record[k] >= val.gte;
+        if ('lte' in val) return record[k] <= val.lte;
+        if ('gt' in val) return record[k] > val.gt;
+        if ('lt' in val) return record[k] < val.lt;
+        // Nested relation filter (e.g., { package: { taskingOrder: { scenarioId: X } } })
+        // In offline mode, we can't traverse relations — log warning and skip filter
+        console.warn(`[offline-proxy] Nested where clause on '${k}' cannot be evaluated — filter skipped`);
         return true;
       }
-      return r[k] === args.where[k];
-    }));
+      return record[k] === val;
+    });
+  }
+
+  findFirst(model: string, args: any) {
+    const coll = this.getCollection(model);
+    let values = Object.values(coll).filter((r) => {
+      if (!args.where) return true;
+      return this.matchesWhere(r, args.where);
+    });
 
     if (args.orderBy) {
       const orderKeys = Object.keys(args.orderBy);
@@ -93,13 +109,7 @@ class OfflineDB {
     let values = Object.values(coll);
 
     if (args.where) {
-      const keys = Object.keys(args.where);
-      values = values.filter((r) => keys.every((k) => {
-        if (args.where[k]?.in) {
-          return args.where[k].in.includes(r[k]);
-        }
-        return r[k] === args.where[k];
-      }));
+      values = values.filter((r) => this.matchesWhere(r, args.where));
     }
 
     if (args.orderBy) {
@@ -129,11 +139,8 @@ class OfflineDB {
       count = Object.keys(coll).length;
       this.collections[model] = {};
     } else {
-      const keys = Object.keys(args.where);
       Object.keys(coll).forEach((id) => {
-        const record = coll[id];
-        const matches = keys.every(k => record[k] === args.where[k]);
-        if (matches) {
+        if (this.matchesWhere(coll[id], args.where)) {
           delete coll[id];
           count++;
         }
@@ -161,7 +168,20 @@ export function createOfflineProxy() {
       // Prisma special properties start with $
       if (modelName.startsWith('$')) {
         if (modelName === '$transaction') {
-          return async (queries: Promise<any>[]) => Promise.all(queries);
+          return async (queriesOrFn: Promise<any>[] | ((tx: any) => Promise<any>)) => {
+            if (typeof queriesOrFn === 'function') {
+              // Interactive transaction (callback form) — pass the proxy itself as the tx client
+              // Note: offline mode has no real isolation/rollback, but the callback will execute
+              const txProxy = new Proxy({}, handler);
+              return queriesOrFn(txProxy);
+            }
+            // Array form — run sequentially to preserve ordering semantics
+            const results: any[] = [];
+            for (const query of queriesOrFn) {
+              results.push(await query);
+            }
+            return results;
+          };
         }
         if (modelName === '$queryRaw') {
           return async () => [];
@@ -188,7 +208,33 @@ export function createOfflineProxy() {
           const res = await offlineDb.findMany(modelName, args);
           return res.length;
         },
-        aggregate: async () => ({ _max: {}, _min: {}, _avg: {} }), // Stub
+        aggregate: async (args: any) => {
+          // Build a meaningful aggregate from in-memory data
+          const records = await offlineDb.findMany(modelName, { where: args?.where });
+          const result: Record<string, any> = { _count: records.length };
+          for (const op of ['_max', '_min', '_avg', '_sum'] as const) {
+            if (args?.[op]) {
+              result[op] = {};
+              for (const field of Object.keys(args[op])) {
+                const values = records.map((r: any) => r[field]).filter((v: any) => typeof v === 'number');
+                if (values.length === 0) { result[op][field] = null; continue; }
+                if (op === '_max') result[op][field] = Math.max(...values);
+                else if (op === '_min') result[op][field] = Math.min(...values);
+                else if (op === '_avg') result[op][field] = values.reduce((a: number, b: number) => a + b, 0) / values.length;
+                else if (op === '_sum') result[op][field] = values.reduce((a: number, b: number) => a + b, 0);
+              }
+            }
+          }
+          return result;
+        },
+        createMany: async (args: any) => {
+          let count = 0;
+          for (const item of (args.data || [])) {
+            await offlineDb.create(modelName, { data: item });
+            count++;
+          }
+          return { count };
+        },
       };
     }
   };

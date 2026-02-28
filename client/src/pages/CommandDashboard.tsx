@@ -29,7 +29,8 @@ export function CommandDashboard() {
         .then(r => r.json())
         .then(data => {
           if (data.success) setScenarioStats(data.data);
-        });
+        })
+        .catch(console.error);
     }
   }, [activeScenarioId]);
 
@@ -37,7 +38,7 @@ export function CommandDashboard() {
 
   // ─── No Scenario Guard ────────────────────────────────────────────────────
 
-  if (!activeScenarioId || scenarios.length === 0) {
+  if (!activeScenarioId) {
     return (
       <>
         <div className="content-header">

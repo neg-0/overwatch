@@ -64,11 +64,19 @@ export function approximateGeoPosition(
   baseLon = 120.0, // Default sub-satellite longitude for WESTPAC coverage
 ): SpacePosition {
   const isGeo = periodMin > 1400 && periodMin < 1500;
-  const altKm = isGeo ? 35786 : ((periodMin / (2 * Math.PI)) * 6371 * Math.sqrt(6371));
 
-  const hourAngle = (datetime.getTime() / (3600000 * 24)) * 2 * Math.PI;
-  let lat = inclination * Math.sin(hourAngle);
-  let lon = baseLon + (eccentricity * 360 * Math.cos(hourAngle));
+  // Kepler's third law: a = (mu * T^2 / (4 * pi^2))^(1/3)
+  const mu = 398600.4418; // km^3/s^2 - Earth gravitational parameter
+  const periodSec = periodMin * 60;
+  const semiMajorAxis = Math.pow((mu * periodSec * periodSec) / (4 * Math.PI * Math.PI), 1/3);
+  const altKm = isGeo ? 35786 : semiMajorAxis - 6371; // subtract Earth radius
+
+  // Use satellite's actual orbital period instead of Earth's daily rotation
+  const elapsedMs = datetime.getTime();
+  const periodMs = periodMin * 60 * 1000;
+  const orbitalAngle = (elapsedMs / periodMs) * 2 * Math.PI;
+  let lat = inclination * Math.sin(orbitalAngle);
+  let lon = baseLon + (eccentricity * 360 * Math.cos(orbitalAngle));
 
   // Handle orbits that cross the poles (e.g., Sun-Synchronous Orbits with inclination > 90)
   // Normalize longitude to [-180, 180]

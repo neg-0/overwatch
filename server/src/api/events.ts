@@ -2,6 +2,9 @@ import { Router } from 'express';
 import prisma from '../db/prisma-client.js';
 import { applyEventsForTime, getSimState } from '../services/simulation-engine.js';
 
+const validEventTypes = ['SATELLITE_DESTROYED', 'SATELLITE_JAMMED', 'UNIT_DESTROYED', 'COMMS_DEGRADED'];
+const validTargetTypes = ['SpaceAsset', 'Unit'];
+
 const router = Router();
 
 // List all events for a scenario (for timeline milestone ticks)
@@ -19,7 +22,8 @@ router.get('/', async (req, res) => {
 
     res.json({ success: true, data: events, timestamp: new Date().toISOString() });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
@@ -32,6 +36,22 @@ router.post('/', async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'scenarioId, simTime, eventType, targetId, targetType, and description are required',
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    if (!validEventTypes.includes(eventType)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid eventType. Must be one of: ${validEventTypes.join(', ')}`,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    if (!validTargetTypes.includes(targetType)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid targetType. Must be one of: ${validTargetTypes.join(', ')}`,
         timestamp: new Date().toISOString(),
       });
     }
@@ -49,7 +69,7 @@ router.post('/', async (req, res) => {
     });
 
     // Apply the effect immediately — update asset status
-    const sim = getSimState();
+    const sim = getSimState(scenarioId);
     const currentSimTime = sim?.simTime || new Date(simTime);
     await applyEventsForTime(scenarioId, currentSimTime);
 
@@ -57,7 +77,8 @@ router.post('/', async (req, res) => {
 
     res.json({ success: true, data: event, timestamp: new Date().toISOString() });
   } catch (error) {
-    res.status(500).json({ success: false, error: String(error), timestamp: new Date().toISOString() });
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });
 
