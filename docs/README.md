@@ -18,6 +18,8 @@ Overwatch is a doctrine-aligned military scenario generation and simulation plat
 | [Frontend](./frontend.md) | React client — all 10 pages, Zustand store, WebSocket integration |
 | [API Reference](./api-reference.md) | REST endpoints and WebSocket events |
 | [Roadmap](./roadmap.md) | Phase D & E implementation roadmap |
+| **[POC #1](./poc-1.md)** | **Knowledge Graph & Doctrine-Aligned Wargame Generation** |
+| **[POC #2](./poc-2.md)** | **Space Domain AI Decision Support System** |
 
 ## Quick Start
 
@@ -40,5 +42,6 @@ npm run dev
 | **Phase B** | AI ORBAT + Campaign Plan | ✅ Complete |
 | **Phase C** | Daily Tasking Cycle | ✅ Complete |
 | **POC #1** | Raw Docs → Knowledge Graph → Wargame | ✅ ~80% Complete |
+| **POC #2** | Space Domain AI Decision Support System | ⏳ Pending |
 | **Phase D** | Adversary Modeling & Red Force Autonomy | ⏳ Pending |
 | **Phase E** | Multi-User Collaborative Wargaming | ⏳ Pending |
