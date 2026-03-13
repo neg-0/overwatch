@@ -1,8 +1,8 @@
-# POC #1 — Knowledge Graph & Doctrine-Aligned Wargame Generation
+# POC #1 — Narrative-to-Structure Pipeline
 
 ## Vision
 
-Take raw data straight from the Combatant Commands — strategy documents, operational plans, intel reports, targeting lists — and ingest it with AI into a structured knowledge graph that aligns high-level national strategy all the way down to individual mission orders. The system must produce a complete, doctrine-compliant wargame scenario from unstructured text alone.
+Take arbitrary narrative data — strategy documents, operational plans, intel reports, targeting lists, hand-typed ATO fragments — and transform it into structured findings, tasking orders (ATO/MTO/STO), and a knowledge graph linking hierarchies, assets, missions, and their interactions. The structured data is the product. Visualization layers (map, timeline, simulation) exist to display and validate the output.
 
 ---
 
@@ -11,15 +11,15 @@ Take raw data straight from the Combatant Commands — strategy documents, opera
 POC #1 proves a single end-to-end pipeline:
 
 ```
-Raw Documents → AI Classification → Structured Knowledge Graph → Wargame Scenario
+Arbitrary Narrative Input → AI Classification → Structured Data (Findings, Orders, Knowledge Graph)
 ```
 
 A user can feed in anything from a National Defense Strategy memo to a hand-typed ATO fragment, and the system will:
 
 1. **Classify** the document's hierarchy level and type
-2. **Normalize** it into structured data (missions, targets, waypoints, priorities)
+2. **Normalize** it into structured data (findings, missions, targets, waypoints, priorities)
 3. **Integrate** it into a knowledge graph where every entity traces back to its strategic origin
-4. **Generate** a living, runnable wargame scenario driven by that knowledge graph
+4. **Generate** downstream tasking orders and operational products driven by that knowledge graph
 
 ---
 

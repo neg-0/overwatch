@@ -1,6 +1,6 @@
 # Overwatch — Project Documentation
 
-Overwatch is a doctrine-aligned military scenario generation and simulation platform. It produces realistic multi-domain operational scenarios — from strategic policy documents down to individual mission waypoints — using AI-driven content generation grounded in real-world military planning processes.
+Overwatch is an AI-powered narrative-to-structure pipeline for military operations. Its core capability is transforming arbitrary narrative data — raw documents, plans, orders, and reports — into structured findings, tasking orders (ATO/MTO/STO), and a knowledge graph that links hierarchies, assets, missions, and their interactions. Visualization layers (map, timeline, simulation) exist to display and validate the structured output.
 
 ## Documentation Index
 
@@ -41,7 +41,7 @@ npm run dev
 | **Phase A** | Schema + Doctrine Cascade | ✅ Complete |
 | **Phase B** | AI ORBAT + Campaign Plan | ✅ Complete |
 | **Phase C** | Daily Tasking Cycle | ✅ Complete |
-| **POC #1** | Raw Docs → Knowledge Graph → Wargame | ✅ ~80% Complete |
+| **POC #1** | Narrative → Structured Data (findings, ATO/MTO/STO, knowledge graph) | ✅ ~80% Complete |
 | **POC #2** | Space Domain AI Decision Support System | ⏳ Pending |
 | **Phase D** | Adversary Modeling & Red Force Autonomy | ⏳ Pending |
 | **Phase E** | Multi-User Collaborative Wargaming | ⏳ Pending |

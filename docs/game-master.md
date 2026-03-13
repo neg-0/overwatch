@@ -1,6 +1,6 @@
 # Game Master Service
 
-The Game Master (`server/src/services/game-master.ts`, 996 lines) is the core of POC #1 Phase 4. It reads the structured knowledge graph (database), generates operational documents on demand, and ingests results back through the doc-ingest pipeline — creating a full **read → generate → ingest back** loop.
+The Game Master (`server/src/services/game-master.ts`, 996 lines) drives the core POC #1 loop. POC #1's goal is transforming arbitrary narrative data into structured findings, tasking orders (ATO/MTO/STO), and a knowledge graph linking hierarchies and asset interactions. The Game Master reads the structured knowledge graph (database), generates operational documents on demand, and ingests results back through the doc-ingest pipeline — creating a full **read → generate → ingest back** loop that continuously enriches the structured data.
 
 ## Architecture
 

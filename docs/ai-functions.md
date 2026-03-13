@@ -52,7 +52,7 @@ All AI-powered functions in Overwatch, organized by service. Every function uses
 
 ## Game Master (`game-master.ts`)
 
-POC #1 Phase 4 — reads the structured knowledge graph (DB) and generates operational documents on demand. All output is ingested back through the doc-ingest pipeline.
+Core of POC #1 — the goal is transforming arbitrary narrative data into structured findings, ATO/MTO/STO, and a knowledge graph linking hierarchies and asset interactions. The Game Master reads the structured knowledge graph (DB) and generates operational documents on demand. All output is ingested back through the doc-ingest pipeline, continuously enriching the structured data.
 
 ### `generateATO(scenarioId, atoDay, io?)`
 **Model**: `midRange` → Generates a complete Air Tasking Order.

@@ -1,6 +1,6 @@
 # Scenario Generation Pipeline
 
-The `generateFullScenario()` function orchestrates a 9-step LLM pipeline that transforms a scenario description into a fully populated wargame database. Pipeline execution takes 2–4 minutes for a typical scenario.
+The `generateFullScenario()` function orchestrates a 9-step LLM pipeline that transforms a scenario description into a fully populated structured database. This pipeline supports the core POC #1 goal: turning arbitrary narrative data into structured findings, tasking orders (ATO/MTO/STO), and a knowledge graph linking hierarchies and asset interactions. Pipeline execution takes 2–4 minutes for a typical scenario.
 
 ## Pipeline Overview
 

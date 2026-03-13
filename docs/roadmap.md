@@ -1,6 +1,6 @@
 # Phase D & E Roadmap
 
-This document defines the remaining two phases of Overwatch development. Phases A–C and POC #1 are complete. These phases build on the established architecture to transform Overwatch from a single-player AI-driven simulation into a full collaborative wargaming platform.
+This document defines the remaining two phases of Overwatch development. Phases A–C and POC #1 are complete. POC #1 established the core capability: transforming arbitrary narrative data into structured findings, tasking orders (ATO/MTO/STO), and a knowledge graph linking hierarchies and asset interactions. The map, timeline, and simulation serve as display and validation layers for the structured output. These phases build on the established architecture to transform Overwatch from a single-player AI-driven pipeline into a full collaborative wargaming platform.
 
 ---
 

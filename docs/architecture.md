@@ -76,10 +76,29 @@ function getModel(tier: 'flagship' | 'midRange' | 'fast'): string
 
 All calls use `reasoning_effort: 'medium'` to balance quality with speed.
 
+## Core Capability: Narrative → Structure
+
+The central product capability is an AI-powered pipeline that transforms arbitrary narrative data into structured military data:
+
+```
+Narrative Input (raw docs, plans, orders, reports)
+    → Classify (hierarchy level + document type)
+    → Normalize (structured JSON matching schema)
+    → Persist (findings, ATO/MTO/STO, missions, targets, space needs)
+    → Graph (knowledge graph linking hierarchies, assets, interactions)
+```
+
+The map, timeline, and simulation are **display and validation layers** — they exist to visualize the structured output and confirm the pipeline is working correctly.
+
 ## Data Flow
 
 ```mermaid
 graph TB
+    subgraph "Narrative → Structure Pipeline (POC #1 Core)"
+        X[Arbitrary Narrative Input] --> Y[Classify & Normalize]
+        Y --> Z[Structured Data: Findings, Orders, Graph]
+    end
+
     subgraph "Scenario Generation (One-time)"
         A[generateFullScenario] --> B[Strategic Context]
         B --> C[Campaign Plan]
@@ -98,7 +117,7 @@ graph TB
         M --> N[Mission Execution]
     end
 
-    subgraph "Real-time Simulation"
+    subgraph "Display & Validation"
         N --> O[Position Updates]
         O --> P[Coverage Analysis]
         P --> Q[Decision Support]
@@ -107,6 +126,7 @@ graph TB
 
     I --> J
     H --> J
+    Z --> J
 ```
 
 ## Database Architecture
