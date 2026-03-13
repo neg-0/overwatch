@@ -10,11 +10,11 @@ export const config = {
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
   nodeEnv: process.env.NODE_ENV || 'development',
 
-  // LLM model tiers — defaults to known-valid OpenAI models
+  // LLM model tiers — defaults to GPT-5 series
   llm: {
-    flagship: process.env.LLM_FLAGSHIP || 'o3-mini',
-    midRange: process.env.LLM_MID_RANGE || 'gpt-4.1-mini',
-    fast: process.env.LLM_FAST || 'gpt-4.1-nano',
+    flagship: process.env.LLM_FLAGSHIP || 'gpt-5.4',
+    midRange: process.env.LLM_MID_RANGE || 'gpt-5-mini',
+    fast: process.env.LLM_FAST || 'gpt-5-nano',
   },
 
   // Simulation defaults

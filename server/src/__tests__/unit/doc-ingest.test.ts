@@ -34,7 +34,7 @@ vi.mock('../../config.js', () => ({
   config: {
     openaiApiKey: 'test-key',
     llm: {
-      flagship: 'gpt-5.2',
+      flagship: 'gpt-5.4',
       midRange: 'gpt-5-mini',
       fast: 'gpt-5-nano',
     },

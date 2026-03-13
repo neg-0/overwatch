@@ -10,7 +10,7 @@
 #
 # Optional environment variables:
 #   MAPBOX_TOKEN    → for the map view
-#   LLM_FLAGSHIP    → override default LLM model (default: gpt-5.2)
+#   LLM_FLAGSHIP    → override default LLM model (default: gpt-5.4)
 #   LLM_MID_RANGE   → override mid-range model (default: gpt-5-mini)
 #   LLM_FAST        → override fast model (default: gpt-5-nano)
 #   UDL_USERNAME    → UDL credentials

@@ -142,7 +142,7 @@ export async function generateDemoDocument(
     .replace('{docType}', selectedType);
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: config.llm.fast,
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.9,
     max_tokens: 1000,

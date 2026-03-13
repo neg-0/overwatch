@@ -86,7 +86,7 @@ vi.mock('../../config.js', () => ({
   config: {
     openaiApiKey: 'test-key',
     llm: {
-      flagship: 'gpt-5.2',
+      flagship: 'gpt-5.4',
       midRange: 'gpt-5-mini',
       fast: 'gpt-5-nano',
     },
@@ -473,7 +473,7 @@ describe('Scenario Generator', () => {
       // First call to the LLM should use the flagship model
       if (mockCreate.mock.calls.length > 0) {
         const firstCallModel = mockCreate.mock.calls[0][0].model;
-        expect(firstCallModel).toBe('gpt-5.2');
+        expect(firstCallModel).toBe('gpt-5.4');
       }
     });
   });

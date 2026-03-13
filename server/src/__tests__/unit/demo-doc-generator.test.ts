@@ -66,6 +66,11 @@ vi.mock('openai', () => ({
 vi.mock('../../config.js', () => ({
   config: {
     openaiApiKey: 'test-key',
+    llm: {
+      flagship: 'gpt-5.4',
+      midRange: 'gpt-5-mini',
+      fast: 'gpt-5-nano',
+    },
   },
 }));
 
@@ -278,7 +283,7 @@ describe('Demo Doc Generator', () => {
 
       expect(mockCreate).toHaveBeenCalledWith(
         expect.objectContaining({
-          model: 'gpt-4o-mini',
+          model: 'gpt-5-nano',
           temperature: 0.9,
           max_tokens: 1000,
         }),

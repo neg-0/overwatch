@@ -56,7 +56,7 @@ overwatch/
 | **State** | Zustand | Client-side state management + WebSocket sync |
 | **Backend** | Express.js + TypeScript | REST API + WebSocket server |
 | **Database** | PostgreSQL + Prisma ORM | Relational data model (22 tables) |
-| **AI** | OpenAI API (o3 / o4-mini / gpt-4o-mini) | Document generation, planning, decision support |
+| **AI** | OpenAI API (gpt-5.4 / gpt-5-mini / gpt-5-nano) | Document generation, planning, decision support |
 | **Real-time** | Socket.IO | Simulation state streaming |
 | **Orbital** | SGP4 propagation | Space asset position tracking |
 
@@ -70,11 +70,11 @@ function getModel(tier: 'flagship' | 'midRange' | 'fast'): string
 
 | Tier | Model | Use Case |
 |---|---|---|
-| `flagship` | `o3` | Strategic documents (NDS, NMS, JSCP) — highest quality |
-| `midRange` | `o4-mini` | Planning docs, MAAP, MSEL, Game Master operations |
-| `fast` | `gpt-4o-mini` | Individual order parsing, real-time advisor queries, demo docs |
+| `flagship` | `gpt-5.4` | Strategic documents (NDS, NMS, JSCP) — highest quality |
+| `midRange` | `gpt-5-mini` | Planning docs, MAAP, MSEL, Game Master operations |
+| `fast` | `gpt-5-nano` | Individual order parsing, real-time advisor queries, demo docs |
 
-All calls use `reasoning_effort: 'medium'` to balance quality with speed.
+All calls use `reasoning_effort` to balance quality with speed (defaults vary by task: `medium` for complex generation, `low` for classification).
 
 ## Core Capability: Narrative → Structure
 

@@ -57,7 +57,7 @@ Generates a complete Air Tasking Order for a specific ATO day.
 **Flow**:
 1. Build scenario context via `buildScenarioContext()`
 2. Assemble prompt with `ATO_PROMPT` template (MAAP, ORBAT, previous ATO/BDA, space assets)
-3. Call LLM (midRange / o4-mini)
+3. Call LLM (midRange / gpt-5-mini)
 4. Feed generated prose through `classifyAndNormalize()` — the doc-ingest pipeline
 5. Pipeline creates: `TaskingOrder` → `MissionPackage[]` → `Mission[]` with `Waypoint[]`, `TimeWindow[]`, `MissionTarget[]`, `SupportRequirement[]`, `SpaceNeed[]`
 6. Broadcast progress via Socket.IO (`sim:gameMasterUpdate`)

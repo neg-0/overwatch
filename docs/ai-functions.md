@@ -1,6 +1,6 @@
 # AI Functions Reference
 
-All AI-powered functions in Overwatch, organized by service. Every function uses the tiered model selection (`flagship` → o3, `midRange` → o4-mini, `fast` → gpt-4o-mini).
+All AI-powered functions in Overwatch, organized by service. Every function uses the tiered model selection (`flagship` → gpt-5.4, `midRange` → gpt-5-mini, `fast` → gpt-5-nano).
 
 ---
 
@@ -116,7 +116,7 @@ Core of POC #1 — the goal is transforming arbitrary narrative data into struct
 ## Demo Document Generator (`demo-doc-generator.ts`)
 
 ### `generateDemoDocument(scenarioId, docType?)`
-**Model**: `fast` (gpt-4o-mini) → Generates realistic training documents.
+**Model**: `fast` (gpt-5-nano) → Generates realistic training documents.
 **Doc Types**: FRAGORD, INTEL_REPORT, ATO_AMENDMENT, VOCORD, SPINS_UPDATE, SITREP, OPORD_ANNEX.
 **Context**: Assembles current scenario state (active missions, space assets, recent events, ATO day).
 **Output**: Raw military-formatted document text (150–400 words) for use in intake demos.

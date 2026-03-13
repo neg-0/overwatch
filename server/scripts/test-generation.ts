@@ -21,7 +21,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // Models — match app config
 const MODELS = {
-  flagship: process.env.LLM_FLAGSHIP || 'gpt-5.2',
+  flagship: process.env.LLM_FLAGSHIP || 'gpt-5.4',
   midRange: process.env.LLM_MID_RANGE || 'gpt-5-mini',
   fast: process.env.LLM_FAST || 'gpt-5-nano',
 };

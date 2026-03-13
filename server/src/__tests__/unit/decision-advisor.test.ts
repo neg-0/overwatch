@@ -36,9 +36,9 @@ vi.mock('../../config.js', () => ({
   config: {
     openaiApiKey: 'test-key',
     llm: {
-      flagship: 'gpt-5.2',
-      midRange: 'gpt-4o',
-      fast: 'gpt-4o-mini',
+      flagship: 'gpt-5.4',
+      midRange: 'gpt-5-mini',
+      fast: 'gpt-5-nano',
     },
   },
 }));
@@ -370,7 +370,7 @@ describe('Decision Advisor', () => {
       await generateCOAs(makeAssessment());
 
       expect(mockCreate).toHaveBeenCalledWith(
-        expect.objectContaining({ model: 'gpt-5.2' }),
+        expect.objectContaining({ model: 'gpt-5.4' }),
       );
     });
 
@@ -537,7 +537,7 @@ describe('Decision Advisor', () => {
       await handleNLQ('scen-001', 'test query');
 
       expect(mockCreate).toHaveBeenCalledWith(
-        expect.objectContaining({ model: 'gpt-4o' }),
+        expect.objectContaining({ model: 'gpt-5-mini' }),
       );
     });
 

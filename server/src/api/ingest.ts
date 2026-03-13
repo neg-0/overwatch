@@ -76,12 +76,12 @@ export function createIngestRoutes(io: Server) {
 
   /**
    * POST /api/ingest/:scenarioId/batch
-   * Ingest multiple documents in one request.
-   * Body: { documents: Array<{ text: string, sourceHint?: string }> }
+   * Ingest multiple documents in parallel with concurrency control.
+   * Body: { documents: Array<{ text: string, sourceHint?: string }>, concurrency?: number }
    */
   router.post('/:scenarioId/batch', async (req, res) => {
     const { scenarioId } = req.params;
-    const { documents } = req.body;
+    const { documents, concurrency: requestedConcurrency } = req.body;
 
     if (!Array.isArray(documents) || documents.length === 0) {
       return res.status(400).json({
@@ -91,49 +91,136 @@ export function createIngestRoutes(io: Server) {
       });
     }
 
-    if (documents.length > 20) {
+    if (documents.length > 50) {
       return res.status(400).json({
         success: false,
-        error: `Batch limited to 20 documents per request (received ${documents.length})`,
+        error: `Batch limited to 50 documents per request (received ${documents.length})`,
         timestamp: new Date().toISOString(),
       });
     }
 
-    const results: Array<{ index: number; success: boolean; createdId?: string; error?: string }> = [];
+    // Concurrency pool size: 3 by default, max 5
+    const poolSize = Math.min(Math.max(requestedConcurrency || 3, 1), 5);
+    const batchId = `batch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    // Validate all docs upfront and build work queue
+    interface BatchItem {
+      index: number;
+      text: string;
+      sourceHint: string;
+      status: 'queued' | 'processing' | 'done' | 'error';
+      error?: string;
+      createdId?: string;
+    }
+    const items: BatchItem[] = [];
 
     for (let i = 0; i < documents.length; i++) {
       const doc = documents[i];
       if (!doc.text || typeof doc.text !== 'string' || doc.text.trim().length === 0) {
-        results.push({ index: i, success: false, error: 'Empty or missing text' });
+        items.push({ index: i, text: '', sourceHint: '', status: 'error', error: 'Empty or missing text' });
         continue;
       }
-
       if (doc.text.length > 100000) {
-        results.push({ index: i, success: false, error: 'Document text exceeds 100000 character limit' });
+        items.push({ index: i, text: '', sourceHint: '', status: 'error', error: 'Document text exceeds 100000 character limit' });
         continue;
       }
-
-      try {
-        const result = await ingestDocument(scenarioId, doc.text, doc.sourceHint || `batch:${i}`, io);
-        results.push({ index: i, success: true, createdId: result.createdId });
-      } catch (err) {
-        results.push({
-          index: i,
-          success: false,
-          error: err instanceof Error ? err.message : 'Unknown error',
-        });
-      }
+      items.push({ index: i, text: doc.text, sourceHint: doc.sourceHint || `batch:${i}`, status: 'queued' });
     }
 
-    const successCount = results.filter(r => r.success).length;
-    return res.json({
-      success: true,
+    const validItems = items.filter(it => it.status === 'queued');
+
+    // Emit batch start event with per-item status
+    io.to(`scenario:${scenarioId}`).emit('batch:started', {
+      batchId,
       total: documents.length,
-      succeeded: successCount,
-      failed: documents.length - successCount,
-      results,
+      valid: validItems.length,
+      skipped: items.filter(it => it.status === 'error').length,
+      concurrency: poolSize,
+      items: items.map(it => ({
+        index: it.index,
+        status: it.status,
+        preview: it.text.substring(0, 80),
+        error: it.error,
+      })),
+    });
+
+    // Return immediately so the client gets the batchId for tracking
+    res.json({
+      success: true,
+      batchId,
+      total: documents.length,
+      valid: validItems.length,
+      skipped: items.filter(it => it.status === 'error').length,
+      concurrency: poolSize,
+      message: `Batch queued: ${validItems.length} documents processing with concurrency ${poolSize}`,
       timestamp: new Date().toISOString(),
     });
+
+    // Process in background with concurrency pool
+    let completed = 0;
+    const queue = [...validItems];
+
+    const processNext = async (): Promise<void> => {
+      const item = queue.shift();
+      if (!item) return;
+
+      item.status = 'processing';
+      io.to(`scenario:${scenarioId}`).emit('batch:item-status', {
+        batchId,
+        index: item.index,
+        status: 'processing',
+        completed,
+        total: validItems.length,
+      });
+
+      try {
+        const result = await ingestDocument(scenarioId, item.text, item.sourceHint, io);
+        item.status = 'done';
+        item.createdId = result.createdId;
+      } catch (err) {
+        item.status = 'error';
+        item.error = err instanceof Error ? err.message : 'Unknown error';
+      }
+
+      completed++;
+      io.to(`scenario:${scenarioId}`).emit('batch:item-status', {
+        batchId,
+        index: item.index,
+        status: item.status,
+        error: item.error,
+        createdId: item.createdId,
+        completed,
+        total: validItems.length,
+      });
+
+      // Process next item from queue
+      await processNext();
+    };
+
+    // Launch pool workers
+    const workers = Array.from(
+      { length: Math.min(poolSize, validItems.length) },
+      () => processNext(),
+    );
+    await Promise.all(workers);
+
+    // Emit batch complete
+    const successCount = items.filter(it => it.status === 'done').length;
+    const failCount = items.filter(it => it.status === 'error').length;
+    io.to(`scenario:${scenarioId}`).emit('batch:complete', {
+      batchId,
+      total: documents.length,
+      succeeded: successCount,
+      failed: failCount,
+      results: items.map(it => ({
+        index: it.index,
+        status: it.status,
+        createdId: it.createdId,
+        error: it.error,
+      })),
+    });
+
+    console.log(`[BATCH] Complete: ${successCount}/${documents.length} succeeded, ${failCount} failed (concurrency: ${poolSize})`);
   });
 
   /**

@@ -39,7 +39,7 @@ vi.mock('../../config.js', () => ({
     databaseProvider: 'postgresql',
     corsOrigin: '*',
     llm: {
-      flagship: 'gpt-5.2',
+      flagship: 'gpt-5.4',
       midRange: 'gpt-5-mini',
       fast: 'gpt-5-nano',
     },

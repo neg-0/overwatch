@@ -43,7 +43,7 @@ The Game Master evaluates the previous day's results:
 ## Phase 3: Order Generation
 
 ### ATO (Air Tasking Order)
-**Model**: `midRange` (o4-mini)
+**Model**: `midRange` (gpt-5-mini)
 
 The Game Master generates a complete ATO document:
 1. Builds full scenario context via `buildScenarioContext()`

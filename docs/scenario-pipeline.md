@@ -24,13 +24,13 @@ graph LR
 **Status Tracking**: Sets `generationStatus = GENERATING`, `generationProgress = 0`.
 
 ### Step 2: Strategic Context
-**AI**: `flagship` (o3)
+**AI**: `flagship` (gpt-5.4)
 **Creates**: 5× `StrategyDocument` (NDS, NMS, JSCP, CONPLAN, OPLAN) with parent-child cascade linkage + `StrategyPriority` entries for each document.
 **Context**: Theater, adversary, scenario description.
 **Schema**: Enforced via `llm-schemas.ts` strategic context schema.
 
 ### Step 3: Campaign Plan
-**AI**: `midRange` (o4-mini)
+**AI**: `midRange` (gpt-5-mini)
 **Creates**: 2× `StrategyDocument` (JFC_GUIDANCE, COMPONENT_GUIDANCE)
 **Context**: Full strategic context from Step 2 (NDS→OPLAN content).
 

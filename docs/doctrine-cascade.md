@@ -24,7 +24,7 @@ Each tier receives the full content of its parent as input context:
 
 | Tier | Document | Context Input | Model |
 |---|---|---|---|
-| 1 | NDS | Scenario description only | `flagship` (o3) |
+| 1 | NDS | Scenario description only | `flagship` (gpt-5.4) |
 | 2 | NMS | NDS content | `flagship` |
 | 3 | JSCP | NDS + NMS content | `flagship` |
 | 4 | CONPLAN | NDS + NMS + JSCP content | `flagship` |

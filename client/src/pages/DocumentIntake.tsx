@@ -57,6 +57,23 @@ interface ReviewFlag {
   ingestLogId: string;
 }
 
+interface BatchItemStatus {
+  index: number;
+  status: 'queued' | 'processing' | 'done' | 'error';
+  preview: string;
+  error?: string;
+}
+
+interface BatchStatus {
+  batchId: string;
+  total: number;
+  valid: number;
+  completed: number;
+  items: BatchItemStatus[];
+  startedAt: number;
+  finishedAt?: number;
+}
+
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 const DOC_TYPE_ICONS: Record<string, string> = {
@@ -158,6 +175,9 @@ export function DocumentIntake() {
   const [sourceHint, setSourceHint] = useState('auto');
   const [submitting, setSubmitting] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+
+  // Batch progress tracking
+  const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null);
   const [reviewFlags, setReviewFlags] = useState<ReviewFlag[]>([]);
   const [showFlags, setShowFlags] = useState(false);
 
@@ -371,15 +391,73 @@ export function DocumentIntake() {
       ));
     };
 
+    // Batch events
+    const handleBatchStarted = (data: any) => {
+      setBatchStatus({
+        batchId: data.batchId,
+        total: data.total,
+        valid: data.valid,
+        completed: 0,
+        items: (data.items || []).map((it: any) => ({
+          index: it.index,
+          status: it.status as BatchItemStatus['status'],
+          preview: it.preview || '',
+          error: it.error,
+        })),
+        startedAt: Date.now(),
+      });
+    };
+
+    const handleBatchItemStatus = (data: any) => {
+      setBatchStatus(prev => {
+        if (!prev || prev.batchId !== data.batchId) return prev;
+        return {
+          ...prev,
+          completed: data.completed ?? prev.completed,
+          items: prev.items.map(it =>
+            it.index === data.index
+              ? { ...it, status: data.status, error: data.error }
+              : it,
+          ),
+        };
+      });
+    };
+
+    const handleBatchComplete = (data: any) => {
+      setBatchStatus(prev => {
+        if (!prev || prev.batchId !== data.batchId) return prev;
+        return {
+          ...prev,
+          completed: data.succeeded + data.failed,
+          finishedAt: Date.now(),
+          items: prev.items.map(it => {
+            const result = data.results?.find((r: any) => r.index === it.index);
+            return result ? { ...it, status: result.status, error: result.error } : it;
+          }),
+        };
+      });
+      setToasts(prev => [...prev.slice(-4),
+        `Batch complete: ${data.succeeded}/${data.total} succeeded${data.failed > 0 ? `, ${data.failed} failed` : ''}`,
+      ]);
+      // Auto-dismiss batch panel after 10s
+      setTimeout(() => setBatchStatus(null), 10000);
+    };
+
     socket.on('ingest:started', handleStarted);
     socket.on('ingest:classified', handleClassified);
     socket.on('ingest:normalized', handleNormalized);
     socket.on('ingest:complete', handleComplete);
+    socket.on('batch:started', handleBatchStarted);
+    socket.on('batch:item-status', handleBatchItemStatus);
+    socket.on('batch:complete', handleBatchComplete);
     return () => {
       socket.off('ingest:started', handleStarted);
       socket.off('ingest:classified', handleClassified);
       socket.off('ingest:normalized', handleNormalized);
       socket.off('ingest:complete', handleComplete);
+      socket.off('batch:started', handleBatchStarted);
+      socket.off('batch:item-status', handleBatchItemStatus);
+      socket.off('batch:complete', handleBatchComplete);
     };
   }, [socket]);
 
@@ -442,17 +520,21 @@ export function DocumentIntake() {
         }),
       });
       const json = await res.json();
-      if (json.success) {
-        setToasts(prev => [...prev.slice(-4), `📦 Batch: ${json.results?.length || unprocessed.length} docs queued`]);
-      } else {
-        setToasts(prev => [...prev.slice(-4), `❌ Batch failed: ${json.error || 'Unknown'}`]);
+      if (!json.success) {
+        setToasts(prev => [...prev.slice(-4), `Batch failed: ${json.error || 'Unknown'}`]);
+        setBatchInProgress(false);
       }
+      // batchInProgress will be cleared when batch:complete fires
     } catch {
-      setToasts(prev => [...prev.slice(-4), '❌ Batch ingest failed']);
-    } finally {
+      setToasts(prev => [...prev.slice(-4), 'Batch ingest failed']);
       setBatchInProgress(false);
     }
   };
+
+  // Clear batchInProgress when batch finishes
+  useEffect(() => {
+    if (batchStatus?.finishedAt) setBatchInProgress(false);
+  }, [batchStatus?.finishedAt]);
 
   const handleImportSubmit = async () => {
     if (!activeScenarioId) return;
@@ -643,7 +725,13 @@ export function DocumentIntake() {
           </span>
         </div>
         <div className="intake-header__right">
-          {activeCards.length > 0 && (
+          {batchStatus && !batchStatus.finishedAt && (
+            <span className="intake-header__processing" style={{ marginRight: '12px' }}>
+              <span className="pulse-dot" style={{ background: 'var(--accent-primary)' }} />
+              Batch {batchStatus.completed}/{batchStatus.valid}
+            </span>
+          )}
+          {activeCards.filter(c => c.stage !== 'complete').length > 0 && (
             <span className="intake-header__processing">
               <span className="pulse-dot" /> {activeCards.filter(c => c.stage !== 'complete').length} processing
             </span>
@@ -760,6 +848,72 @@ export function DocumentIntake() {
         </div>
       )}
 
+      {/* ─── Batch Progress Panel ─────────────────────────────────── */}
+      {batchStatus && !batchStatus.finishedAt && (
+        <div style={{
+          padding: '12px 16px', margin: '0 0 4px',
+          background: 'rgba(96, 165, 250, 0.06)',
+          borderBottom: '1px solid rgba(96, 165, 250, 0.15)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--accent-primary)' }}>
+                BATCH PROCESSING
+              </span>
+              <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+                {batchStatus.completed}/{batchStatus.valid} docs
+              </span>
+            </div>
+            <span style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+              {Math.round((Date.now() - batchStatus.startedAt) / 1000)}s elapsed
+            </span>
+          </div>
+
+          {/* Progress bar */}
+          <div style={{
+            height: '4px', borderRadius: '2px',
+            background: 'rgba(96, 165, 250, 0.15)', marginBottom: '10px',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              height: '100%', borderRadius: '2px',
+              background: 'var(--accent-primary)',
+              width: `${batchStatus.valid > 0 ? (batchStatus.completed / batchStatus.valid) * 100 : 0}%`,
+              transition: 'width 0.3s ease',
+            }} />
+          </div>
+
+          {/* Per-item status grid */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+            {batchStatus.items.map(item => (
+              <div
+                key={item.index}
+                title={item.preview || `Doc ${item.index + 1}${item.error ? ` — ${item.error}` : ''}`}
+                style={{
+                  width: '28px', height: '28px', borderRadius: '4px',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '10px', fontWeight: 700, fontFamily: 'var(--font-mono)',
+                  transition: 'all 0.2s',
+                  ...(item.status === 'done'
+                    ? { background: 'rgba(0, 200, 83, 0.2)', color: 'var(--accent-success)', border: '1px solid rgba(0, 200, 83, 0.3)' }
+                    : item.status === 'processing'
+                    ? { background: 'rgba(0, 212, 255, 0.15)', color: 'var(--accent-primary)', border: '1px solid rgba(0, 212, 255, 0.3)', animation: 'pulse 1.5s infinite' }
+                    : item.status === 'error'
+                    ? { background: 'rgba(248, 113, 113, 0.15)', color: '#f87171', border: '1px solid rgba(248, 113, 113, 0.3)' }
+                    : { background: 'var(--bg-tertiary)', color: 'var(--text-muted)', border: '1px solid var(--border-subtle)' }
+                  ),
+                }}
+              >
+                {item.status === 'done' ? '✓'
+                  : item.status === 'processing' ? '⟳'
+                  : item.status === 'error' ? '✕'
+                  : item.index + 1}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ─── 3 Panel Layout ──────────────────────────────────────── */}
       <div className="intake-body" style={{ display: 'flex', flex: 1, gap: 0, overflow: 'hidden', position: 'relative' }}>
 
@@ -846,20 +1000,38 @@ export function DocumentIntake() {
           }}>
             {(() => {
               const unprocessedCount = docs.filter(d => !d.ingestedAt).length;
-              return unprocessedCount > 0 ? (
+              if (unprocessedCount === 0 && !batchInProgress) return null;
+              const batchProgress = batchStatus && !batchStatus.finishedAt
+                ? `${batchStatus.completed}/${batchStatus.valid}`
+                : null;
+              return (
                 <button
                   onClick={batchIngestAll}
                   disabled={batchInProgress || submitting}
                   style={{
                     width: '100%', padding: '10px', borderRadius: '8px', border: 'none',
-                    background: 'var(--accent-primary)', color: '#000',
-                    fontSize: '12px', fontWeight: 700, cursor: 'pointer',
-                    transition: 'all 0.2s', opacity: batchInProgress ? 0.7 : 1,
+                    background: batchInProgress ? 'rgba(0, 212, 255, 0.2)' : 'var(--accent-primary)',
+                    color: batchInProgress ? 'var(--accent-primary)' : '#000',
+                    fontSize: '12px', fontWeight: 700, cursor: batchInProgress ? 'default' : 'pointer',
+                    transition: 'all 0.2s',
+                    position: 'relative', overflow: 'hidden',
                   }}
                 >
-                  {batchInProgress ? '⟳ Batching…' : `⚡ Ingest All (${unprocessedCount})`}
+                  {batchInProgress && batchStatus && !batchStatus.finishedAt && (
+                    <div style={{
+                      position: 'absolute', left: 0, top: 0, bottom: 0,
+                      width: `${batchStatus.valid > 0 ? (batchStatus.completed / batchStatus.valid) * 100 : 0}%`,
+                      background: 'rgba(0, 212, 255, 0.15)',
+                      transition: 'width 0.3s ease',
+                    }} />
+                  )}
+                  <span style={{ position: 'relative' }}>
+                    {batchInProgress
+                      ? `Processing ${batchProgress || '…'}`
+                      : `Ingest All (${unprocessedCount})`}
+                  </span>
                 </button>
-              ) : null;
+              );
             })()}
             <button
               onClick={() => setShowImport(true)}

@@ -38,7 +38,7 @@ graph LR
     SN --> SA["Space Allocations<br/>(Resolved Decisions)"]
 ```
 
-Each tier receives the full content of its parent as LLM context. A five-document strategic cascade (NDS → NMS → JSCP → CONPLAN → OPLAN) is generated using the `flagship` model (o3) to ensure doctrinal quality, then operational documents are generated with `midRange` (o4-mini).
+Each tier receives the full content of its parent as LLM context. A five-document strategic cascade (NDS → NMS → JSCP → CONPLAN → OPLAN) is generated using the `flagship` model (gpt-5.4) to ensure doctrinal quality, then operational documents are generated with `midRange` (gpt-5-mini).
 
 ---
 
@@ -80,7 +80,7 @@ A 9-step pipeline that creates a full multi-domain wargame:
 
 | Step | Output | Model |
 |---|---|---|
-| 1. Strategic Context | NDS, NMS, JSCP, CONPLAN, OPLAN | `flagship` (o3) |
+| 1. Strategic Context | NDS, NMS, JSCP, CONPLAN, OPLAN | `flagship` (gpt-5.4) |
 | 2. Campaign Plan | JFC/Component guidance | `midRange` |
 | 3. Bases | Theater basing posture | `midRange` |
 | 4. Joint Force ORBAT | Friendly + adversary forces | `midRange` |
