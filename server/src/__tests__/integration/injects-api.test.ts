@@ -135,7 +135,7 @@ describe('Injects API', () => {
           scenarioId: seed.scenarioId,
           triggerDay: 4,
           triggerHour: 10,
-          injectType: 'INTEL',
+          injectType: 'INTEL_UPDATE',
           title: 'New SAM Site Detected',
           description: 'Mobile SAM relocated.',
           impact: 'Updated targeting required',

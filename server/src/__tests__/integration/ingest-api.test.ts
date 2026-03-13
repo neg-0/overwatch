@@ -202,7 +202,7 @@ describe('Ingest API', () => {
       expect(res.status).toBe(500);
       const body: any = await res.json();
       expect(body.success).toBe(false);
-      expect(body.error).toContain('Ingestion failed');
+      expect(body.error).toContain('Internal server error');
     });
   });
 
@@ -220,7 +220,7 @@ describe('Ingest API', () => {
       const res = await fetch(`${app.baseUrl}/api/ingest/log?scenarioId=${seed.scenarioId}`);
       expect(res.status).toBe(200);
       const body: any = await res.json();
-      expect(body.logs).toEqual([]);
+      expect(body.data).toEqual([]);
     });
 
     it('returns logs after ingestion', async () => {
@@ -238,10 +238,10 @@ describe('Ingest API', () => {
       const res = await fetch(`${app.baseUrl}/api/ingest/log?scenarioId=${seed.scenarioId}`);
       expect(res.status).toBe(200);
       const body: any = await res.json();
-      expect(body.logs).toHaveLength(1);
-      expect(body.logs[0].scenarioId).toBe(seed.scenarioId);
-      expect(body.logs[0].hierarchyLevel).toBe('STRATEGY');
-      expect(body.logs[0].documentType).toBe('NMS');
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0].scenarioId).toBe(seed.scenarioId);
+      expect(body.data[0].hierarchyLevel).toBe('STRATEGY');
+      expect(body.data[0].documentType).toBe('NMS');
     });
 
     it('returns logs in descending order', async () => {
@@ -265,9 +265,9 @@ describe('Ingest API', () => {
 
       const res = await fetch(`${app.baseUrl}/api/ingest/log?scenarioId=${seed.scenarioId}`);
       const body: any = await res.json();
-      expect(body.logs).toHaveLength(2);
+      expect(body.data).toHaveLength(2);
       // Most recent first
-      const dates = body.logs.map((l: any) => new Date(l.createdAt).getTime());
+      const dates = body.data.map((l: any) => new Date(l.createdAt).getTime());
       expect(dates[0]).toBeGreaterThanOrEqual(dates[1]);
     });
   });

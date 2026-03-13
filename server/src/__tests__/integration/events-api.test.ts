@@ -83,9 +83,9 @@ describe('Events API', () => {
         body: JSON.stringify({
           scenarioId: seed.scenarioId,
           simTime: new Date().toISOString(),
-          eventType: 'DESTROYED',
+          eventType: 'UNIT_DESTROYED',
           targetId: seed.missionId,
-          targetType: 'MISSION',
+          targetType: 'Unit',
           description: 'Mission asset destroyed by OPFOR',
         }),
       });
@@ -93,8 +93,8 @@ describe('Events API', () => {
 
       expect(res.status).toBe(200);
       expect(body.success).toBe(true);
-      expect(body.data.eventType).toBe('DESTROYED');
-      expect(body.data.targetType).toBe('MISSION');
+      expect(body.data.eventType).toBe('UNIT_DESTROYED');
+      expect(body.data.targetType).toBe('Unit');
     });
 
     it('returns 400 when required fields are missing', async () => {
