@@ -6,6 +6,7 @@ import multer from 'multer';
 import path from 'path';
 import prisma from '../db/prisma-client.js';
 import { generateFullScenario } from '../services/scenario-generator.js';
+import { seedPlatformCatalog } from '../services/reference-data.js';
 import { allocateSpaceResources } from '../services/space-allocator.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
@@ -90,7 +91,7 @@ scenarioRoutes.post('/ready-made/:filename/load', async (req, res) => {
     // Use the same import logic as the /import route
     const {
       strategies, planningDocs, units, spaceAssets, scenarioInjects, taskingOrders,
-      simEvents, leadershipDecisions, ingestLogs,
+      simEvents, leadershipDecisions, ingestLogs, assetTypes,
       _count, ...core
     } = data;
 
@@ -118,6 +119,16 @@ scenarioRoutes.post('/ready-made/:filename/load', async (req, res) => {
     }
 
     // Hydrate all relations (idempotent: skip if already present)
+    // Upsert AssetTypes first (standalone reference table, prevents FK violation on assets)
+    if (assetTypes && assetTypes.length > 0) {
+      for (const at of assetTypes) {
+        const { assets: _a, ...atCore } = at;
+        await prisma.assetType.upsert({ where: { id: atCore.id }, update: {}, create: atCore });
+      }
+    } else {
+      // Legacy ZIP without assetTypes — seed from PLATFORM_CATALOG
+      await seedPlatformCatalog();
+    }
     for (const s of (strategies || [])) {
       const { scenario: _s, priorities: _p, ...sCore } = s;
       const exists = await prisma.strategyDocument.findUnique({ where: { id: sCore.id } });
@@ -138,8 +149,19 @@ scenarioRoutes.post('/ready-made/:filename/load', async (req, res) => {
         }
         await prisma.unit.create({ data: unitCore });
         for (const a of (assets || [])) {
-          const { unit: _u, assetType: _at, ...assetCore } = a;
-          await prisma.asset.create({ data: assetCore });
+          const { unit: _u, assetType: atData, ...assetCore } = a;
+          // Upsert AssetType if embedded in the export (prevents FK violation)
+          if (atData && assetCore.assetTypeId) {
+            const { assets: _assets, ...atCore } = atData;
+            await prisma.assetType.upsert({
+              where: { id: assetCore.assetTypeId },
+              update: {},
+              create: atCore,
+            });
+          }
+          await prisma.asset.create({ data: assetCore }).catch((err: any) => {
+            console.warn(`[IMPORT] Skipped asset ${assetCore.id}: ${err.message}`);
+          });
         }
       }
     }
@@ -653,7 +675,7 @@ scenarioRoutes.get('/:id/export', async (req, res) => {
       include: {
         strategies: true,
         planningDocs: true,
-        units: { include: { assets: true } },
+        units: { include: { assets: { include: { assetType: true } } } },
         spaceAssets: { include: { coverageWindows: true } },
         scenarioInjects: true,
         taskingOrders: {
@@ -688,8 +710,19 @@ scenarioRoutes.get('/:id/export', async (req, res) => {
       orderBy: { createdAt: 'asc' },
     });
 
+    // Collect referenced AssetType records (standalone reference table)
+    const assetTypeIds = new Set<string>();
+    for (const u of scenario.units) {
+      for (const a of u.assets) {
+        if (a.assetTypeId) assetTypeIds.add(a.assetTypeId);
+      }
+    }
+    const assetTypes = assetTypeIds.size > 0
+      ? await prisma.assetType.findMany({ where: { id: { in: [...assetTypeIds] } } })
+      : [];
+
     const zip = new AdmZip();
-    zip.addFile('scenario.json', Buffer.from(JSON.stringify({ ...scenario, leadershipDecisions, ingestLogs }, null, 2), 'utf8'));
+    zip.addFile('scenario.json', Buffer.from(JSON.stringify({ ...scenario, leadershipDecisions, ingestLogs, assetTypes }, null, 2), 'utf8'));
 
     // Create a markdown overview
     const md = `# Scenario: ${scenario.name}\n**Theater:** ${scenario.theater}\n**Adversary:** ${scenario.adversary}\n\n${scenario.description}`;
@@ -727,7 +760,7 @@ scenarioRoutes.post('/import', upload.single('file'), async (req, res) => {
     const data = JSON.parse(entry.getData().toString('utf8'));
     const {
       strategies, planningDocs, units, spaceAssets, scenarioInjects, taskingOrders,
-      simEvents, leadershipDecisions, ingestLogs,
+      simEvents, leadershipDecisions, ingestLogs, assetTypes,
       _count, ...core
     } = data;
 
@@ -754,6 +787,16 @@ scenarioRoutes.post('/import', upload.single('file'), async (req, res) => {
     }
 
     // Hydrate all relations (idempotent: skip if already present)
+    // Upsert AssetTypes first (standalone reference table, prevents FK violation on assets)
+    if (assetTypes && assetTypes.length > 0) {
+      for (const at of assetTypes) {
+        const { assets: _a, ...atCore } = at;
+        await prisma.assetType.upsert({ where: { id: atCore.id }, update: {}, create: atCore });
+      }
+    } else {
+      // Legacy ZIP without assetTypes — seed from PLATFORM_CATALOG
+      await seedPlatformCatalog();
+    }
     for (const s of (strategies || [])) {
       const { scenario: _s, priorities: _p, ...sCore } = s;
       const exists = await prisma.strategyDocument.findUnique({ where: { id: sCore.id } });
@@ -774,8 +817,19 @@ scenarioRoutes.post('/import', upload.single('file'), async (req, res) => {
         }
         await prisma.unit.create({ data: unitCore });
         for (const a of (assets || [])) {
-          const { unit: _u, assetType: _at, ...assetCore } = a;
-          await prisma.asset.create({ data: assetCore });
+          const { unit: _u, assetType: atData, ...assetCore } = a;
+          // Upsert AssetType if embedded in the export (prevents FK violation)
+          if (atData && assetCore.assetTypeId) {
+            const { assets: _assets, ...atCore } = atData;
+            await prisma.assetType.upsert({
+              where: { id: assetCore.assetTypeId },
+              update: {},
+              create: atCore,
+            });
+          }
+          await prisma.asset.create({ data: assetCore }).catch((err: any) => {
+            console.warn(`[IMPORT] Skipped asset ${assetCore.id}: ${err.message}`);
+          });
         }
       }
     }
