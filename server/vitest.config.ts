@@ -13,7 +13,7 @@ export default defineConfig({
     testTimeout: 30000,
     hookTimeout: 30000,
     env: {
-      DATABASE_URL: 'postgresql://dustinstringer@localhost:5432/overwatch_test'
+      DATABASE_URL: 'postgresql://overwatch:overwatch123@localhost:5432/overwatch_test'
     },
 
     // Workspace-style projects for tiered testing
