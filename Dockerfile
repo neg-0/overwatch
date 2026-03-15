@@ -52,9 +52,9 @@ COPY --from=builder /app/shared/package.json shared/package.json
 COPY --from=builder /app/server/dist server/dist
 COPY --from=builder /app/server/prisma server/prisma
 COPY --from=builder /app/server/prisma.config.ts server/prisma.config.ts
-COPY --from=builder /app/server/node_modules/.prisma server/node_modules/.prisma
 COPY --from=builder /app/client/dist client/dist
-COPY --from=builder /app/node_modules/.prisma node_modules/.prisma
+# Prisma 7 generates client into @prisma/client (not .prisma)
+COPY --from=builder /app/node_modules/@prisma/client node_modules/@prisma/client
 
 ENV NODE_ENV=production
 
