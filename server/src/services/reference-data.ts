@@ -268,6 +268,20 @@ export const PLATFORM_CATALOG: PlatformSpec[] = [
   },
 ];
 
+// ─── Radar Sensor Helper ─────────────────────────────────────────────────────
+
+/**
+ * Extracts radar sensor names from a platform in the catalog.
+ * Returns sensor strings containing 'Radar', 'SPY', 'APG', 'APY', 'APQ', 'SPS', 'SPN'.
+ */
+export function getRadarSensors(platformName: string): string[] {
+  const platform = PLATFORM_CATALOG.find(p => p.name === platformName);
+  if (!platform?.sensors) return [];
+  return platform.sensors.filter(s =>
+    /radar|SPY|APG|APY|APQ|SPS|SPN/i.test(s),
+  );
+}
+
 // ─── INDOPACOM Bases ─────────────────────────────────────────────────────────
 
 export const INDOPACOM_BASES: BaseSpec[] = [
@@ -312,6 +326,19 @@ export const INDOPACOM_BASES: BaseSpec[] = [
   {
     name: 'Naval Base Guam', baseType: 'NAVAL_BASE',
     latitude: 13.4443, longitude: 144.6537, country: 'Guam (US)', icaoCode: null,
+  },
+  // ── OPFOR Installations (for red force ORBAT) ──────────────────────────────
+  {
+    name: 'Mainland Airbase Alpha', baseType: 'AIRBASE',
+    latitude: 25.0, longitude: 121.5, country: 'OPFOR', icaoCode: null,
+  },
+  {
+    name: 'Coastal Defense Zone', baseType: 'JOINT_BASE',
+    latitude: 24.5, longitude: 118.0, country: 'OPFOR', icaoCode: null,
+  },
+  {
+    name: 'Naval Base Bravo', baseType: 'NAVAL_BASE',
+    latitude: 24.0, longitude: 118.5, country: 'OPFOR', icaoCode: null,
   },
 ];
 
@@ -1259,7 +1286,7 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
 export const INDOPACOM_BLUE_ORBAT: BlueUnitSpec[] = [
   { unitName: '388th Fighter Wing', unitDesignation: '388 FW', serviceBranch: 'USAF', domain: 'AIR', baseLocation: 'Kadena AB, Okinawa', baseLat: 26.3516, baseLon: 127.7692, platformName: 'F-35A', assetCount: 24 },
   { unitName: '35th Fighter Wing', unitDesignation: '35 FW', serviceBranch: 'USAF', domain: 'AIR', baseLocation: 'Misawa AB, Japan', baseLat: 40.7032, baseLon: 141.3686, platformName: 'F-16C', assetCount: 18 },
-  { unitName: 'Carrier Air Wing 5', unitDesignation: 'CVW-5', serviceBranch: 'USN', domain: 'AIR', baseLocation: 'USS Ronald Reagan (CVN-76)', baseLat: 22.0, baseLon: 131.0, platformName: 'F/A-18E', assetCount: 36 },
+  { unitName: 'Carrier Air Wing 5', unitDesignation: 'CVW-5', serviceBranch: 'USN', domain: 'AIR', baseLocation: 'Yokosuka, Japan (embarked CVN-76)', baseLat: 35.2833, baseLon: 139.6500, platformName: 'F/A-18E', assetCount: 36 },
   { unitName: '55th Wing', unitDesignation: '55 WG', serviceBranch: 'USAF', domain: 'AIR', baseLocation: 'Kadena AB (deployed)', baseLat: 26.3, baseLon: 127.8, platformName: 'RC-135V', assetCount: 4 },
   { unitName: 'Carrier Strike Group 5', unitDesignation: 'CSG-5', serviceBranch: 'USN', domain: 'MARITIME', baseLocation: 'Yokosuka, Japan', baseLat: 35.2833, baseLon: 139.6500, platformName: 'CVN (Nimitz)', assetCount: 1 },
   { unitName: 'Destroyer Squadron 15', unitDesignation: 'DESRON-15', serviceBranch: 'USN', domain: 'MARITIME', baseLocation: 'Yokosuka, Japan', baseLat: 35.2833, baseLon: 139.6500, platformName: 'DDG (Arleigh Burke)', assetCount: 5 },
@@ -1465,17 +1492,23 @@ export async function seedORBATForScenario(scenarioId: string): Promise<void> {
       },
     });
 
-    const opforTypes = PLATFORM_CATALOG.filter(at => at.domain === unit.domain);
-    if (opforTypes.length > 0) {
-      const dbType = await prisma.assetType.findUnique({ where: { name: opforTypes[0].name } });
+    // Select domain-appropriate platform: fighters for AIR, destroyers for MARITIME,
+    // use first available for LAND (no dedicated LAND platforms in catalog yet)
+    const OPFOR_PLATFORM_MAP: Record<string, string> = {
+      AIR: 'F-16C',           // Generic adversary fighter
+      MARITIME: 'DDG (Arleigh Burke)', // Generic adversary surface combatant
+    };
+    const opforPlatformName = OPFOR_PLATFORM_MAP[unit.domain] || PLATFORM_CATALOG.find(at => at.domain === unit.domain)?.name;
+    if (opforPlatformName) {
+      const dbType = await prisma.assetType.findUnique({ where: { name: opforPlatformName } });
       if (dbType) {
-        const count = unit.domain === 'AIR' ? 12 : 3;
+        const count = unit.domain === 'AIR' ? 12 : unit.domain === 'LAND' ? 6 : 3;
         for (let i = 0; i < count; i++) {
           await prisma.asset.create({
             data: {
               unitId: created.id,
               assetTypeId: dbType.id,
-              name: `OPFOR ${opforTypes[0].name} ${i + 1}`,
+              name: `OPFOR ${opforPlatformName} ${i + 1}`,
               status: 'OPERATIONAL',
             },
           });

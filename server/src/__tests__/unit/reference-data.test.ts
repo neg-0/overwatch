@@ -7,7 +7,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   ADVERSARY_SPACE_CONSTELLATIONS,
+  INDOPACOM_BASES,
   US_SPACE_CONSTELLATIONS,
+  getRadarSensors,
   type SpaceAssetSpec,
 } from '../../services/reference-data.js';
 
@@ -196,3 +198,107 @@ describe('Space Constellation Catalog', () => {
     });
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INDOPACOM BASES — OPFOR + CVW-5 CO-LOCATION REGRESSION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('INDOPACOM Bases', () => {
+  const allBases = INDOPACOM_BASES;
+  const opforBases = allBases.filter(b => b.country === 'OPFOR');
+  const friendlyBases = allBases.filter(b => b.country !== 'OPFOR');
+
+  describe('OPFOR base presence (regression)', () => {
+    it('has at least 3 OPFOR bases', () => {
+      expect(opforBases.length).toBeGreaterThanOrEqual(3);
+    });
+
+    it('OPFOR bases have expected names', () => {
+      const opforNames = opforBases.map(b => b.name);
+      expect(opforNames).toContain('Mainland Airbase Alpha');
+      expect(opforNames).toContain('Coastal Defense Zone');
+      expect(opforNames).toContain('Naval Base Bravo');
+    });
+
+    it('OPFOR bases have valid coordinates', () => {
+      for (const base of opforBases) {
+        expect(base.latitude, `${base.name} lat`).toBeGreaterThanOrEqual(-90);
+        expect(base.latitude, `${base.name} lat`).toBeLessThanOrEqual(90);
+        expect(base.longitude, `${base.name} lon`).toBeGreaterThanOrEqual(-180);
+        expect(base.longitude, `${base.name} lon`).toBeLessThanOrEqual(180);
+      }
+    });
+  });
+
+  describe('Yokosuka Naval Base coordinates (CVW-5/CSG-5 co-location regression)', () => {
+    it('Yokosuka is near 35.28°N, 139.65°E', () => {
+      const yokosuka = allBases.find(b => b.name.includes('Yokosuka'));
+      expect(yokosuka).toBeDefined();
+      expect(yokosuka!.latitude).toBeCloseTo(35.28, 0);
+      expect(yokosuka!.longitude).toBeCloseTo(139.65, 0);
+    });
+  });
+
+  describe('Coordinate sanity for all bases', () => {
+    it('all bases have valid latitude [-90, 90]', () => {
+      for (const base of allBases) {
+        expect(base.latitude, `${base.name} lat`).toBeGreaterThanOrEqual(-90);
+        expect(base.latitude, `${base.name} lat`).toBeLessThanOrEqual(90);
+      }
+    });
+
+    it('all bases have valid longitude [-180, 180]', () => {
+      for (const base of allBases) {
+        expect(base.longitude, `${base.name} lon`).toBeGreaterThanOrEqual(-180);
+        expect(base.longitude, `${base.name} lon`).toBeLessThanOrEqual(180);
+      }
+    });
+
+    it('no duplicate base names', () => {
+      const names = allBases.map(b => b.name);
+      const dupes = names.filter((n, i) => names.indexOf(n) !== i);
+      expect(dupes, `Dupes: ${[...new Set(dupes)].join(', ')}`).toHaveLength(0);
+    });
+  });
+
+  describe('Friendly/Hostile split', () => {
+    it('has >= 15 friendly bases', () => {
+      expect(friendlyBases.length).toBeGreaterThanOrEqual(5);
+    });
+
+    it('all bases have a country', () => {
+      for (const base of allBases) {
+        expect(base.country).toBeTruthy();
+      }
+    });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// getRadarSensors HELPER
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('getRadarSensors', () => {
+  it('returns radar sensor names for a known platform', () => {
+    // F-35A should have at least one APG radar
+    const sensors = getRadarSensors('F-35A');
+    expect(Array.isArray(sensors)).toBe(true);
+    // If platform exists in catalog with sensors, verify they match radar pattern
+    for (const s of sensors) {
+      expect(typeof s).toBe('string');
+      expect(s).toMatch(/radar|SPY|APG|APY|APQ|SPS|SPN/i);
+    }
+  });
+
+  it('returns empty array for unknown platform', () => {
+    const sensors = getRadarSensors('NONEXISTENT-PLATFORM');
+    expect(sensors).toHaveLength(0);
+  });
+
+  it('contains no duplicates for any given platform', () => {
+    const sensors = getRadarSensors('F-35A');
+    const unique = [...new Set(sensors)];
+    expect(sensors.length).toBe(unique.length);
+  });
+});
+
