@@ -20,6 +20,10 @@ RUN npm ci
 # Copy all source
 COPY . .
 
+# prisma generate doesn't connect to the DB, but prisma.config.ts
+# uses env('DATABASE_URL') which throws if the var is missing.
+ENV DATABASE_URL="postgresql://prisma:prisma@localhost:5432/placeholder"
+
 # Build order: shared types → client bundle → prisma client → server tsc
 RUN npm -w shared run build && \
     npm -w client run build && \
