@@ -94,6 +94,27 @@ export interface SimEvent {
   createdAt: string;
 }
 
+export interface BaseData {
+  id: string;
+  name: string;
+  baseType: string;
+  latitude: number;
+  longitude: number;
+  country: string;
+  icaoCode: string | null;
+  unitCount: number;
+  totalAssets: number;
+  radarSensors: string[];
+  units: Array<{
+    id: string;
+    unitName: string;
+    unitDesignation: string;
+    domain: string;
+    affiliation: string;
+    assetCount: number;
+  }>;
+}
+
 export interface PendingDecision {
   eventId: string;
   scenarioId: string;
@@ -133,6 +154,9 @@ interface OverwatchStore {
   spaceGaps: SpaceGap[];
   coverageWindows: CoverageWindowUpdate[];
   alerts: string[];
+
+  // Infrastructure layers (static, hydrated on scenario select)
+  bases: BaseData[];
 
   // Events
   simEvents: SimEvent[];
@@ -209,6 +233,7 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
   spaceGaps: [],
   coverageWindows: [],
   alerts: [],
+  bases: [],
   simEvents: [],
   pendingDecisions: [],
   generationProgress: null,
@@ -452,6 +477,17 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
         if (signal.aborted) return;
         if (json.success && json.data) {
           set({ coverageWindows: json.data });
+        }
+      })
+      .catch(() => { });
+
+    // Bases — static infrastructure for map layer
+    fetch(`/api/bases?scenarioId=${id}`, { signal })
+      .then(r => r.json())
+      .then(json => {
+        if (signal.aborted) return;
+        if (json.success && json.data) {
+          set({ bases: json.data });
         }
       })
       .catch(() => { });

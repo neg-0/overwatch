@@ -1,6 +1,7 @@
 import mapboxgl from 'mapbox-gl';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useOverwatchStore } from '../store/overwatch-store';
+import type { BaseData } from '../store/overwatch-store';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -20,6 +21,17 @@ interface MissionRoute {
   waypoints: Waypoint[];
 }
 
+interface MissionTarget {
+  targetId: string;
+  targetName: string;
+  latitude: number;
+  longitude: number;
+  desiredEffect: string;
+  beNumber: string | null;
+  targetCategory: string | null;
+  priorityRank: number;
+}
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const DOMAIN_COLORS: Record<string, string> = {
@@ -34,6 +46,27 @@ const TRAIL_COLORS: Record<string, string> = {
   SPACE: '#c084fc',
 };
 
+const BASE_COLORS: Record<string, string> = {
+  AIRBASE: '#f59e0b',    // amber
+  NAVAL_BASE: '#3b82f6', // blue
+  JOINT_BASE: '#10b981', // green
+};
+
+const BASE_SYMBOLS: Record<string, string> = {
+  AIRBASE: '✦',
+  NAVAL_BASE: '⚓',
+  JOINT_BASE: '◆',
+};
+
+const COVERAGE_COLORS: Record<string, string> = {
+  SATCOM_WIDEBAND: '#3b82f6',
+  SATCOM_PROTECTED: '#8b5cf6',
+  GPS: '#10b981',
+  PNT: '#10b981',
+  OPIR: '#f97316',
+  ISR: '#eab308',
+};
+
 // ─── XSS Escape Helper ──────────────────────────────────────────────────────
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -44,13 +77,21 @@ export function MapView() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markersRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
+  const baseMarkersRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
+  const targetMarkersRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
   const trailsRef = useRef<Map<string, [number, number][]>>(new Map());
   const mapLoadedRef = useRef(false);
 
-  const { positions, activeScenarioId, simulation } = useOverwatchStore();
+  const { positions, activeScenarioId, simulation, bases, coverageWindows } = useOverwatchStore();
   const [activeDomains, setActiveDomains] = useState<Set<string>>(new Set(['AIR', 'MARITIME', 'SPACE']));
   const [affiliation, setAffiliation] = useState<'ALL' | 'FRIENDLY' | 'HOSTILE'>('ALL');
   const [routes, setRoutes] = useState<MissionRoute[]>([]);
+  const [targets, setTargets] = useState<MissionTarget[]>([]);
+
+  // Layer toggles
+  const [showBases, setShowBases] = useState(true);
+  const [showTargets, setShowTargets] = useState(true);
+  const [showCoverage, setShowCoverage] = useState(false);
 
   // ─── Initialize Map ─────────────────────────────────────────────────────────
 
@@ -84,7 +125,7 @@ export function MapView() {
     };
   }, []);
 
-  // ─── Fetch Waypoints for Route Lines ────────────────────────────────────────
+  // ─── Fetch Waypoints & Targets for Route Lines ──────────────────────────────
 
   useEffect(() => {
     if (!activeScenarioId) return;
@@ -102,6 +143,28 @@ export function MapView() {
               waypoints: m.waypoints.sort((a: Waypoint, b: Waypoint) => a.sequence - b.sequence),
             }));
           setRoutes(missionRoutes);
+
+          // Extract targets from missions
+          const allTargets: MissionTarget[] = [];
+          for (const m of data.data) {
+            if (m.targets) {
+              for (const t of m.targets) {
+                if (t.latitude != null && t.longitude != null) {
+                  allTargets.push({
+                    targetId: t.targetId || t.id,
+                    targetName: t.targetName || 'Unknown',
+                    latitude: t.latitude,
+                    longitude: t.longitude,
+                    desiredEffect: t.desiredEffect || '',
+                    beNumber: t.beNumber,
+                    targetCategory: t.targetCategory,
+                    priorityRank: t.priorityRank || 5,
+                  });
+                }
+              }
+            }
+          }
+          setTargets(allTargets);
         }
       })
       .catch(err => console.error('[MAP] Failed to fetch mission routes:', err));
@@ -177,6 +240,195 @@ export function MapView() {
       }
     });
   }, [routes]);
+
+  // ─── Render Base Markers ────────────────────────────────────────────────────
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const currentBaseMarkers = baseMarkersRef.current;
+
+    // Remove all existing base markers
+    currentBaseMarkers.forEach(marker => marker.remove());
+    currentBaseMarkers.clear();
+
+    if (!showBases || bases.length === 0) return;
+
+    bases.forEach((base: BaseData) => {
+      const color = BASE_COLORS[base.baseType] || '#888';
+      const symbol = BASE_SYMBOLS[base.baseType] || '●';
+      const isOpfor = base.country === 'OPFOR';
+
+      // Filter by affiliation
+      if (affiliation === 'FRIENDLY' && isOpfor) return;
+      if (affiliation === 'HOSTILE' && !isOpfor) return;
+
+      const el = document.createElement('div');
+      el.style.cssText = `
+        width: 24px; height: 24px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 16px;
+        cursor: pointer;
+        filter: drop-shadow(0 0 4px ${isOpfor ? '#ef4444' : color}80);
+        ${isOpfor ? 'color: #ef4444;' : `color: ${color};`}
+      `;
+      el.textContent = symbol;
+
+      const unitsList = base.units.map(u =>
+        `<div style="margin-left:8px;font-size:10px;">• ${esc(u.unitDesignation)} (${u.assetCount} assets)</div>`
+      ).join('');
+      const radarList = base.radarSensors.length > 0
+        ? `<div style="margin-top:4px;font-size:10px;color:#f59e0b;">🔵 ${base.radarSensors.map(esc).join(', ')}</div>`
+        : '';
+
+      const popup = new mapboxgl.Popup({ offset: 15, className: 'overwatch-popup' })
+        .setHTML(`
+          <div style="padding: 8px; font-family: var(--font-mono); font-size: 12px; max-width: 240px;">
+            <div style="font-weight: 700; margin-bottom: 4px; color: ${isOpfor ? '#ef4444' : color};">
+              ${symbol} ${esc(base.name)}
+            </div>
+            <div>Type: ${esc(base.baseType.replace('_', ' '))}</div>
+            <div>Country: ${esc(base.country)}</div>
+            ${base.icaoCode ? `<div>ICAO: ${esc(base.icaoCode)}</div>` : ''}
+            <div style="margin-top:4px;">Units: ${base.unitCount} | Assets: ${base.totalAssets}</div>
+            ${unitsList}
+            ${radarList}
+          </div>
+        `);
+
+      const marker = new mapboxgl.Marker({ element: el })
+        .setLngLat([base.longitude, base.latitude])
+        .setPopup(popup)
+        .addTo(map);
+
+      currentBaseMarkers.set(base.id, marker);
+    });
+  }, [bases, showBases, affiliation]);
+
+  // ─── Render Target Markers ──────────────────────────────────────────────────
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const currentTargetMarkers = targetMarkersRef.current;
+
+    // Remove all existing target markers
+    currentTargetMarkers.forEach(marker => marker.remove());
+    currentTargetMarkers.clear();
+
+    if (!showTargets || targets.length === 0) return;
+
+    targets.forEach(target => {
+      const el = document.createElement('div');
+      el.style.cssText = `
+        width: 16px; height: 16px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 14px; font-weight: bold;
+        color: #ef4444;
+        cursor: pointer;
+        filter: drop-shadow(0 0 6px #ef444480);
+      `;
+      el.textContent = '✕';
+
+      const popup = new mapboxgl.Popup({ offset: 15, className: 'overwatch-popup' })
+        .setHTML(`
+          <div style="padding: 8px; font-family: var(--font-mono); font-size: 12px;">
+            <div style="font-weight: 700; margin-bottom: 4px; color: #ef4444;">
+              ✕ ${esc(target.targetName)}
+            </div>
+            ${target.beNumber ? `<div>BE#: ${esc(target.beNumber)}</div>` : ''}
+            ${target.targetCategory ? `<div>Category: ${esc(target.targetCategory)}</div>` : ''}
+            <div>Effect: ${esc(target.desiredEffect)}</div>
+            <div>Priority: ${target.priorityRank}</div>
+          </div>
+        `);
+
+      const marker = new mapboxgl.Marker({ element: el })
+        .setLngLat([target.longitude, target.latitude])
+        .setPopup(popup)
+        .addTo(map);
+
+      currentTargetMarkers.set(target.targetId, marker);
+    });
+  }, [targets, showTargets]);
+
+  // ─── Render Space Coverage Circles ──────────────────────────────────────────
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoadedRef.current) return;
+
+    const sourceId = 'coverage-circles';
+
+    if (!showCoverage || coverageWindows.length === 0) {
+      // Remove coverage layer if it exists
+      if (map.getLayer(`${sourceId}-fill`)) map.removeLayer(`${sourceId}-fill`);
+      if (map.getLayer(`${sourceId}-outline`)) map.removeLayer(`${sourceId}-outline`);
+      if (map.getSource(sourceId)) map.removeSource(sourceId);
+      return;
+    }
+
+    // Build GeoJSON circles from coverage windows
+    const features: GeoJSON.Feature[] = coverageWindows
+      .filter(cw => cw.lat != null && cw.lon != null)
+      .map(cw => {
+        const color = COVERAGE_COLORS[cw.capability] || '#6366f1';
+        // Create a circle polygon (approximation with 32 points)
+        const radiusDeg = 5; // ~5 degrees ≈ 550 km visual footprint
+        const points: [number, number][] = [];
+        for (let i = 0; i <= 32; i++) {
+          const angle = (i / 32) * 2 * Math.PI;
+          points.push([
+            cw.lon + radiusDeg * Math.cos(angle),
+            cw.lat + radiusDeg * Math.sin(angle) * 0.8, // Slightly flatten for projection
+          ]);
+        }
+
+        return {
+          type: 'Feature' as const,
+          geometry: { type: 'Polygon' as const, coordinates: [points] },
+          properties: {
+            assetName: cw.assetName,
+            capability: cw.capability,
+            color,
+          },
+        };
+      });
+
+    const geojson: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features,
+    };
+
+    const source = map.getSource(sourceId) as mapboxgl.GeoJSONSource;
+    if (source) {
+      source.setData(geojson);
+    } else {
+      map.addSource(sourceId, { type: 'geojson', data: geojson });
+      map.addLayer({
+        id: `${sourceId}-fill`,
+        type: 'fill',
+        source: sourceId,
+        paint: {
+          'fill-color': ['get', 'color'],
+          'fill-opacity': 0.08,
+        },
+      });
+      map.addLayer({
+        id: `${sourceId}-outline`,
+        type: 'line',
+        source: sourceId,
+        paint: {
+          'line-color': ['get', 'color'],
+          'line-width': 1,
+          'line-opacity': 0.3,
+          'line-dasharray': [2, 2],
+        },
+      });
+    }
+  }, [coverageWindows, showCoverage]);
 
   // ─── Update Breadcrumb Trails ───────────────────────────────────────────────
 
@@ -360,6 +612,31 @@ export function MapView() {
 
         <span style={{ width: '1px', background: 'var(--border-subtle)', margin: '0 4px' }} />
 
+        {/* Layer toggles */}
+        <button
+          onClick={() => setShowBases(!showBases)}
+          className={`btn btn-sm ${showBases ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ padding: '6px 12px', fontSize: '11px', fontWeight: 600 }}
+        >
+          BASES
+        </button>
+        <button
+          onClick={() => setShowTargets(!showTargets)}
+          className={`btn btn-sm ${showTargets ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ padding: '6px 12px', fontSize: '11px', fontWeight: 600 }}
+        >
+          TARGETS
+        </button>
+        <button
+          onClick={() => setShowCoverage(!showCoverage)}
+          className={`btn btn-sm ${showCoverage ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ padding: '6px 12px', fontSize: '11px', fontWeight: 600 }}
+        >
+          COVERAGE
+        </button>
+
+        <span style={{ width: '1px', background: 'var(--border-subtle)', margin: '0 4px' }} />
+
         <select
           value={affiliation}
           onChange={e => setAffiliation(e.target.value as any)}
@@ -392,10 +669,10 @@ export function MapView() {
         border: '1px solid var(--border-subtle)',
         borderRadius: '8px',
         padding: '12px 16px',
-        minWidth: '160px',
+        minWidth: '180px',
       }}>
         <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '8px', letterSpacing: '0.1em' }}>
-          LEGEND
+          TRACKS
         </div>
         <LegendItem color="#00d4ff" label="AIR" symbol="circle" />
         <LegendItem color="#0090ff" label="MARITIME" symbol="circle" />
@@ -403,9 +680,37 @@ export function MapView() {
         <div style={{ margin: '8px 0', borderTop: '1px solid var(--border-subtle)' }} />
         <LegendItem color="" label="Planned Route" symbol="dashed" />
         <LegendItem color="" label="Track History" symbol="solid" />
+
+        {showBases && (
+          <>
+            <div style={{ margin: '8px 0', borderTop: '1px solid var(--border-subtle)' }} />
+            <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px', letterSpacing: '0.1em' }}>
+              INFRASTRUCTURE
+            </div>
+            <LegendItem color="#f59e0b" label="Airbase ✦" symbol="text" />
+            <LegendItem color="#3b82f6" label="Naval Base ⚓" symbol="text" />
+            <LegendItem color="#10b981" label="Joint Base ◆" symbol="text" />
+          </>
+        )}
+
+        {showTargets && targets.length > 0 && (
+          <>
+            <div style={{ margin: '8px 0', borderTop: '1px solid var(--border-subtle)' }} />
+            <LegendItem color="#ef4444" label="Target ✕" symbol="text" />
+          </>
+        )}
+
+        {showCoverage && coverageWindows.length > 0 && (
+          <>
+            <div style={{ margin: '8px 0', borderTop: '1px solid var(--border-subtle)' }} />
+            <LegendItem color="#6366f1" label="Sat Coverage" symbol="coverage" />
+          </>
+        )}
+
         <div style={{ margin: '8px 0', borderTop: '1px solid var(--border-subtle)' }} />
         <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-          {positions.size} tracks
+          {positions.size} tracks{bases.length > 0 ? ` | ${bases.length} bases` : ''}
+          {targets.length > 0 ? ` | ${targets.length} tgts` : ''}
         </div>
         {simulation.simTime && (
           <div style={{ fontSize: '10px', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', marginTop: '4px' }}>
@@ -450,6 +755,22 @@ function LegendItem({ color, label, symbol }: { color: string; label: string; sy
         <span style={{
           width: '18px', height: '2px',
           background: 'var(--accent-success)',
+          display: 'inline-block',
+        }} />
+      );
+    }
+    if (symbol === 'text') {
+      return (
+        <span style={{ fontSize: '11px', color, display: 'inline-block', width: '14px', textAlign: 'center' }}>
+          {label.includes('✦') ? '✦' : label.includes('⚓') ? '⚓' : label.includes('◆') ? '◆' : label.includes('✕') ? '✕' : '●'}
+        </span>
+      );
+    }
+    if (symbol === 'coverage') {
+      return (
+        <span style={{
+          width: '14px', height: '8px', borderRadius: '50%',
+          border: `1px dashed ${color}`, background: `${color}15`,
           display: 'inline-block',
         }} />
       );
