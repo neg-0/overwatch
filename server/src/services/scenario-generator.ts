@@ -5,6 +5,8 @@ import { config } from '../config.js';
 import prisma from '../db/prisma-client.js';
 import { broadcastGenerationProgress } from '../websocket/ws-server.js';
 import { ORDER_GENERATOR_SCHEMA } from './llm-schemas.js';
+import { parseACOToStructures } from './aco-parser.js';
+import { locateInjects } from './inject-locator.js';
 // NOTE: ingestDocument is no longer called during generation (POC #1 decoupling).
 // The ingest pipeline runs separately — generator produces text only.
 import { callLLMWithRetry, logGenerationAttempt } from './generation-logger.js';
@@ -716,6 +718,16 @@ export async function generateFullScenario({
     }
   }
 
+  // POC1 AIRGAP: Post-generation parser pass — derive coordinates for injects
+  try {
+    const locatedCount = await locateInjects(scenarioId);
+    if (locatedCount > 0) {
+      console.log(`[SCENARIO] Inject locator resolved coordinates for ${locatedCount} injects`);
+    }
+  } catch (err) {
+    console.warn('[SCENARIO] Inject locator failed (non-fatal):', err);
+  }
+
   await updateGenerationStatus(scenarioId, GenerationStatus.COMPLETE, 'Done', 100);
   console.log(`[SCENARIO] Generation complete for ${scenarioId}`);
   return scenarioId;
@@ -843,6 +855,23 @@ Format with sections covering:
         },
       });
       console.log(`  [PLANNING] Created ${doc.docType} (${docText.length} chars)`);
+
+      // POC1 AIRGAP: If this is an ACO, run the parser to extract structured airspace data
+      if (doc.docType === 'ACO') {
+        const acoDoc = await prisma.planningDocument.findFirst({
+          where: { scenarioId, docType: 'ACO' },
+          orderBy: { createdAt: 'desc' },
+          select: { id: true },
+        });
+        if (acoDoc) {
+          try {
+            const structureCount = await parseACOToStructures(scenarioId, acoDoc.id);
+            console.log(`  [PLANNING] ACO parser extracted ${structureCount} airspace structures`);
+          } catch (err) {
+            console.warn('  [PLANNING] ACO parser failed (non-fatal):', err);
+          }
+        }
+      }
     } catch (error) {
       console.error(`  [PLANNING] Failed to generate / ingest ${doc.docType}: `, error);
       await logGenerationAttempt({
