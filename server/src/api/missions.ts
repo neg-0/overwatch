@@ -1,5 +1,5 @@
 import type { GanttData, GeoJSONFeatureCollection } from '@overwatch/shared';
-import type { Domain, MissionStatus } from '../../generated/prisma/client.js';
+import type { Domain, MissionStatus } from '../generated/prisma/client.js';
 import { Router } from 'express';
 import prisma from '../db/prisma-client.js';
 

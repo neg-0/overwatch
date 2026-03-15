@@ -862,7 +862,7 @@ async function advanceMissionStatuses(scenarioId: string, io: Server) {
     const totStart = new Date(totWindow.startTime);
     const timeDiffHours = (simTime.getTime() - totStart.getTime()) / 3600000;
 
-    let newStatus: import('@prisma/client').MissionStatus | null = null;
+    let newStatus: import('../generated/prisma/client.js').MissionStatus | null = null;
 
     switch (mission.status) {
       case 'PLANNED':
