@@ -56,6 +56,8 @@ export async function cleanDatabase(): Promise<void> {
   await prisma.simulationState.deleteMany();
   await prisma.leadershipDecision.deleteMany();
   await prisma.generationLog.deleteMany();
+  await prisma.airspaceStructure.deleteMany();
+  await prisma.base.deleteMany();
   await prisma.scenario.deleteMany();
 }
 
@@ -407,6 +409,9 @@ export async function createTestApp(): Promise<TestApp> {
   const eventsModule = await import('../../api/events.js');
   const { knowledgeGraphRoutes } = await import('../../api/knowledge-graph.js');
   const { createGameMasterRoutes } = await import('../../api/game-master.js');
+  const { baseRoutes } = await import('../../api/bases.js');
+  const { airspaceRoutes } = await import('../../api/airspace.js');
+  const { assetRoutes } = await import('../../api/assets.js');
   const { setupWebSocket } = await import('../../websocket/ws-server.js');
 
   const app = express();
@@ -443,6 +448,9 @@ export async function createTestApp(): Promise<TestApp> {
   app.use('/api/events', eventsModule.default);
   app.use('/api/knowledge-graph', knowledgeGraphRoutes);
   app.use('/api/game-master', createGameMasterRoutes(io));
+  app.use('/api/bases', baseRoutes);
+  app.use('/api/airspace', airspaceRoutes);
+  app.use('/api/assets', assetRoutes);
 
   return new Promise((resolve) => {
     httpServer.listen(0, () => {

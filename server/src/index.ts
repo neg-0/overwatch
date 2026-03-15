@@ -12,7 +12,9 @@ global.dbConnected = false;
 
 // API route handlers
 import { createAdvisorRoutes } from './api/advisor.js';
+import { airspaceRoutes } from './api/airspace.js';
 import { assetRoutes } from './api/assets.js';
+import { baseRoutes } from './api/bases.js';
 import { createDecisionRoutes } from './api/decisions.js';
 import eventsRoutes from './api/events.js';
 import { createGameMasterRoutes } from './api/game-master.js';
@@ -71,6 +73,8 @@ app.use('/api/scenarios', scenarioRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/missions', missionRoutes);
 app.use('/api/assets', assetRoutes);
+app.use('/api/bases', baseRoutes);
+app.use('/api/airspace', airspaceRoutes);
 app.use('/api/simulation', createSimulationRoutes(io));
 app.use('/api/timeline', timelineRoutes);
 app.use('/api/decisions', createDecisionRoutes(io));
