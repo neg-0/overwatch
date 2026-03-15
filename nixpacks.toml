@@ -1,0 +1,7 @@
+# Override Nixpacks build configuration
+# Default nixpkgs revision has Node 22.11.0, but Prisma 7.5.0 requires >=22.12.
+# Pin to nixos-24.11 commit with Node 22.14.0.
+
+[phases.setup]
+nixpkgsArchive = "5ef6c425980847c78a80d759abc476e941a9bf42"
+nixPkgs = ["nodejs_22", "npm-9_x", "openssl"]

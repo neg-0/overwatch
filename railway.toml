@@ -16,14 +16,7 @@
 #   UDL_USERNAME    → UDL credentials
 #   UDL_PASSWORD    → UDL credentials
 
-[nixpacks]
-# Prisma 7.5.0 requires Node >=20.19 or >=22.12.
-# Nixpacks' default nixpkgs has Node 22.11.0 (too old).
-# Override to nixos-24.11 commit with Node 22.14.0.
-nixPkgs = ["nodejs_22", "npm-9_x", "openssl"]
-
-[phases.setup]
-nixpkgsArchive = "5ef6c425980847c78a80d759abc476e941a9bf42"
+# Node.js version and nixpkgs archive are configured in nixpacks.toml
 
 [build]
 builder = "NIXPACKS"
