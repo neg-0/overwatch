@@ -18,9 +18,12 @@
 
 [nixpacks]
 # Prisma 7.5.0 requires Node >=20.19 or >=22.12.
-# Nixpacks' nodejs_20 Nix package resolves to v20.18.1 (too old).
-# Use Node 22 LTS instead.
+# Nixpacks' default nixpkgs has Node 22.11.0 (too old).
+# Override to nixos-24.11 commit with Node 22.14.0.
 nixPkgs = ["nodejs_22", "npm-9_x", "openssl"]
+
+[phases.setup]
+nixpkgsArchive = "5ef6c425980847c78a80d759abc476e941a9bf42"
 
 [build]
 builder = "NIXPACKS"
