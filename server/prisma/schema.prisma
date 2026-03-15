@@ -166,6 +166,7 @@ model Scenario {
   simEvents        SimEvent[]
   scenarioInjects  ScenarioInject[]
   generationLogs   GenerationLog[]
+  airspaceStructures AirspaceStructure[]
 
   @@map("scenarios")
 }
@@ -692,6 +693,11 @@ model ScenarioInject {
 
   fired       Boolean   @default(false)
   firedAt     DateTime?
+
+  // Geospatial — derived by inject-locator parser from referenced entities
+  latitude    Float?    // Optional, resolved post-generation
+  longitude   Float?    // Optional, resolved post-generation
+
   createdAt   DateTime  @default(now())
 
   @@index([scenarioId, triggerDay])
@@ -719,4 +725,29 @@ model GenerationLog {
 
   @@index([scenarioId])
   @@map("generation_logs")
+}
+
+// ─── Airspace Control Order Structures ───────────────────────────────────────
+// Parsed from ACO prose documents by aco-parser.ts (POC1 airgap pattern)
+// LLM generates prose → stored as PlanningDocument → parser extracts structured geo data
+
+model AirspaceStructure {
+  id              String   @id @default(uuid())
+  scenarioId      String
+  scenario        Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  structureType   String   // ROZ, ART, CAP, CORRIDOR, KILLBOX, HIDACZ, MRR
+  name            String   // e.g. "TAROKA SHOAL", "AR-205 BLUE"
+  coordinatesJson Json     // Array of {lat, lon} for polygon corners or waypoints
+  centerLat       Float?   // For circular areas (CAP stations, HIDACZ)
+  centerLon       Float?
+  radiusNm        Float?   // For circular areas
+  altitudeLow     Int?     // Floor in feet or flight level
+  altitudeHigh    Int?     // Ceiling in feet or flight level
+  effectiveStart  DateTime?
+  effectiveEnd    DateTime?
+  sourceDocId     String?  // Links to PlanningDocument (ACO) for traceability
+  createdAt       DateTime @default(now())
+
+  @@index([scenarioId])
+  @@map("airspace_structures")
 }
