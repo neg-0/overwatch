@@ -23,7 +23,7 @@ COPY . .
 # Build order: shared types → client bundle → prisma client → server tsc
 RUN npm -w shared run build && \
     npm -w client run build && \
-    npx prisma generate --schema=server/prisma/schema.prisma && \
+    npx prisma generate --config=server/prisma.config.ts && \
     npm -w server run build
 
 # ── Stage 2: Production ──────────────────────────────────────────────────────
@@ -46,6 +46,7 @@ COPY --from=builder /app/shared/dist shared/dist
 COPY --from=builder /app/shared/package.json shared/package.json
 COPY --from=builder /app/server/dist server/dist
 COPY --from=builder /app/server/prisma server/prisma
+COPY --from=builder /app/server/prisma.config.ts server/prisma.config.ts
 COPY --from=builder /app/server/node_modules/.prisma server/node_modules/.prisma
 COPY --from=builder /app/client/dist client/dist
 COPY --from=builder /app/node_modules/.prisma node_modules/.prisma
@@ -53,4 +54,4 @@ COPY --from=builder /app/node_modules/.prisma node_modules/.prisma
 ENV NODE_ENV=production
 
 # Run migrations then start the server
-CMD npx prisma migrate deploy --schema=server/prisma/schema.prisma && node server/dist/index.js
+CMD npx prisma migrate deploy --config=server/prisma.config.ts && node server/dist/index.js
