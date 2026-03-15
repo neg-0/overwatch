@@ -16,6 +16,12 @@
 #   UDL_USERNAME    → UDL credentials
 #   UDL_PASSWORD    → UDL credentials
 
+[nixpacks]
+# Prisma 7.5.0 requires Node >=20.19 or >=22.12.
+# Nixpacks' nodejs_20 Nix package resolves to v20.18.1 (too old).
+# Use Node 22 LTS instead.
+nixPkgs = ["nodejs_22", "npm-9_x", "openssl"]
+
 [build]
 builder = "NIXPACKS"
 # Nixpacks runs `npm ci` automatically in the install phase — do NOT repeat it here.
