@@ -50,7 +50,6 @@ RUN npm ci --omit=dev
 COPY --from=builder /app/shared/dist shared/dist
 COPY --from=builder /app/shared/package.json shared/package.json
 COPY --from=builder /app/server/dist server/dist
-COPY --from=builder /app/server/src/generated server/dist/generated
 COPY --from=builder /app/server/prisma server/prisma
 COPY --from=builder /app/server/prisma.config.ts server/prisma.config.ts
 COPY --from=builder /app/client/dist client/dist
