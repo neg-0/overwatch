@@ -11,7 +11,7 @@
  *                               "DDG → needs EHF SATCOM → provided by AEHF-4"
  */
 
-import { SpaceCapabilityType } from '@prisma/client';
+import { SpaceCapabilityType } from '../generated/prisma/client.js';
 import prisma from '../db/prisma-client.js';
 
 // ─── Type Definitions ────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import type { Affiliation, Domain, SpaceCapabilityType } from '@prisma/client';
+import type { Affiliation, Domain, SpaceCapabilityType } from '../generated/prisma/client.js';
 import { Router } from 'express';
 import prisma from '../db/prisma-client.js';
 

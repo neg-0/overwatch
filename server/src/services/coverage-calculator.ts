@@ -10,7 +10,7 @@
  * - AOS/LOS (Acquisition/Loss of Signal) transitions computed over a time window
  */
 
-import type { SpaceCapabilityType } from '@prisma/client';
+import type { SpaceCapabilityType } from '../generated/prisma/client.js';
 import { approximateGeoPosition, propagateFromTLE, type SpacePosition } from './space-propagator.js';
 
 // ─── Constants ───────────────────────────────────────────────────────────────

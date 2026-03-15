@@ -1,7 +1,7 @@
 /**
  * Shared test helpers for integration and E2E tests.
  */
-import { GenerationStatus, PrismaClient } from '@prisma/client';
+import { GenerationStatus, PrismaClient } from '../../generated/prisma/client.js';
 import express from 'express';
 import { createServer, type Server as HttpServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';

@@ -1,4 +1,4 @@
-import { GenerationStatus } from '@prisma/client';
+import { GenerationStatus } from '../generated/prisma/client.js';
 import AdmZip from 'adm-zip';
 import { Router } from 'express';
 import fs from 'fs';

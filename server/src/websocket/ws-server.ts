@@ -1,4 +1,4 @@
-import { GenerationStatus } from '@prisma/client';
+import { GenerationStatus } from '../../generated/prisma/client.js';
 import { Socket, Server as SocketIOServer } from 'socket.io';
 
 let ioInstance: SocketIOServer | null = null;

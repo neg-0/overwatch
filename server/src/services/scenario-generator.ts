@@ -1,4 +1,4 @@
-import { GenerationStatus, OrderType } from '@prisma/client';
+import { GenerationStatus, OrderType } from '../generated/prisma/client.js';
 import OpenAI from 'openai';
 import { v4 as uuid } from 'uuid';
 import { config } from '../config.js';

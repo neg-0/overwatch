@@ -1,4 +1,4 @@
-import type { OrderType } from '@prisma/client';
+import type { OrderType } from '../generated/prisma/client.js';
 import { Router } from 'express';
 import prisma from '../db/prisma-client.js';
 

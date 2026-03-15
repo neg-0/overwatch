@@ -1,7 +1,7 @@
 /**
  * Unit tests for ScenarioCache — in-memory cache for offline mode.
  */
-import { GenerationStatus } from '@prisma/client';
+import { GenerationStatus } from '../../generated/prisma/client.js';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 // We import the class via the module-level singleton. Since ScenarioCache

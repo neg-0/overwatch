@@ -1,4 +1,4 @@
-import { GenerationStatus } from '@prisma/client';
+import { GenerationStatus } from '../generated/prisma/client.js';
 
 export interface CachedScenario {
   id: string;

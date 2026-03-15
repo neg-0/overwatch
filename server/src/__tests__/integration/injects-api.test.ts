@@ -2,7 +2,7 @@
  * Integration tests for Injects API routes.
  * Tests CRUD operations: list, get, create, patch, delete.
  */
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../generated/prisma/client.js';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   cleanDatabase,

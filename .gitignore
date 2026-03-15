@@ -44,3 +44,6 @@ blob-report/
 
 # ─── Misc ─────────────────────────────────────────────────────────────────────
 .gemini/
+
+# Prisma 7 generated client
+server/src/generated/

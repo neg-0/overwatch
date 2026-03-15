@@ -50,11 +50,10 @@ RUN npm ci --omit=dev
 COPY --from=builder /app/shared/dist shared/dist
 COPY --from=builder /app/shared/package.json shared/package.json
 COPY --from=builder /app/server/dist server/dist
+COPY --from=builder /app/server/src/generated server/dist/generated
 COPY --from=builder /app/server/prisma server/prisma
 COPY --from=builder /app/server/prisma.config.ts server/prisma.config.ts
 COPY --from=builder /app/client/dist client/dist
-# Prisma 7 generates client into @prisma/client (not .prisma)
-COPY --from=builder /app/node_modules/@prisma/client node_modules/@prisma/client
 
 ENV NODE_ENV=production
 

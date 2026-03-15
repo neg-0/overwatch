@@ -2,7 +2,7 @@
  * Integration tests for Events API routes.
  * Tests GET (list by scenarioId) and POST (create + effect application).
  */
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../generated/prisma/client.js';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   cleanDatabase,
