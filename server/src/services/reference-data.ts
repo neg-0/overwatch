@@ -1519,4 +1519,58 @@ export async function seedORBATForScenario(scenarioId: string): Promise<void> {
 
   const totalUnits = INDOPACOM_BLUE_ORBAT.length + INDOPACOM_RED_FORCE.length;
   console.log(`  [REF-DATA] Created ${totalUnits} units (${INDOPACOM_BLUE_ORBAT.length} blue, ${INDOPACOM_RED_FORCE.length} red) for scenario`);
+
+  // Post-pass: co-locate carrier strike group components
+  await colocateCarrierGroups(scenarioId);
 }
+
+// ─── Carrier Group Co-Location ─────────────────────────────────────────────
+// Ensures carrier strike group components share the same coordinates.
+// The "anchor" unit's position is used for all members.
+
+export const CARRIER_GROUP_DEFINITIONS = [
+  {
+    group: 'CSG-5',
+    anchor: 'CSG-5',            // Carrier hull defines formation position
+    members: ['CSG-5', 'CVW-5', 'DESRON-15'],
+  },
+];
+
+/**
+ * Co-locate carrier group units to the anchor unit's position.
+ * Fixes the problem where air wings appear at different coordinates
+ * than their carrier and escorts.
+ */
+export async function colocateCarrierGroups(scenarioId: string): Promise<number> {
+  let updated = 0;
+
+  for (const group of CARRIER_GROUP_DEFINITIONS) {
+    // Find the anchor unit
+    const anchor = await prisma.unit.findFirst({
+      where: { scenarioId, unitDesignation: group.anchor },
+      select: { baseLat: true, baseLon: true, baseLocation: true },
+    });
+    if (!anchor || anchor.baseLat == null || anchor.baseLon == null) continue;
+
+    // Update all member units to match the anchor's coordinates
+    for (const memberDesignation of group.members) {
+      if (memberDesignation === group.anchor) continue; // skip the anchor itself
+
+      const result = await prisma.unit.updateMany({
+        where: { scenarioId, unitDesignation: memberDesignation },
+        data: {
+          baseLat: anchor.baseLat,
+          baseLon: anchor.baseLon,
+        },
+      });
+      updated += result.count;
+    }
+
+    if (updated > 0) {
+      console.log(`  [REF-DATA] Co-located ${updated} unit(s) in ${group.group} at ${anchor.baseLat}°N, ${anchor.baseLon}°E`);
+    }
+  }
+
+  return updated;
+}
+

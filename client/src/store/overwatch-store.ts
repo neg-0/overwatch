@@ -115,6 +115,20 @@ export interface BaseData {
   }>;
 }
 
+export interface UnitPosition {
+  id: string;
+  unitName: string;
+  unitDesignation: string;
+  serviceBranch: string;
+  domain: string;
+  affiliation: string;
+  baseLocation: string;
+  baseLat: number;
+  baseLon: number;
+  baseId: string | null;
+  assetCount: number;
+}
+
 export interface PendingDecision {
   eventId: string;
   scenarioId: string;
@@ -157,6 +171,7 @@ interface OverwatchStore {
 
   // Infrastructure layers (static, hydrated on scenario select)
   bases: BaseData[];
+  unitPositions: UnitPosition[];
 
   // Events
   simEvents: SimEvent[];
@@ -234,6 +249,7 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
   coverageWindows: [],
   alerts: [],
   bases: [],
+  unitPositions: [],
   simEvents: [],
   pendingDecisions: [],
   generationProgress: null,
@@ -488,6 +504,17 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
         if (signal.aborted) return;
         if (json.success && json.data) {
           set({ bases: json.data });
+        }
+      })
+      .catch(() => { });
+
+    // Unit positions — home coordinates for map markers
+    fetch(`/api/units/positions?scenarioId=${id}`, { signal })
+      .then(r => r.json())
+      .then(json => {
+        if (signal.aborted) return;
+        if (json.success && json.data) {
+          set({ unitPositions: json.data });
         }
       })
       .catch(() => { });

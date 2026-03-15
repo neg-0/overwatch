@@ -1,7 +1,7 @@
 import mapboxgl from 'mapbox-gl';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useOverwatchStore } from '../store/overwatch-store';
-import type { BaseData } from '../store/overwatch-store';
+import type { BaseData, UnitPosition } from '../store/overwatch-store';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -82,7 +82,7 @@ export function MapView() {
   const trailsRef = useRef<Map<string, [number, number][]>>(new Map());
   const mapLoadedRef = useRef(false);
 
-  const { positions, activeScenarioId, simulation, bases, coverageWindows } = useOverwatchStore();
+  const { positions, activeScenarioId, simulation, bases, coverageWindows, unitPositions } = useOverwatchStore();
   const [activeDomains, setActiveDomains] = useState<Set<string>>(new Set(['AIR', 'MARITIME', 'SPACE']));
   const [affiliation, setAffiliation] = useState<'ALL' | 'FRIENDLY' | 'HOSTILE'>('ALL');
   const [routes, setRoutes] = useState<MissionRoute[]>([]);
@@ -92,6 +92,8 @@ export function MapView() {
   const [showBases, setShowBases] = useState(true);
   const [showTargets, setShowTargets] = useState(true);
   const [showCoverage, setShowCoverage] = useState(false);
+  const [showUnits, setShowUnits] = useState(true);
+  const unitMarkersRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
 
   // ─── Initialize Map ─────────────────────────────────────────────────────────
 
@@ -353,6 +355,80 @@ export function MapView() {
       currentTargetMarkers.set(target.targetId, marker);
     });
   }, [targets, showTargets]);
+
+  // ─── Render Unit Position Markers (clustered by co-location) ───────────────
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const currentUnitMarkers = unitMarkersRef.current;
+    currentUnitMarkers.forEach(marker => marker.remove());
+    currentUnitMarkers.clear();
+
+    if (!showUnits || unitPositions.length === 0) return;
+
+    // Group units by coordinates for cluster rendering
+    const groups = new Map<string, UnitPosition[]>();
+    for (const up of unitPositions) {
+      // Filter by affiliation
+      if (affiliation === 'FRIENDLY' && up.affiliation === 'HOSTILE') continue;
+      if (affiliation === 'HOSTILE' && up.affiliation !== 'HOSTILE') continue;
+      // Filter by domain
+      if (!activeDomains.has(up.domain)) continue;
+
+      const key = `${up.baseLat.toFixed(3)},${up.baseLon.toFixed(3)}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(up);
+    }
+
+    groups.forEach((units, key) => {
+      const first = units[0];
+      const isOpfor = first.affiliation === 'HOSTILE';
+      const totalAssets = units.reduce((s, u) => s + u.assetCount, 0);
+
+      const el = document.createElement('div');
+      el.style.cssText = `
+        width: 28px; height: 28px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 10px; font-weight: 700;
+        color: ${isOpfor ? '#fff' : '#fff'};
+        background: ${isOpfor ? 'rgba(239, 68, 68, 0.7)' : 'rgba(59, 130, 246, 0.7)'};
+        border: 2px solid ${isOpfor ? '#ef4444' : '#3b82f6'};
+        border-radius: 50%;
+        cursor: pointer;
+        box-shadow: 0 0 8px ${isOpfor ? '#ef444480' : '#3b82f680'};
+      `;
+      el.textContent = String(totalAssets);
+
+      const unitList = units.map(u =>
+        `<div style="margin: 2px 0; font-size: 10px;">
+          <span style="color: ${DOMAIN_COLORS[u.domain] || '#888'};">■</span>
+          ${esc(u.unitDesignation)} — ${u.assetCount} assets
+        </div>`
+      ).join('');
+
+      const popup = new mapboxgl.Popup({ offset: 15, className: 'overwatch-popup' })
+        .setHTML(`
+          <div style="padding: 8px; font-family: var(--font-mono); font-size: 12px; max-width: 260px;">
+            <div style="font-weight: 700; margin-bottom: 4px; color: ${isOpfor ? '#ef4444' : '#60a5fa'};">
+              ${esc(first.baseLocation || 'Unknown Location')}
+            </div>
+            <div style="color: var(--text-muted); font-size: 10px; margin-bottom: 4px;">
+              ${units.length} unit${units.length > 1 ? 's' : ''} · ${totalAssets} assets
+            </div>
+            ${unitList}
+          </div>
+        `);
+
+      const marker = new mapboxgl.Marker({ element: el })
+        .setLngLat([first.baseLon, first.baseLat])
+        .setPopup(popup)
+        .addTo(map);
+
+      currentUnitMarkers.set(key, marker);
+    });
+  }, [unitPositions, showUnits, affiliation, activeDomains]);
 
   // ─── Render Space Coverage Circles ──────────────────────────────────────────
 
@@ -628,6 +704,13 @@ export function MapView() {
           TARGETS
         </button>
         <button
+          onClick={() => setShowUnits(!showUnits)}
+          className={`btn btn-sm ${showUnits ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ padding: '6px 12px', fontSize: '11px', fontWeight: 600 }}
+        >
+          UNITS
+        </button>
+        <button
           onClick={() => setShowCoverage(!showCoverage)}
           className={`btn btn-sm ${showCoverage ? 'btn-primary' : 'btn-secondary'}`}
           style={{ padding: '6px 12px', fontSize: '11px', fontWeight: 600 }}
@@ -693,6 +776,17 @@ export function MapView() {
           </>
         )}
 
+        {showUnits && unitPositions.length > 0 && (
+          <>
+            <div style={{ margin: '8px 0', borderTop: '1px solid var(--border-subtle)' }} />
+            <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px', letterSpacing: '0.1em' }}>
+              UNITS
+            </div>
+            <LegendItem color="#3b82f6" label="Friendly" symbol="circle" />
+            <LegendItem color="#ef4444" label="Hostile" symbol="circle" />
+          </>
+        )}
+
         {showTargets && targets.length > 0 && (
           <>
             <div style={{ margin: '8px 0', borderTop: '1px solid var(--border-subtle)' }} />
@@ -709,7 +803,7 @@ export function MapView() {
 
         <div style={{ margin: '8px 0', borderTop: '1px solid var(--border-subtle)' }} />
         <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-          {positions.size} tracks{bases.length > 0 ? ` | ${bases.length} bases` : ''}
+          {positions.size} tracks{bases.length > 0 ? ` | ${bases.length} bases` : ''}{unitPositions.length > 0 ? ` | ${unitPositions.length} units` : ''}
           {targets.length > 0 ? ` | ${targets.length} tgts` : ''}
         </div>
         {simulation.simTime && (

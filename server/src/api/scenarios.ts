@@ -6,7 +6,7 @@ import multer from 'multer';
 import path from 'path';
 import prisma from '../db/prisma-client.js';
 import { generateFullScenario } from '../services/scenario-generator.js';
-import { seedPlatformCatalog } from '../services/reference-data.js';
+import { seedPlatformCatalog, colocateCarrierGroups, seedBasesForScenario } from '../services/reference-data.js';
 import { allocateSpaceResources } from '../services/space-allocator.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
@@ -200,6 +200,19 @@ scenarioRoutes.post('/ready-made/:filename/load', async (req, res) => {
         }
       }
     }
+
+    // Co-locate carrier group components (fixes CVW-5/CSG-5/DESRON-15 split)
+    await colocateCarrierGroups(core.id);
+
+    // Seed bases if not present in import data (legacy ZIPs lack bases)
+    const importedBases = data.bases || [];
+    if (importedBases.length === 0) {
+      const existingBases = await prisma.base.count({ where: { scenarioId: core.id } });
+      if (existingBases === 0) {
+        await seedBasesForScenario(core.id);
+      }
+    }
+
     for (const sa of (spaceAssets || [])) {
       const { scenario: _s, coverageWindows: _cw, ...saCore } = sa;
       const exists = await prisma.spaceAsset.findUnique({ where: { id: saCore.id } });
@@ -903,6 +916,19 @@ scenarioRoutes.post('/import', upload.single('file'), async (req, res) => {
         }
       }
     }
+
+    // Co-locate carrier group components (fixes CVW-5/CSG-5/DESRON-15 split)
+    await colocateCarrierGroups(core.id);
+
+    // Seed bases if not present in import data (legacy ZIPs lack bases)
+    const importedBases2 = data.bases || [];
+    if (importedBases2.length === 0) {
+      const existingBases2 = await prisma.base.count({ where: { scenarioId: core.id } });
+      if (existingBases2 === 0) {
+        await seedBasesForScenario(core.id);
+      }
+    }
+
     for (const sa of (spaceAssets || [])) {
       const { scenario: _s, ...saCore } = sa;
       const exists = await prisma.spaceAsset.findUnique({ where: { id: saCore.id } });
