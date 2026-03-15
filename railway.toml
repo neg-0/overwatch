@@ -16,21 +16,11 @@
 #   UDL_USERNAME    → UDL credentials
 #   UDL_PASSWORD    → UDL credentials
 
-# Node.js version and nixpkgs archive are configured in nixpacks.toml
-
 [build]
-builder = "NIXPACKS"
-# Nixpacks runs `npm ci` automatically in the install phase — do NOT repeat it here.
-# Build order: shared types → client static bundle → prisma client → server tsc
-buildCommand = """
-npm -w shared run build && \
-npm -w client run build && \
-npx prisma generate --schema=server/prisma/schema.prisma && \
-npm -w server run build
-"""
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "npx prisma migrate deploy --schema=server/prisma/schema.prisma && npm -w server run start"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"

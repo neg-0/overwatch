@@ -1,0 +1,14 @@
+node_modules
+.git
+.gitignore
+*.md
+.env
+.env.*
+.vscode
+.idea
+server/src/__tests__
+server/scripts
+docs
+.gemini
+.nixpacks
+nixpacks.toml
