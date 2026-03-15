@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@overwatch/shared": "*",
+    "@prisma/adapter-pg": "^7.5.0",
     "@prisma/client": "^7.5.0",
     "adm-zip": "^0.5.16",
     "cors": "^2.8.5",
