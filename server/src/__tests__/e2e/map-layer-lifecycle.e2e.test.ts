@@ -62,7 +62,7 @@ describe('Map Layer API Lifecycle E2E', () => {
         baseType: 'AIRBASE',
         latitude: 26.35,
         longitude: 127.77,
-        affiliation: 'FRIENDLY',
+        country: 'Japan',
       },
     });
 
@@ -73,7 +73,7 @@ describe('Map Layer API Lifecycle E2E', () => {
         baseType: 'NAVAL_BASE',
         latitude: 35.28,
         longitude: 139.65,
-        affiliation: 'FRIENDLY',
+        country: 'Japan',
       },
     });
 
@@ -84,7 +84,7 @@ describe('Map Layer API Lifecycle E2E', () => {
         baseType: 'AIRBASE',
         latitude: 25.0,
         longitude: 121.5,
-        affiliation: 'HOSTILE',
+        country: 'Adversary',
       },
     });
 
@@ -105,7 +105,7 @@ describe('Map Layer API Lifecycle E2E', () => {
 
     const assetType = await prisma.assetType.create({
       data: {
-        typeName: 'F-35A',
+        name: 'F-35A',
         domain: 'AIR',
         category: 'FIGHTER',
       },
@@ -190,14 +190,12 @@ describe('Map Layer API Lifecycle E2E', () => {
     // Friendly base with units
     const kadenaData = basesBody.data.find((b: any) => b.name === 'Kadena Air Base');
     expect(kadenaData).toBeDefined();
-    expect(kadenaData.affiliation).toBe('FRIENDLY');
     expect(kadenaData.unitCount).toBe(1);
-    expect(kadenaData.assetCount).toBe(2);
+    expect(kadenaData.totalAssets).toBe(2);
 
     // OPFOR base
     const opforData = basesBody.data.find((b: any) => b.name === 'Mainland Airbase Alpha');
     expect(opforData).toBeDefined();
-    expect(opforData.affiliation).toBe('HOSTILE');
 
     // ─── 7. Validate /api/airspace ─────────────────────────────────────
     const airspaceRes = await fetch(`${app.baseUrl}/api/airspace?scenarioId=${scenarioId}`);

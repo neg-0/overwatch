@@ -49,7 +49,7 @@ beforeEach(async () => {
       baseType: 'AIRBASE',
       latitude: 26.35,
       longitude: 127.77,
-      affiliation: 'FRIENDLY',
+      country: 'Japan',
     },
   });
 
@@ -60,7 +60,7 @@ beforeEach(async () => {
       baseType: 'AIRBASE',
       latitude: 25.0,
       longitude: 121.5,
-      affiliation: 'HOSTILE',
+      country: 'Adversary',
     },
   });
 
@@ -82,7 +82,7 @@ beforeEach(async () => {
   // Create an asset type and asset
   const assetType = await prisma.assetType.create({
     data: {
-      typeName: 'F-35A',
+      name: 'F-35A',
       domain: 'AIR',
       category: 'FIGHTER',
     },
@@ -125,13 +125,12 @@ describe('Bases API', () => {
       expect(kadena.assetCount).toBeGreaterThanOrEqual(1);
     });
 
-    it('returns OPFOR bases with HOSTILE affiliation', async () => {
+    it('returns OPFOR bases', async () => {
       const res = await fetch(`${app.baseUrl}/api/bases?scenarioId=${scenarioId}`);
       const body: any = await res.json();
 
       const opfor = body.data.find((b: any) => b.name === 'Mainland Airbase Alpha');
       expect(opfor).toBeDefined();
-      expect(opfor.affiliation).toBe('HOSTILE');
     });
 
     it('returns empty array for non-existent scenario', async () => {
