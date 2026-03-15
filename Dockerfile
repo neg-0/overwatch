@@ -25,6 +25,10 @@ COPY . .
 ARG DATABASE_URL
 ENV DATABASE_URL=$DATABASE_URL
 
+# Vite embeds VITE_* vars at build time into the client bundle
+ARG VITE_MAPBOX_TOKEN
+ENV VITE_MAPBOX_TOKEN=$VITE_MAPBOX_TOKEN
+
 # Build order: shared types → client bundle → prisma client → server tsc
 RUN npm -w shared run build && \
     npm -w client run build && \
