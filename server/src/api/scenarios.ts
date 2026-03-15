@@ -128,6 +128,41 @@ scenarioRoutes.post('/ready-made/:filename/load', async (req, res) => {
     } else {
       // Legacy ZIP without assetTypes — seed from PLATFORM_CATALOG
       await seedPlatformCatalog();
+
+      // Collect all assetTypeIds referenced by incoming assets and ensure they exist.
+      // Legacy exports reference IDs from the original DB that won't match the
+      // freshly-seeded catalog entries. Create stub AssetType records for any
+      // orphaned IDs so the FK constraint on asset creation is satisfied.
+      const referencedTypeIds = new Set<string>();
+      for (const u of (units || [])) {
+        for (const a of (u.assets || [])) {
+          if (a.assetTypeId) referencedTypeIds.add(a.assetTypeId);
+        }
+      }
+      if (referencedTypeIds.size > 0) {
+        const existingTypes = await prisma.assetType.findMany({
+          where: { id: { in: [...referencedTypeIds] } },
+          select: { id: true },
+        });
+        const existingIds = new Set(existingTypes.map((t: { id: string }) => t.id));
+        let stubCount = 0;
+        for (const orphanId of referencedTypeIds) {
+          if (!existingIds.has(orphanId)) {
+            await prisma.assetType.create({
+              data: {
+                id: orphanId,
+                name: `Imported Type ${orphanId.slice(0, 8)}`,
+                domain: 'AIR',
+                category: 'Unknown',
+              },
+            }).catch(() => { /* ignore if race/duplicate */ });
+            stubCount++;
+          }
+        }
+        if (stubCount > 0) {
+          console.log(`  [IMPORT] Created ${stubCount} stub AssetType record(s) for legacy import`);
+        }
+      }
     }
     for (const s of (strategies || [])) {
       const { scenario: _s, priorities: _p, ...sCore } = s;
@@ -796,6 +831,41 @@ scenarioRoutes.post('/import', upload.single('file'), async (req, res) => {
     } else {
       // Legacy ZIP without assetTypes — seed from PLATFORM_CATALOG
       await seedPlatformCatalog();
+
+      // Collect all assetTypeIds referenced by incoming assets and ensure they exist.
+      // Legacy exports reference IDs from the original DB that won't match the
+      // freshly-seeded catalog entries. Create stub AssetType records for any
+      // orphaned IDs so the FK constraint on asset creation is satisfied.
+      const referencedTypeIds = new Set<string>();
+      for (const u of (units || [])) {
+        for (const a of (u.assets || [])) {
+          if (a.assetTypeId) referencedTypeIds.add(a.assetTypeId);
+        }
+      }
+      if (referencedTypeIds.size > 0) {
+        const existingTypes = await prisma.assetType.findMany({
+          where: { id: { in: [...referencedTypeIds] } },
+          select: { id: true },
+        });
+        const existingIds = new Set(existingTypes.map((t: { id: string }) => t.id));
+        let stubCount = 0;
+        for (const orphanId of referencedTypeIds) {
+          if (!existingIds.has(orphanId)) {
+            await prisma.assetType.create({
+              data: {
+                id: orphanId,
+                name: `Imported Type ${orphanId.slice(0, 8)}`,
+                domain: 'AIR',
+                category: 'Unknown',
+              },
+            }).catch(() => { /* ignore if race/duplicate */ });
+            stubCount++;
+          }
+        }
+        if (stubCount > 0) {
+          console.log(`  [IMPORT] Created ${stubCount} stub AssetType record(s) for legacy import`);
+        }
+      }
     }
     for (const s of (strategies || [])) {
       const { scenario: _s, priorities: _p, ...sCore } = s;
