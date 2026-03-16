@@ -2,18 +2,18 @@
  * Integration tests for Events API routes.
  * Tests GET (list by scenarioId) and POST (create + effect application).
  */
-import { PrismaClient } from '../../generated/prisma/client.js';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   cleanDatabase,
   createTestApp,
   disconnectPrisma,
+  getTestPrisma,
   seedTestScenario,
   type TestApp,
   type TestSeedResult,
 } from '../helpers/test-helpers.js';
 
-const prisma = new PrismaClient();
+const prisma = getTestPrisma();
 let app: TestApp;
 let seed: TestSeedResult;
 

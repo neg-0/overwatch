@@ -1,7 +1,17 @@
 /**
  * Shared test helpers for integration and E2E tests.
+ *
+ * IMPORTANT: .env.test is loaded FIRST (override: true) to ensure DATABASE_URL
+ * points at the test database. This must happen before any application modules
+ * are imported, because config.ts calls dotenv.config() which would otherwise
+ * set DATABASE_URL to the development/production value from .env.
  */
+import dotenv from 'dotenv';
+import { resolve } from 'path';
+dotenv.config({ path: resolve(import.meta.dirname, '../../../.env.test'), override: true });
+
 import { GenerationStatus, PrismaClient } from '../../generated/prisma/client.js';
+import { PrismaPg } from '@prisma/adapter-pg';
 import express from 'express';
 import { createServer, type Server as HttpServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
@@ -13,7 +23,8 @@ let _testPrisma: PrismaClient | null = null;
 
 export function getTestPrisma(): PrismaClient {
   if (!_testPrisma) {
-    _testPrisma = new PrismaClient({ log: ['error'] });
+    const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
+    _testPrisma = new PrismaClient({ adapter, log: ['error'] });
   }
   return _testPrisma;
 }

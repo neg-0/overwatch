@@ -228,11 +228,25 @@ scenarioRoutes.post('/ready-made/:filename/load', async (req, res) => {
       const exists = await prisma.taskingOrder.findUnique({ where: { id: orderCore.id } });
       if (!exists) {
         await prisma.taskingOrder.create({ data: orderCore });
-        // Support both flat missions and nested missionPackages
-        const allMissions = missions || (missionPackages || []).flatMap((pkg: any) => pkg.missions || []);
-        for (const m of (allMissions || [])) {
+        // Create MissionPackage records first, then their missions
+        for (const pkg of (missionPackages || [])) {
+          const { missions: pkgMissions, taskingOrder: _toPkg, ...pkgCore } = pkg;
+          await prisma.missionPackage.create({ data: pkgCore }).catch((err: any) => {
+            console.warn(`[IMPORT] Skipped package ${pkgCore.id}: ${err.message}`);
+          });
+          for (const m of (pkgMissions || [])) {
+            const { taskingOrder: _to, unit: _u, positionUpdates: _pu, spaceNeeds: _sn, targets: _t, waypoints: _w, timeWindows: _tw, supportRequirements: _sr, package: _pkg, ...missionCore } = m;
+            await prisma.mission.create({ data: missionCore }).catch((err: any) => {
+              console.warn(`[IMPORT] Skipped mission ${missionCore.id}: ${err.message}`);
+            });
+          }
+        }
+        // Also support flat missions array (legacy exports)
+        for (const m of (missions || [])) {
           const { taskingOrder: _to, unit: _u, positionUpdates: _pu, spaceNeeds: _sn, targets: _t, waypoints: _w, timeWindows: _tw, supportRequirements: _sr, package: _pkg, ...missionCore } = m;
-          await prisma.mission.create({ data: missionCore });
+          await prisma.mission.create({ data: missionCore }).catch((err: any) => {
+            console.warn(`[IMPORT] Skipped mission ${missionCore.id}: ${err.message}`);
+          });
         }
       }
     }
@@ -944,11 +958,25 @@ scenarioRoutes.post('/import', upload.single('file'), async (req, res) => {
       const exists = await prisma.taskingOrder.findUnique({ where: { id: orderCore.id } });
       if (!exists) {
         await prisma.taskingOrder.create({ data: orderCore });
-        // Support both flat missions and nested missionPackages
-        const allMissions = missions || (missionPackages || []).flatMap((pkg: any) => pkg.missions || []);
-        for (const m of (allMissions || [])) {
+        // Create MissionPackage records first, then their missions
+        for (const pkg of (missionPackages || [])) {
+          const { missions: pkgMissions, taskingOrder: _toPkg, ...pkgCore } = pkg;
+          await prisma.missionPackage.create({ data: pkgCore }).catch((err: any) => {
+            console.warn(`[IMPORT] Skipped package ${pkgCore.id}: ${err.message}`);
+          });
+          for (const m of (pkgMissions || [])) {
+            const { taskingOrder: _to, unit: _u, positionUpdates: _pu, spaceNeeds: _sn, targets: _t, waypoints: _w, timeWindows: _tw, supportRequirements: _sr, package: _pkg, ...missionCore } = m;
+            await prisma.mission.create({ data: missionCore }).catch((err: any) => {
+              console.warn(`[IMPORT] Skipped mission ${missionCore.id}: ${err.message}`);
+            });
+          }
+        }
+        // Also support flat missions array (legacy exports)
+        for (const m of (missions || [])) {
           const { taskingOrder: _to, unit: _u, positionUpdates: _pu, spaceNeeds: _sn, targets: _t, waypoints: _w, timeWindows: _tw, supportRequirements: _sr, package: _pkg, ...missionCore } = m;
-          await prisma.mission.create({ data: missionCore });
+          await prisma.mission.create({ data: missionCore }).catch((err: any) => {
+            console.warn(`[IMPORT] Skipped mission ${missionCore.id}: ${err.message}`);
+          });
         }
       }
     }
