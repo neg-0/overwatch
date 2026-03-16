@@ -930,7 +930,7 @@ scenarioRoutes.post('/import', upload.single('file'), async (req, res) => {
     }
 
     for (const sa of (spaceAssets || [])) {
-      const { scenario: _s, ...saCore } = sa;
+      const { scenario: _s, coverageWindows: _cw, ...saCore } = sa;
       const exists = await prisma.spaceAsset.findUnique({ where: { id: saCore.id } });
       if (!exists) await prisma.spaceAsset.create({ data: saCore });
     }
@@ -940,12 +940,14 @@ scenarioRoutes.post('/import', upload.single('file'), async (req, res) => {
       if (!exists) await prisma.scenarioInject.create({ data: injCore });
     }
     for (const order of (taskingOrders || [])) {
-      const { missions, scenario: _s, ...orderCore } = order;
+      const { missions, scenario: _s, missionPackages, ...orderCore } = order;
       const exists = await prisma.taskingOrder.findUnique({ where: { id: orderCore.id } });
       if (!exists) {
         await prisma.taskingOrder.create({ data: orderCore });
-        for (const m of (missions || [])) {
-          const { taskingOrder: _to, unit: _u, ...missionCore } = m;
+        // Support both flat missions and nested missionPackages
+        const allMissions = missions || (missionPackages || []).flatMap((pkg: any) => pkg.missions || []);
+        for (const m of (allMissions || [])) {
+          const { taskingOrder: _to, unit: _u, positionUpdates: _pu, spaceNeeds: _sn, targets: _t, waypoints: _w, timeWindows: _tw, supportRequirements: _sr, package: _pkg, ...missionCore } = m;
           await prisma.mission.create({ data: missionCore });
         }
       }
