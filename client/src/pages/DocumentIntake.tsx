@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useOverwatchStore } from '../store/overwatch-store';
+import type { IngestCard, BatchStatus } from '../store/overwatch-store';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -26,28 +27,6 @@ interface EntityMatch {
   color: string;
 }
 
-interface IngestCard {
-  ingestId: string;
-  rawTextPreview: string;
-  rawTextLength: number;
-  stage: 'started' | 'classified' | 'normalized' | 'complete';
-  classification?: {
-    hierarchyLevel: string;
-    documentType: string;
-    sourceFormat: string;
-    confidence: number;
-    title: string;
-    issuingAuthority: string;
-  };
-  normalized?: {
-    previewCounts: Record<string, number>;
-    reviewFlagCount: number;
-  };
-  result?: any;
-  elapsedMs: number;
-  completedAt?: number;
-}
-
 interface ReviewFlag {
   field: string;
   rawValue: string;
@@ -55,23 +34,6 @@ interface ReviewFlag {
   reason: string;
   documentType: string;
   ingestLogId: string;
-}
-
-interface BatchItemStatus {
-  index: number;
-  status: 'queued' | 'processing' | 'done' | 'error';
-  preview: string;
-  error?: string;
-}
-
-interface BatchStatus {
-  batchId: string;
-  total: number;
-  valid: number;
-  completed: number;
-  items: BatchItemStatus[];
-  startedAt: number;
-  finishedAt?: number;
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -155,7 +117,14 @@ function findEntityMatches(rawText: string, doc: DocItem): EntityMatch[] {
 export function DocumentIntake() {
   const { socket, activeScenarioId } = useOverwatchStore();
 
-  // Doc list
+  // Ingest state from global store (persists across navigation)
+  const activeCards = useOverwatchStore(s => s.ingestCards);
+  const batchStatus = useOverwatchStore(s => s.ingestBatchStatus);
+  const batchInProgress = useOverwatchStore(s => s.ingestBatchInProgress);
+  const toasts = useOverwatchStore(s => s.ingestToasts);
+  const setIngestBatchInProgress = useOverwatchStore(s => s.setIngestBatchInProgress);
+
+  // Doc list (page-local — re-fetched on mount)
   const [docs, setDocs] = useState<DocItem[]>([]);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [loadingDocs, setLoadingDocs] = useState(false);
@@ -163,10 +132,6 @@ export function DocumentIntake() {
   // Entity matches for selected doc
   const [entityMatches, setEntityMatches] = useState<EntityMatch[]>([]);
   const [hoveredEntity, setHoveredEntity] = useState<string | null>(null);
-
-  // Live ingest cards
-  const [activeCards, setActiveCards] = useState<IngestCard[]>([]);
-  const [toasts, setToasts] = useState<string[]>([]);
 
   // Import modal
   const [showImport, setShowImport] = useState(false);
@@ -176,8 +141,7 @@ export function DocumentIntake() {
   const [submitting, setSubmitting] = useState(false);
   const [dragOver, setDragOver] = useState(false);
 
-  // Batch progress tracking
-  const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null);
+  // Review flags
   const [reviewFlags, setReviewFlags] = useState<ReviewFlag[]>([]);
   const [showFlags, setShowFlags] = useState(false);
 
@@ -328,146 +292,21 @@ export function DocumentIntake() {
     };
   }, [drawLinks]);
 
-  // ─── WebSocket: Ingest Stage Events ────────────────────────────────────
+  // ─── NOTE: Ingest WebSocket listeners and cleanup timer are now
+  //         handled globally in overwatch-store.ts so they persist
+  //         across navigation. ──────────────────────────────────
 
+  // Mark docs as ingested when ingest:complete fires (derived from store)
   useEffect(() => {
-    if (!socket) return;
-
-    const handleStarted = (data: any) => {
-      setActiveCards(prev => [{
-        ingestId: data.ingestId,
-        rawTextPreview: data.rawTextPreview,
-        rawTextLength: data.rawTextLength,
-        stage: 'started' as const,
-        elapsedMs: 0,
-      }, ...prev].slice(0, 5));
-    };
-
-    const handleClassified = (data: any) => {
-      setActiveCards(prev => prev.map(c =>
-        c.ingestId === data.ingestId
-          ? {
-            ...c, stage: 'classified',
-            classification: {
-              hierarchyLevel: data.hierarchyLevel,
-              documentType: data.documentType,
-              sourceFormat: data.sourceFormat,
-              confidence: data.confidence,
-              title: data.title,
-              issuingAuthority: data.issuingAuthority,
-            },
-            elapsedMs: data.elapsedMs,
-          }
-          : c,
-      ));
-    };
-
-    const handleNormalized = (data: any) => {
-      setActiveCards(prev => prev.map(c =>
-        c.ingestId === data.ingestId
-          ? {
-            ...c, stage: 'normalized',
-            normalized: { previewCounts: data.previewCounts, reviewFlagCount: data.reviewFlagCount },
-            elapsedMs: data.elapsedMs,
-          }
-          : c,
-      ));
-    };
-
-    const handleComplete = (data: any) => {
-      setActiveCards(prev => prev.map(c =>
-        c.ingestId === data.ingestId
-          ? { ...c, stage: 'complete', result: data, elapsedMs: data.parseTimeMs, completedAt: Date.now() }
-          : c,
-      ));
-      const docType = data.documentType || 'Document';
-      const entityCount = (data.extracted?.missionCount || 0) + (data.extracted?.priorityCount || 0);
-      setToasts(prev => [...prev.slice(-4), `${getDocIcon(docType)} ${docType} ingested — ${entityCount} entities (${data.parseTimeMs}ms)`]);
-      // Mark the doc as ingested locally — no re-fetch, no reorder
-      setDocs(prev => prev.map(d =>
-        (data.id && d.id === data.id) || (data.ingestLogId && d.id === data.ingestLogId) || d.title === data.title
-          ? { ...d, ingestedAt: new Date().toISOString() }
-          : d,
-      ));
-    };
-
-    // Batch events
-    const handleBatchStarted = (data: any) => {
-      setBatchStatus({
-        batchId: data.batchId,
-        total: data.total,
-        valid: data.valid,
-        completed: 0,
-        items: (data.items || []).map((it: any) => ({
-          index: it.index,
-          status: it.status as BatchItemStatus['status'],
-          preview: it.preview || '',
-          error: it.error,
-        })),
-        startedAt: Date.now(),
-      });
-    };
-
-    const handleBatchItemStatus = (data: any) => {
-      setBatchStatus(prev => {
-        if (!prev || prev.batchId !== data.batchId) return prev;
-        return {
-          ...prev,
-          completed: data.completed ?? prev.completed,
-          items: prev.items.map(it =>
-            it.index === data.index
-              ? { ...it, status: data.status, error: data.error }
-              : it,
-          ),
-        };
-      });
-    };
-
-    const handleBatchComplete = (data: any) => {
-      setBatchStatus(prev => {
-        if (!prev || prev.batchId !== data.batchId) return prev;
-        return {
-          ...prev,
-          completed: data.succeeded + data.failed,
-          finishedAt: Date.now(),
-          items: prev.items.map(it => {
-            const result = data.results?.find((r: any) => r.index === it.index);
-            return result ? { ...it, status: result.status, error: result.error } : it;
-          }),
-        };
-      });
-      setToasts(prev => [...prev.slice(-4),
-        `Batch complete: ${data.succeeded}/${data.total} succeeded${data.failed > 0 ? `, ${data.failed} failed` : ''}`,
-      ]);
-      // Auto-dismiss batch panel after 10s
-      setTimeout(() => setBatchStatus(null), 10000);
-    };
-
-    socket.on('ingest:started', handleStarted);
-    socket.on('ingest:classified', handleClassified);
-    socket.on('ingest:normalized', handleNormalized);
-    socket.on('ingest:complete', handleComplete);
-    socket.on('batch:started', handleBatchStarted);
-    socket.on('batch:item-status', handleBatchItemStatus);
-    socket.on('batch:complete', handleBatchComplete);
-    return () => {
-      socket.off('ingest:started', handleStarted);
-      socket.off('ingest:classified', handleClassified);
-      socket.off('ingest:normalized', handleNormalized);
-      socket.off('ingest:complete', handleComplete);
-      socket.off('batch:started', handleBatchStarted);
-      socket.off('batch:item-status', handleBatchItemStatus);
-      socket.off('batch:complete', handleBatchComplete);
-    };
-  }, [socket]);
-
-  // Clean completed cards after 30s
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setActiveCards(prev => prev.filter(c => !c.completedAt || Date.now() - c.completedAt < 30000));
-    }, 5000);
-    return () => clearInterval(interval);
-  }, []);
+    const latestComplete = activeCards.find(c => c.stage === 'complete' && c.result);
+    if (!latestComplete) return;
+    const data = latestComplete.result;
+    setDocs(prev => prev.map(d =>
+      (data.id && d.id === data.id) || (data.ingestLogId && d.id === data.ingestLogId) || d.title === data.title
+        ? { ...d, ingestedAt: new Date().toISOString() }
+        : d,
+    ));
+  }, [activeCards]);
 
   // ─── Submit: Ingest a Document ─────────────────────────────────────────
 
@@ -486,11 +325,15 @@ export function DocumentIntake() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Ingest failed' }));
-        setToasts(prev => [...prev.slice(-4), `❌ Ingestion failed: ${err.error || 'Unknown error'}`]);
+        useOverwatchStore.setState(s => ({
+          ingestToasts: [...s.ingestToasts.slice(-4), `❌ Ingestion failed: ${err.error || 'Unknown error'}`],
+        }));
         return;
       }
     } catch {
-      setToasts(prev => [...prev.slice(-4), '❌ Ingestion failed']);
+      useOverwatchStore.setState(s => ({
+        ingestToasts: [...s.ingestToasts.slice(-4), '❌ Ingestion failed'],
+      }));
     } finally {
       setSubmitting(false);
     }
@@ -502,15 +345,13 @@ export function DocumentIntake() {
     }
   };
 
-  // ─── Batch Ingest All Unprocessed Docs ─────────────────────────────────
-
-  const [batchInProgress, setBatchInProgress] = useState(false);
+  // ─── Batch Ingest All Unprocessed Docs ─────────────────────────────
 
   const batchIngestAll = async () => {
     if (!activeScenarioId) return;
     const unprocessed = docs.filter(d => !d.ingestedAt);
     if (unprocessed.length === 0) return;
-    setBatchInProgress(true);
+    setIngestBatchInProgress(true);
     try {
       const res = await fetch(`/api/ingest/${activeScenarioId}/batch`, {
         method: 'POST',
@@ -521,20 +362,19 @@ export function DocumentIntake() {
       });
       const json = await res.json();
       if (!json.success) {
-        setToasts(prev => [...prev.slice(-4), `Batch failed: ${json.error || 'Unknown'}`]);
-        setBatchInProgress(false);
+        useOverwatchStore.setState(s => ({
+          ingestToasts: [...s.ingestToasts.slice(-4), `Batch failed: ${json.error || 'Unknown'}`],
+        }));
+        setIngestBatchInProgress(false);
       }
-      // batchInProgress will be cleared when batch:complete fires
+      // batchInProgress will be cleared when batch:complete fires in the store
     } catch {
-      setToasts(prev => [...prev.slice(-4), 'Batch ingest failed']);
-      setBatchInProgress(false);
+      useOverwatchStore.setState(s => ({
+        ingestToasts: [...s.ingestToasts.slice(-4), 'Batch ingest failed'],
+      }));
+      setIngestBatchInProgress(false);
     }
   };
-
-  // Clear batchInProgress when batch finishes
-  useEffect(() => {
-    if (batchStatus?.finishedAt) setBatchInProgress(false);
-  }, [batchStatus?.finishedAt]);
 
   const handleImportSubmit = async () => {
     if (!activeScenarioId) return;
@@ -553,7 +393,9 @@ export function DocumentIntake() {
           });
           const json = await res.json();
           if (!res.ok) {
-            setToasts(prev => [...prev.slice(-4), `❌ Upload failed: ${json.error || 'Unknown error'}`]);
+        useOverwatchStore.setState(s => ({
+          ingestToasts: [...s.ingestToasts.slice(-4), `❌ Upload failed: ${json.error || 'Unknown error'}`],
+        }));
             return;
           }
           setShowImport(false);
@@ -577,7 +419,9 @@ export function DocumentIntake() {
       setImportText('');
       setImportFile(null);
     } catch {
-      setToasts(prev => [...prev.slice(-4), '❌ Import failed']);
+      useOverwatchStore.setState(s => ({
+        ingestToasts: [...s.ingestToasts.slice(-4), '❌ Import failed'],
+      }));
     } finally {
       setSubmitting(false);
     }

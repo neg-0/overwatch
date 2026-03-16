@@ -40,6 +40,47 @@ export interface ScenarioSummary {
   generationProgress: number;
 }
 
+// ─── Ingest Types (lifted from DocumentIntake for global persistence) ────────
+
+export interface IngestCard {
+  ingestId: string;
+  rawTextPreview: string;
+  rawTextLength: number;
+  stage: 'started' | 'classified' | 'normalized' | 'complete';
+  classification?: {
+    hierarchyLevel: string;
+    documentType: string;
+    sourceFormat: string;
+    confidence: number;
+    title: string;
+    issuingAuthority: string;
+  };
+  normalized?: {
+    previewCounts: Record<string, number>;
+    reviewFlagCount: number;
+  };
+  result?: any;
+  elapsedMs: number;
+  completedAt?: number;
+}
+
+export interface BatchItemStatus {
+  index: number;
+  status: 'queued' | 'processing' | 'done' | 'error';
+  preview: string;
+  error?: string;
+}
+
+export interface BatchStatus {
+  batchId: string;
+  total: number;
+  valid: number;
+  completed: number;
+  items: BatchItemStatus[];
+  startedAt: number;
+  finishedAt?: number;
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface SimulationState {
@@ -188,6 +229,12 @@ interface OverwatchStore {
   // Per-artifact generation results (live from WebSocket)
   artifactResults: ArtifactResult[];
 
+  // Ingest pipeline state (persists across navigation)
+  ingestCards: IngestCard[];
+  ingestBatchStatus: BatchStatus | null;
+  ingestBatchInProgress: boolean;
+  ingestToasts: string[];
+
   // Hierarchy + allocation data
   hierarchyData: Record<string, unknown> | null;
   allocationReport: Record<string, unknown> | null;
@@ -224,6 +271,10 @@ interface OverwatchStore {
 
   // Generation state reset
   resetGenerationProgress: () => void;
+
+  // Ingest actions
+  setIngestBatchInProgress: (val: boolean) => void;
+  clearIngestToast: (index: number) => void;
 }
 
 // Module-level AbortController for setActiveScenario race condition prevention
@@ -254,6 +305,10 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
   pendingDecisions: [],
   generationProgress: null,
   artifactResults: [],
+  ingestCards: [],
+  ingestBatchStatus: null,
+  ingestBatchInProgress: false,
+  ingestToasts: [],
   hierarchyData: null,
   allocationReport: null,
 
@@ -409,12 +464,153 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
       set({ artifactResults: [...get().artifactResults, data] });
     });
 
+    // ─── Ingest Pipeline Events (global so they persist across navigation) ───
+
+    socket.on('ingest:started', (data: any) => {
+      set({
+        ingestCards: [{
+          ingestId: data.ingestId,
+          rawTextPreview: data.rawTextPreview,
+          rawTextLength: data.rawTextLength,
+          stage: 'started' as const,
+          elapsedMs: 0,
+        }, ...get().ingestCards].slice(0, 5),
+      });
+    });
+
+    socket.on('ingest:classified', (data: any) => {
+      set({
+        ingestCards: get().ingestCards.map(c =>
+          c.ingestId === data.ingestId
+            ? {
+              ...c, stage: 'classified' as const,
+              classification: {
+                hierarchyLevel: data.hierarchyLevel,
+                documentType: data.documentType,
+                sourceFormat: data.sourceFormat,
+                confidence: data.confidence,
+                title: data.title,
+                issuingAuthority: data.issuingAuthority,
+              },
+              elapsedMs: data.elapsedMs,
+            }
+            : c,
+        ),
+      });
+    });
+
+    socket.on('ingest:normalized', (data: any) => {
+      set({
+        ingestCards: get().ingestCards.map(c =>
+          c.ingestId === data.ingestId
+            ? {
+              ...c, stage: 'normalized' as const,
+              normalized: { previewCounts: data.previewCounts, reviewFlagCount: data.reviewFlagCount },
+              elapsedMs: data.elapsedMs,
+            }
+            : c,
+        ),
+      });
+    });
+
+    socket.on('ingest:complete', (data: any) => {
+      set({
+        ingestCards: get().ingestCards.map(c =>
+          c.ingestId === data.ingestId
+            ? { ...c, stage: 'complete' as const, result: data, elapsedMs: data.parseTimeMs, completedAt: Date.now() }
+            : c,
+        ),
+      });
+      const docType = data.documentType || 'Document';
+      const DOC_TYPE_ICONS: Record<string, string> = {
+        FRAGORD: '⚡', ATO: '✈️', MTO: '🚢', STO: '🛰️',
+        OPORD: '📋', EXORD: '🎯', SPINS: '📡', ACO: '🗺️',
+        NDS: '🏛️', NMS: '⭐', JSCP: '📊', CONPLAN: '📐',
+        OPLAN: '📑', JIPTL: '🎯', INTEL_REPORT: '🔍',
+        MSEL: '💥', MAAP: '📋',
+      };
+      const icon = DOC_TYPE_ICONS[docType] || '📄';
+      const entityCount = (data.extracted?.missionCount || 0) + (data.extracted?.priorityCount || 0);
+      set({
+        ingestToasts: [...get().ingestToasts.slice(-4), `${icon} ${docType} ingested — ${entityCount} entities (${data.parseTimeMs}ms)`],
+      });
+    });
+
+    socket.on('batch:started', (data: any) => {
+      set({
+        ingestBatchStatus: {
+          batchId: data.batchId,
+          total: data.total,
+          valid: data.valid,
+          completed: 0,
+          items: (data.items || []).map((it: any) => ({
+            index: it.index,
+            status: it.status as BatchItemStatus['status'],
+            preview: it.preview || '',
+            error: it.error,
+          })),
+          startedAt: Date.now(),
+        },
+      });
+    });
+
+    socket.on('batch:item-status', (data: any) => {
+      const prev = get().ingestBatchStatus;
+      if (!prev || prev.batchId !== data.batchId) return;
+      set({
+        ingestBatchStatus: {
+          ...prev,
+          completed: data.completed ?? prev.completed,
+          items: prev.items.map(it =>
+            it.index === data.index
+              ? { ...it, status: data.status, error: data.error }
+              : it,
+          ),
+        },
+      });
+    });
+
+    socket.on('batch:complete', (data: any) => {
+      const prev = get().ingestBatchStatus;
+      if (!prev || prev.batchId !== data.batchId) return;
+      set({
+        ingestBatchStatus: {
+          ...prev,
+          completed: data.succeeded + data.failed,
+          finishedAt: Date.now(),
+          items: prev.items.map(it => {
+            const result = data.results?.find((r: any) => r.index === it.index);
+            return result ? { ...it, status: result.status, error: result.error } : it;
+          }),
+        },
+        ingestBatchInProgress: false,
+        ingestToasts: [...get().ingestToasts.slice(-4),
+          `Batch complete: ${data.succeeded}/${data.total} succeeded${data.failed > 0 ? `, ${data.failed} failed` : ''}`,
+        ],
+      });
+      // Auto-dismiss batch panel after 10s
+      setTimeout(() => set({ ingestBatchStatus: null }), 10000);
+    });
+
+    // Cleanup timer: prune completed ingest cards older than 30s
+    const ingestCleanupTimer = setInterval(() => {
+      set({
+        ingestCards: get().ingestCards.filter(c => !c.completedAt || Date.now() - c.completedAt < 30000),
+      });
+    }, 5000);
+
     set({ socket });
+
+    // Return cleanup reference on the socket for the disconnect handler
+    (socket as any).__ingestCleanupTimer = ingestCleanupTimer;
   },
 
   disconnect: () => {
     const socket = get().socket;
     if (socket) {
+      // Clear the ingest cleanup timer
+      const timer = (socket as any).__ingestCleanupTimer;
+      if (timer) clearInterval(timer);
       socket.disconnect();
       set({ socket: null, connected: false });
     }
@@ -808,6 +1004,15 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
   // ─── Generation State Reset ─────────────────────────────────────────────
   resetGenerationProgress: () => {
     set({ generationProgress: null, artifactResults: [] });
+  },
+
+  // ─── Ingest Actions ─────────────────────────────────────────────────────
+  setIngestBatchInProgress: (val: boolean) => {
+    set({ ingestBatchInProgress: val });
+  },
+
+  clearIngestToast: (index: number) => {
+    set({ ingestToasts: get().ingestToasts.filter((_, i) => i !== index) });
   },
 
   resolveDecision: async (scenarioId: string, decisionEventId: string, action: string) => {
