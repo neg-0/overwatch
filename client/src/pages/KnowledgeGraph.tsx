@@ -2,6 +2,7 @@ import * as d3 from 'd3';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useOverwatchStore } from '../store/overwatch-store';
+import type { IngestCard } from '../store/overwatch-store';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -90,7 +91,13 @@ export function KnowledgeGraph() {
   const [stats, setStats] = useState({ nodes: 0, edges: 0 });
   const [showOrbat, setShowOrbat] = useState(false);
   const [atoDay, setAtoDay] = useState<number | null>(null);
+  const [overlayExpanded, setOverlayExpanded] = useState(true);
+  const [newNodeIds, setNewNodeIds] = useState<Set<string>>(new Set());
   const nodesRef = useRef<GraphNode[]>([]);
+
+  // Ingest state from Zustand (persists across page navigation)
+  const ingestCards = useOverwatchStore(s => s.ingestCards);
+  const activeCards = ingestCards.filter(c => !c.completedAt || Date.now() - c.completedAt < 8000);
 
   // ─── Fetch Graph Data ────────────────────────────────────────────────────
 
@@ -131,6 +138,18 @@ export function KnowledgeGraph() {
       addedNodes: GraphNode[];
       addedEdges: GraphEdge[];
     }) => {
+      // Track newly added node IDs for entrance animation
+      const incomingIds = new Set(data.addedNodes.map(n => n.id));
+      setNewNodeIds(prev => new Set([...prev, ...incomingIds]));
+      // Clear the "new" flag after animation completes
+      setTimeout(() => {
+        setNewNodeIds(prev => {
+          const next = new Set(prev);
+          incomingIds.forEach(id => next.delete(id));
+          return next;
+        });
+      }, 2000);
+
       setNodes(prev => {
         const existing = new Set(prev.map(n => n.id));
         const newNodes = data.addedNodes.filter(n => !existing.has(n.id));
@@ -275,11 +294,35 @@ export function KnowledgeGraph() {
 
     // Node circles
     node.append('circle')
-      .attr('r', NODE_RADIUS)
+      .attr('r', d => newNodeIds.has(d.id) ? 0 : NODE_RADIUS)
       .attr('fill', d => NODE_CONFIG[d.type]?.color || '#666')
       .attr('fill-opacity', 0.2)
       .attr('stroke', d => NODE_CONFIG[d.type]?.color || '#666')
       .attr('stroke-width', 2);
+
+    // Animate new nodes
+    node.filter(d => newNodeIds.has(d.id))
+      .select('circle')
+      .transition()
+      .duration(600)
+      .ease(d3.easeCubicOut)
+      .attr('r', NODE_RADIUS);
+
+    // Pulse ring for new nodes
+    node.filter(d => newNodeIds.has(d.id))
+      .append('circle')
+      .attr('class', 'kg-pulse-ring')
+      .attr('r', NODE_RADIUS)
+      .attr('fill', 'none')
+      .attr('stroke', d => NODE_CONFIG[d.type]?.color || '#60a5fa')
+      .attr('stroke-width', 3)
+      .attr('stroke-opacity', 0.8)
+      .transition()
+      .duration(1200)
+      .ease(d3.easeQuadOut)
+      .attr('r', NODE_RADIUS * 2.5)
+      .attr('stroke-opacity', 0)
+      .remove();
 
     // Node icons
     node.append('text')
@@ -401,7 +444,7 @@ export function KnowledgeGraph() {
     return () => {
       simulation.stop();
     };
-  }, [filteredNodes, filteredEdges]);
+  }, [filteredNodes, filteredEdges, newNodeIds]);
 
   // ─── Empty States ──────────────────────────────────────────────────────
 
@@ -575,6 +618,63 @@ export function KnowledgeGraph() {
           </div>
         </div>
       )}
+
+      {/* ─── Ingest Activity Overlay ────────────────────────────────── */}
+      {activeCards.length > 0 && (
+        <div className="kg-ingest-overlay">
+          <div
+            className="kg-ingest-pill"
+            onClick={() => setOverlayExpanded(!overlayExpanded)}
+          >
+            <span className="kg-ingest-pill__dot" />
+            📥 Processing {activeCards.length} doc{activeCards.length !== 1 ? 's' : ''}
+            <span className={`kg-ingest-pill__chevron ${overlayExpanded ? 'expanded' : ''}`}>▼</span>
+          </div>
+          {overlayExpanded && (
+            <div className="kg-ingest-cards">
+              {activeCards.map(card => (
+                <IngestCardMini key={card.ingestId} card={card} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Ingest Card Mini ─────────────────────────────────────────────────────────
+
+const DOC_TYPE_ICONS: Record<string, string> = {
+  FRAGORD: '⚡', ATO: '✈️', MTO: '🚢', STO: '🛰️',
+  OPORD: '📋', EXORD: '🎯', SPINS: '📡', ACO: '🗺️',
+  NDS: '🏛️', NMS: '⭐', JSCP: '📊', CONPLAN: '📐',
+  OPLAN: '📑', JIPTL: '🎯', INTEL_REPORT: '🔍',
+  MSEL: '💥', MAAP: '📋',
+};
+
+const STAGE_LABELS: Record<string, string> = {
+  started: 'Parsing',
+  classified: 'Classified',
+  normalized: 'Extracting',
+  complete: 'Done',
+};
+
+function IngestCardMini({ card }: { card: IngestCard }) {
+  const docType = card.classification?.documentType || '';
+  const icon = DOC_TYPE_ICONS[docType] || '📄';
+  const title = card.classification?.title || card.rawTextPreview.slice(0, 40) + '…';
+  const stage = card.stage;
+
+  return (
+    <div className="kg-ingest-card">
+      <span className="kg-ingest-card__icon">{icon}</span>
+      <div className="kg-ingest-card__info">
+        <div className="kg-ingest-card__title">{title}</div>
+      </div>
+      <span className={`kg-ingest-card__stage kg-ingest-card__stage--${stage}`}>
+        {STAGE_LABELS[stage] || stage}
+      </span>
     </div>
   );
 }

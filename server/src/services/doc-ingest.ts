@@ -3,6 +3,8 @@ import OpenAI from 'openai';
 import type { Server } from 'socket.io';
 import { config } from '../config.js';
 import prisma from '../db/prisma-client.js';
+import { broadcastGraphUpdate } from '../websocket/ws-server.js';
+import { buildIngestDelta } from '../api/knowledge-graph.js';
 import {
   CLASSIFY_SCHEMA,
   NORMALIZE_MSEL_SCHEMA,
@@ -1152,6 +1154,17 @@ export async function ingestDocument(
     reviewFlags,
     parseTimeMs,
   };
+  // Broadcast real-time knowledge graph delta (non-blocking)
+  if (classification.hierarchyLevel !== 'EVENT_LIST') {
+    buildIngestDelta(scenarioId, createdId, classification.hierarchyLevel)
+      .then(delta => {
+        if (delta.nodes.length > 0) {
+          broadcastGraphUpdate(scenarioId, { addedNodes: delta.nodes, addedEdges: delta.edges });
+          console.log(`[INGEST] Broadcast graph:update — ${delta.nodes.length} nodes, ${delta.edges.length} edges`);
+        }
+      })
+      .catch(err => console.warn('[INGEST] graph:update broadcast failed:', err.message));
+  }
 
   // Emit: complete
   if (io) {
@@ -1166,4 +1179,3 @@ export async function ingestDocument(
 
   return result;
 }
-

@@ -329,7 +329,149 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
   return { nodes, edges };
 }
 
-// ─── Routes ──────────────────────────────────────────────────────────────────
+// ─── Ingest Delta Builder ──────────────────────────────────────────────────────
+// Builds a minimal graph containing only data created by a single ingest.
+// Used for real-time WebSocket broadcasts after each document ingest.
+
+export async function buildIngestDelta(
+  scenarioId: string,
+  createdId: string,
+  hierarchyLevel: string,
+): Promise<KnowledgeGraphData> {
+  const nodes: GraphNode[] = [];
+  const edges: GraphEdge[] = [];
+
+  switch (hierarchyLevel) {
+    case 'STRATEGY': {
+      const doc = await prisma.strategyDocument.findUnique({
+        where: { id: createdId },
+        include: { priorities: true },
+      });
+      if (!doc) break;
+
+      nodes.push({
+        id: doc.id,
+        type: 'DOCUMENT',
+        label: doc.title,
+        sublabel: doc.docType,
+        meta: { tier: doc.tier, authorityLevel: doc.authorityLevel },
+      });
+
+      if (doc.parentDocId) {
+        edges.push({ source: doc.parentDocId, target: doc.id, relationship: 'DERIVES_FROM' });
+      }
+
+      for (const p of doc.priorities) {
+        nodes.push({
+          id: p.id,
+          type: 'PRIORITY',
+          label: p.objective,
+          sublabel: `Rank ${p.rank}`,
+          meta: { effect: p.effect },
+        });
+        edges.push({ source: doc.id, target: p.id, relationship: 'ESTABLISHES_PRIORITY', weight: 11 - p.rank });
+      }
+      break;
+    }
+
+    case 'PLANNING': {
+      const doc = await prisma.planningDocument.findUnique({
+        where: { id: createdId },
+        include: { priorities: { include: { strategyPriority: true } } },
+      });
+      if (!doc) break;
+
+      nodes.push({
+        id: doc.id,
+        type: 'DOCUMENT',
+        label: doc.title,
+        sublabel: doc.docType,
+        meta: { docTier: doc.docTier },
+      });
+
+      if (doc.strategyDocId) {
+        edges.push({ source: doc.strategyDocId, target: doc.id, relationship: 'IMPLEMENTS' });
+      }
+
+      for (const p of doc.priorities) {
+        nodes.push({
+          id: p.id,
+          type: 'PRIORITY',
+          label: p.effect,
+          sublabel: `Rank ${p.rank}`,
+          meta: { targetId: p.targetId },
+        });
+        edges.push({ source: doc.id, target: p.id, relationship: 'ESTABLISHES_PRIORITY', weight: 11 - p.rank });
+
+        if (p.strategyPriorityId) {
+          edges.push({ source: p.strategyPriorityId, target: p.id, relationship: 'DERIVES' });
+        }
+      }
+      break;
+    }
+
+    case 'ORDER': {
+      const order = await prisma.taskingOrder.findUnique({
+        where: { id: createdId },
+        include: {
+          missionPackages: {
+            include: {
+              missions: { include: { targets: true, unit: true } },
+            },
+          },
+        },
+      });
+      if (!order) break;
+
+      nodes.push({
+        id: order.id,
+        type: 'DOCUMENT',
+        label: order.orderId,
+        sublabel: order.orderType,
+        meta: { atoDayNumber: order.atoDayNumber },
+      });
+
+      if (order.planningDocId) {
+        edges.push({ source: order.planningDocId, target: order.id, relationship: 'AUTHORIZES' });
+      }
+
+      for (const pkg of order.missionPackages) {
+        for (const mission of pkg.missions) {
+          nodes.push({
+            id: mission.id,
+            type: 'MISSION',
+            label: mission.callsign || mission.missionId,
+            sublabel: `${mission.missionType} (${mission.platformType})`,
+            meta: { domain: mission.domain, status: mission.status },
+          });
+          edges.push({ source: order.id, target: mission.id, relationship: 'ASSIGNS_MISSION' });
+
+          if (mission.unitId) {
+            edges.push({ source: mission.unitId, target: mission.id, relationship: 'EXECUTES' });
+          }
+
+          for (const tgt of mission.targets) {
+            nodes.push({
+              id: tgt.id,
+              type: 'TARGET',
+              label: tgt.targetName,
+              sublabel: tgt.beNumber || tgt.targetCategory || undefined,
+              meta: { lat: tgt.latitude, lon: tgt.longitude, desiredEffect: tgt.desiredEffect },
+            });
+            edges.push({ source: mission.id, target: tgt.id, relationship: 'TARGETS' });
+          }
+        }
+      }
+      break;
+    }
+
+    // EVENT_LIST (MSEL) — injects don't appear in the KG
+    default:
+      break;
+  }
+
+  return { nodes, edges };
+}
 
 export const knowledgeGraphRoutes = Router();
 
