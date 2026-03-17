@@ -144,7 +144,7 @@ export function DocumentIntake() {
   const [importText, setImportText] = useState('');
   const [importFile, setImportFile] = useState<File | null>(null);
   const [sourceHint, setSourceHint] = useState('auto');
-  const [submitting, setSubmitting] = useState(false);
+  const [submitting, setSubmitting] = useState<Set<string>>(new Set());
   const [dragOver, setDragOver] = useState(false);
 
   // Review flags
@@ -377,18 +377,28 @@ export function DocumentIntake() {
     const latestComplete = activeCards.find(c => c.stage === 'complete' && c.result);
     if (!latestComplete) return;
     const data = latestComplete.result;
-    setDocs(prev => prev.map(d =>
-      (data.id && d.id === data.id) || (data.ingestLogId && d.id === data.ingestLogId) || d.title === data.title
-        ? { ...d, ingestedAt: new Date().toISOString() }
-        : d,
-    ));
+    // Clear submitting state for this doc
+    setSubmitting(prev => {
+      const next = new Set(prev);
+      if (data.title) {
+        // Find the doc by title and remove from submitting
+        const doc = docs.find(d => d.title === data.title);
+        if (doc) next.delete(doc.id);
+      }
+      return next;
+    });
+    // Re-fetch docs from server to get DB-stamped ingestedAt
+    fetchDocs();
+    fetchReviewFlags();
   }, [activeCards]);
 
   // ─── Submit: Ingest a Document ─────────────────────────────────────────
 
-  const ingestDocument = async (rawText: string, hint?: string) => {
+  const ingestDocument = async (rawText: string, hint?: string, docId?: string) => {
     if (!activeScenarioId || !rawText.trim()) return;
-    setSubmitting(true);
+    if (docId) {
+      setSubmitting(prev => new Set(prev).add(docId));
+    }
     try {
       const res = await fetch('/api/ingest', {
         method: 'POST',
@@ -411,13 +421,19 @@ export function DocumentIntake() {
         ingestToasts: [...s.ingestToasts.slice(-4), '❌ Ingestion failed'],
       }));
     } finally {
-      setSubmitting(false);
+      if (docId) {
+        setSubmitting(prev => {
+          const next = new Set(prev);
+          next.delete(docId);
+          return next;
+        });
+      }
     }
   };
 
   const handleIngestSelected = () => {
     if (selectedDoc) {
-      ingestDocument(selectedDoc.content);
+      ingestDocument(selectedDoc.content, undefined, selectedDoc.id);
     }
   };
 
@@ -454,7 +470,6 @@ export function DocumentIntake() {
 
   const handleImportSubmit = async () => {
     if (!activeScenarioId) return;
-    setSubmitting(true);
 
     try {
       // Binary file upload path (PDF, DOCX) — send to server for extraction
@@ -487,7 +502,6 @@ export function DocumentIntake() {
         text = await importFile.text();
       }
       if (!text) {
-        setSubmitting(false);
         return;
       }
       await ingestDocument(text, sourceHint);
@@ -499,7 +513,7 @@ export function DocumentIntake() {
         ingestToasts: [...s.ingestToasts.slice(-4), '❌ Import failed'],
       }));
     } finally {
-      setSubmitting(false);
+      // import modal handles its own close state
     }
   };
 
@@ -872,7 +886,7 @@ export function DocumentIntake() {
               return (
                 <button
                   onClick={batchIngestAll}
-                  disabled={batchInProgress || submitting}
+                  disabled={batchInProgress || submitting.size > 0}
                   style={{
                     width: '100%', padding: '10px', borderRadius: '8px', border: 'none',
                     background: batchInProgress ? 'rgba(0, 212, 255, 0.2)' : 'var(--accent-primary)',
@@ -946,16 +960,16 @@ export function DocumentIntake() {
                 </div>
                 <button
                   onClick={handleIngestSelected}
-                  disabled={submitting || !!selectedDoc.ingestedAt}
+                  disabled={submitting.has(selectedDoc.id) || !!selectedDoc.ingestedAt}
                   style={{
                     padding: '8px 16px', borderRadius: '6px', border: 'none', fontWeight: 700,
                     fontSize: '12px', cursor: selectedDoc.ingestedAt ? 'default' : 'pointer',
-                    background: selectedDoc.ingestedAt ? 'rgba(0, 200, 83, 0.15)' : 'var(--accent-primary)',
-                    color: selectedDoc.ingestedAt ? 'var(--accent-success)' : '#000',
+                    background: selectedDoc.ingestedAt ? 'rgba(0, 200, 83, 0.15)' : submitting.has(selectedDoc.id) ? 'rgba(0, 212, 255, 0.2)' : 'var(--accent-primary)',
+                    color: selectedDoc.ingestedAt ? 'var(--accent-success)' : submitting.has(selectedDoc.id) ? 'var(--accent-primary)' : '#000',
                     transition: 'all 0.2s',
                   }}
                 >
-                  {selectedDoc.ingestedAt ? '✅ Ingested' : submitting ? '⟳ Processing…' : '⚡ Ingest'}
+                  {selectedDoc.ingestedAt ? '✅ Ingested' : submitting.has(selectedDoc.id) ? '⟳ Processing…' : '⚡ Ingest'}
                 </button>
               </div>
 
@@ -1401,7 +1415,7 @@ export function DocumentIntake() {
               </button>
               <button
                 onClick={handleImportSubmit}
-                disabled={submitting || (!importText.trim() && !importFile)}
+                disabled={submitting.size > 0 || (!importText.trim() && !importFile)}
                 style={{
                   padding: '8px 20px', borderRadius: '6px', border: 'none',
                   background: 'var(--accent-primary)', color: '#000',
@@ -1409,7 +1423,7 @@ export function DocumentIntake() {
                   opacity: (!importText.trim() && !importFile) ? 0.5 : 1,
                 }}
               >
-                {submitting ? '⟳ Processing…' : '⚡ INGEST'}
+                {submitting.size > 0 ? '⟳ Processing…' : '⚡ INGEST'}
               </button>
             </div>
           </div>
