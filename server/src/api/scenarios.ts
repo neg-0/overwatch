@@ -39,7 +39,12 @@ scenarioRoutes.get('/', async (_req, res) => {
 // ─── Ready-Made Scenarios ───────────────────────────────────────────────────
 
 function getReadyMadeDirectory() {
-  // Assuming process.cwd() is 'server' and 'scenarios' is parallel to it
+  // Compiled: server/dist/api/scenarios.js → 3 levels up → project root
+  // Source:   server/src/api/scenarios.ts  → 3 levels up → project root
+  const projectRoot = path.resolve(import.meta.dirname, '..', '..', '..');
+  const primary = path.join(projectRoot, 'scenarios');
+  if (fs.existsSync(primary)) return primary;
+  // Fallback: legacy path (cwd=server → ../scenarios)
   return path.resolve(process.cwd(), '../scenarios');
 }
 
