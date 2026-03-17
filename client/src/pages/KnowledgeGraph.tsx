@@ -352,8 +352,12 @@ export function KnowledgeGraph() {
       .attr('font-size', 9)
       .text(d => d.sublabel || '');
 
-    // Click handler
+    // Track drag vs click — drag sets this flag so click handler skips
+    let wasDragged = false;
+
+    // Click handler — only fire on genuine clicks, not at end of a drag
     node.on('click', (_event, d) => {
+      if (wasDragged) { wasDragged = false; return; }
       const original = nodesRef.current.find(n => n.id === d.id) || null;
       setSelectedNode(original);
     });
@@ -399,6 +403,7 @@ export function KnowledgeGraph() {
         d.fy = d.y;
       })
       .on('drag', (event, d) => {
+        wasDragged = true;
         d.fx = event.x;
         d.fy = event.y;
       })
