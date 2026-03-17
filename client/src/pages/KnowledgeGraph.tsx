@@ -654,10 +654,10 @@ const DOC_TYPE_ICONS: Record<string, string> = {
 };
 
 const STAGE_LABELS: Record<string, string> = {
-  started: 'Parsing',
-  classified: 'Classified',
-  normalized: 'Extracting',
-  complete: 'Done',
+  started: 'Parsing…',
+  classified: 'Classifying…',
+  normalized: 'Extracting…',
+  complete: '✓ Done',
 };
 
 function IngestCardMini({ card }: { card: IngestCard }) {
