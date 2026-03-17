@@ -781,12 +781,20 @@ async function persistOrder(
             ? (tw.windowType as typeof validTimeWindowTypes[number])
             : 'TOT';
 
+          // Guard against invalid dates from LLM output
+          const startTime = tw.start ? new Date(tw.start) : null;
+          const endTime = tw.end ? new Date(tw.end) : null;
+          if (!startTime || isNaN(startTime.getTime())) {
+            console.warn(`[INGEST] Skipping time window with invalid startTime: "${tw.start}"`);
+            continue;
+          }
+
           await tx.timeWindow.create({
             data: {
               missionId: mission.id,
               windowType,
-              startTime: new Date(tw.start),
-              endTime: tw.end ? new Date(tw.end) : null,
+              startTime,
+              endTime: endTime && !isNaN(endTime.getTime()) ? endTime : null,
             },
           });
         }
