@@ -92,7 +92,7 @@ export function KnowledgeGraph() {
   const [showOrbat, setShowOrbat] = useState(false);
   const [atoDay, setAtoDay] = useState<number | null>(null);
   const [overlayExpanded, setOverlayExpanded] = useState(true);
-  const [newNodeIds, setNewNodeIds] = useState<Set<string>>(new Set());
+  const newNodeIdsRef = useRef<Set<string>>(new Set());
   const nodesRef = useRef<GraphNode[]>([]);
 
   // Ingest state from Zustand (persists across page navigation)
@@ -140,14 +140,10 @@ export function KnowledgeGraph() {
     }) => {
       // Track newly added node IDs for entrance animation
       const incomingIds = new Set(data.addedNodes.map(n => n.id));
-      setNewNodeIds(prev => new Set([...prev, ...incomingIds]));
+      incomingIds.forEach(id => newNodeIdsRef.current.add(id));
       // Clear the "new" flag after animation completes
       setTimeout(() => {
-        setNewNodeIds(prev => {
-          const next = new Set(prev);
-          incomingIds.forEach(id => next.delete(id));
-          return next;
-        });
+        incomingIds.forEach(id => newNodeIdsRef.current.delete(id));
       }, 2000);
 
       setNodes(prev => {
@@ -296,14 +292,14 @@ export function KnowledgeGraph() {
 
     // Node circles
     node.append('circle')
-      .attr('r', d => newNodeIds.has(d.id) ? 0 : NODE_RADIUS)
+      .attr('r', d => newNodeIdsRef.current.has(d.id) ? 0 : NODE_RADIUS)
       .attr('fill', d => NODE_CONFIG[d.type]?.color || '#666')
       .attr('fill-opacity', 0.2)
       .attr('stroke', d => NODE_CONFIG[d.type]?.color || '#666')
       .attr('stroke-width', 2);
 
     // Animate new nodes
-    node.filter(d => newNodeIds.has(d.id))
+    node.filter(d => newNodeIdsRef.current.has(d.id))
       .select('circle')
       .transition()
       .duration(600)
@@ -311,7 +307,7 @@ export function KnowledgeGraph() {
       .attr('r', NODE_RADIUS);
 
     // Pulse ring for new nodes
-    node.filter(d => newNodeIds.has(d.id))
+    node.filter(d => newNodeIdsRef.current.has(d.id))
       .append('circle')
       .attr('class', 'kg-pulse-ring')
       .attr('r', NODE_RADIUS)
@@ -459,7 +455,7 @@ export function KnowledgeGraph() {
     return () => {
       simulation.stop();
     };
-  }, [filteredNodes, filteredEdges, newNodeIds]);
+  }, [filteredNodes, filteredEdges]);
 
   // ─── Empty States ──────────────────────────────────────────────────────
 
