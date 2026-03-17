@@ -247,13 +247,15 @@ export function KnowledgeGraph() {
         confidence: e.confidence,
       }));
 
-    // Force simulation — tuned for performance
+    // Force simulation — tuned for stability
     const simulation = d3.forceSimulation<SimNode>(simNodes)
       .force('link', d3.forceLink<SimNode, SimLink>(simLinks)
         .id(d => d.id)
         .distance(120))
-      .force('charge', d3.forceManyBody().strength(-300))
-      .force('center', d3.forceCenter(width / 2, height / 2))
+      .force('charge', d3.forceManyBody().strength(-200).distanceMax(400))
+      // Weak gravity pulls everything toward center without resettling on drag
+      .force('x', d3.forceX(width / 2).strength(0.03))
+      .force('y', d3.forceY(height / 2).strength(0.03))
       .force('collision', d3.forceCollide(NODE_RADIUS + 10))
       .alphaDecay(0.05)    // Settle faster (default 0.0228)
       .alphaMin(0.1);      // Stop sooner (default 0.001)
@@ -392,7 +394,7 @@ export function KnowledgeGraph() {
     // Drag behavior
     const drag = d3.drag<SVGGElement, SimNode>()
       .on('start', (event, d) => {
-        if (!event.active) simulation.alphaTarget(0.3).restart();
+        if (!event.active) simulation.alphaTarget(0.05).restart();
         d.fx = d.x;
         d.fy = d.y;
       })
@@ -402,12 +404,20 @@ export function KnowledgeGraph() {
       })
       .on('end', (event, d) => {
         if (!event.active) simulation.alphaTarget(0);
-        d.fx = null;
-        d.fy = null;
+        // Keep node pinned where the user dropped it
+        d.fx = event.x;
+        d.fy = event.y;
       });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     node.call(drag as any);
+
+    // Double-click to unpin a node
+    node.on('dblclick', (_event, d) => {
+      d.fx = null;
+      d.fy = null;
+      simulation.alpha(0.1).restart();
+    });
 
     // Tick
     simulation.on('tick', () => {
