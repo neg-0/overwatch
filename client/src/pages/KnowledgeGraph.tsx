@@ -78,10 +78,12 @@ const ORBAT_TYPES: Set<GraphNodeType> = new Set(['UNIT', 'BASE', 'SPACE_ASSET'])
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function KnowledgeGraph() {
-  const { activeScenarioId, socket } = useOverwatchStore();
+  const activeScenarioId = useOverwatchStore(s => s.activeScenarioId);
+  const socket = useOverwatchStore(s => s.socket);
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
+  const isDraggingRef = useRef(false);
 
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
@@ -355,7 +357,8 @@ export function KnowledgeGraph() {
     node.on('click', (_event, d) => {
       if (wasDragged) { wasDragged = false; return; }
       const original = nodesRef.current.find(n => n.id === d.id) || null;
-      setSelectedNode(original);
+      // Defer state update to avoid disrupting D3 during event handling
+      requestAnimationFrame(() => setSelectedNode(original));
     });
 
     // Hover effects
@@ -391,10 +394,11 @@ export function KnowledgeGraph() {
           .attr('stroke-opacity', (l: SimLink) => l.confidence ?? 0.5);
       });
 
-    // Drag behavior
+    // Drag behavior — canonical D3 pattern
     const drag = d3.drag<SVGGElement, SimNode>()
       .on('start', (event, d) => {
-        if (!event.active) simulation.alphaTarget(0.05).restart();
+        isDraggingRef.current = true;
+        if (!event.active) simulation.alphaTarget(0.3).restart();
         d.fx = d.x;
         d.fy = d.y;
       })
@@ -404,21 +408,14 @@ export function KnowledgeGraph() {
         d.fy = event.y;
       })
       .on('end', (event, d) => {
+        isDraggingRef.current = false;
         if (!event.active) simulation.alphaTarget(0);
-        // Keep node pinned where the user dropped it
-        d.fx = event.x;
-        d.fy = event.y;
+        d.fx = null;
+        d.fy = null;
       });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     node.call(drag as any);
-
-    // Double-click to unpin a node
-    node.on('dblclick', (_event, d) => {
-      d.fx = null;
-      d.fy = null;
-      simulation.alpha(0.1).restart();
-    });
 
     // Tick
     simulation.on('tick', () => {
@@ -453,7 +450,10 @@ export function KnowledgeGraph() {
     }, 1500);
 
     return () => {
-      simulation.stop();
+      // Don't destroy the simulation if we're mid-drag (React re-render)
+      if (!isDraggingRef.current) {
+        simulation.stop();
+      }
     };
   }, [filteredNodes, filteredEdges]);
 
