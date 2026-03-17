@@ -1136,6 +1136,32 @@ export async function ingestDocument(
     },
   });
 
+  // Stamp ingestedAt on the original scenario-generated doc so the client
+  // knows this document has been processed through the ingest pipeline.
+  // The original docs (from scenario generation) have ingestedAt = null.
+  try {
+    const now = new Date();
+    if (classification.hierarchyLevel === 'STRATEGY') {
+      await prisma.strategyDocument.updateMany({
+        where: { scenarioId, content: rawText, ingestedAt: null },
+        data: { ingestedAt: now },
+      });
+    } else if (classification.hierarchyLevel === 'PLANNING' || classification.hierarchyLevel === 'EVENT_LIST') {
+      await prisma.planningDocument.updateMany({
+        where: { scenarioId, content: rawText, ingestedAt: null },
+        data: { ingestedAt: now },
+      });
+    } else if (classification.hierarchyLevel === 'ORDER') {
+      await prisma.taskingOrder.updateMany({
+        where: { scenarioId, rawText, ingestedAt: null },
+        data: { ingestedAt: now },
+      });
+    }
+  } catch (stampErr) {
+    // Non-fatal — don't break the pipeline for this bookkeeping
+    console.warn('[INGEST] Failed to stamp ingestedAt on original doc:', stampErr);
+  }
+
   const result: IngestResult = {
     success: true,
     hierarchyLevel: classification.hierarchyLevel,
