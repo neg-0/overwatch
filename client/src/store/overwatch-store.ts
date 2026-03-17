@@ -467,6 +467,9 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
     // ─── Ingest Pipeline Events (global so they persist across navigation) ───
 
     socket.on('ingest:started', (data: any) => {
+      // Guard against duplicate cards with the same ingestId
+      const existing = get().ingestCards;
+      if (existing.some(c => c.ingestId === data.ingestId)) return;
       set({
         ingestCards: [{
           ingestId: data.ingestId,
@@ -474,7 +477,7 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
           rawTextLength: data.rawTextLength,
           stage: 'started' as const,
           elapsedMs: 0,
-        }, ...get().ingestCards].slice(0, 5),
+        }, ...existing].slice(0, 5),
       });
     });
 
