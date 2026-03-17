@@ -20,12 +20,31 @@ export default function App() {
   const {
     connect, connected, simulation, activeScenarioId,
     startSimulation, pauseSimulation, resumeSimulation, stopSimulation, seekTo, setSpeed,
+    fetchScenarios, setActiveScenario,
   } = useOverwatchStore();
 
   // Connect WebSocket on mount
   useEffect(() => {
     connect();
   }, [connect]);
+
+  // Restore scenario state on mount (survives page refresh)
+  useEffect(() => {
+    fetchScenarios().then(() => {
+      const storedId = localStorage.getItem('ow_activeScenarioId');
+      if (storedId) {
+        // Verify scenario still exists before restoring
+        const { scenarios } = useOverwatchStore.getState();
+        const exists = scenarios.some((s: any) => s.id === storedId);
+        if (exists) {
+          setActiveScenario(storedId);
+        } else {
+          localStorage.removeItem('ow_activeScenarioId');
+        }
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const isActive = simulation.status === 'RUNNING' || simulation.status === 'PAUSED';
 

@@ -285,7 +285,7 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
   socket: null,
   connected: false,
   dbConnected: null,
-  activeScenarioId: null,
+  activeScenarioId: localStorage.getItem('ow_activeScenarioId') || null,
   scenarios: [],
   scenarioTimeRange: null,
   simulation: {
@@ -631,6 +631,7 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
       socket.emit('join:scenario', id);
     }
     set({ activeScenarioId: id });
+    localStorage.setItem('ow_activeScenarioId', id);
 
     // Core hydration (existing)
     get().fetchScenarioTimeRange(id);
@@ -795,6 +796,7 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
         const state = get();
         if (state.activeScenarioId === id) {
           set({ activeScenarioId: null, scenarioTimeRange: null, simEvents: [] });
+          localStorage.removeItem('ow_activeScenarioId');
         }
         get().fetchScenarios();
       }
