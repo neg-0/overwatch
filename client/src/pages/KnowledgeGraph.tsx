@@ -153,7 +153,11 @@ export function KnowledgeGraph() {
         const newNodes = data.addedNodes.filter(n => !existing.has(n.id));
         return [...prev, ...newNodes];
       });
-      setEdges(prev => [...prev, ...data.addedEdges]);
+      setEdges(prev => {
+        const existingKeys = new Set(prev.map(e => `${e.source}::${e.target}::${e.relationship}`));
+        const newEdges = data.addedEdges.filter(e => !existingKeys.has(`${e.source}::${e.target}::${e.relationship}`));
+        return [...prev, ...newEdges];
+      });
       setStats(prev => ({
         nodes: prev.nodes + data.addedNodes.length,
         edges: prev.edges + data.addedEdges.length,

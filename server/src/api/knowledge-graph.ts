@@ -54,12 +54,29 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
 
   // ─── Strategy Documents ────────────────────────────────────────────────────
 
-  const strategies = await prisma.strategyDocument.findMany({
+  const allStrategies = await prisma.strategyDocument.findMany({
     where: { scenarioId },
     include: { priorities: true },
     orderBy: { tier: 'asc' },
-    take: 100,
+    take: 200,
   });
+
+  // Deduplicate: when both a generator-created doc and an ingested copy exist,
+  // prefer the ingested version (has richer structured data + ingestedAt set).
+  const strategyMap = new Map<string, typeof allStrategies[0]>();
+  for (const doc of allStrategies) {
+    const key = `${doc.title}::${doc.docType}`;
+    const existing = strategyMap.get(key);
+    if (!existing) {
+      strategyMap.set(key, doc);
+    } else {
+      // Prefer the one with ingestedAt (pipeline-processed version)
+      if (doc.ingestedAt && !existing.ingestedAt) {
+        strategyMap.set(key, doc);
+      }
+    }
+  }
+  const strategies = Array.from(strategyMap.values());
 
   for (const doc of strategies) {
     addNode({
@@ -90,13 +107,28 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
 
   // ─── Planning Documents ────────────────────────────────────────────────────
 
-  const planningDocs = await prisma.planningDocument.findMany({
+  const allPlanningDocs = await prisma.planningDocument.findMany({
     where: { scenarioId },
     include: {
       priorities: { include: { strategyPriority: true } },
     },
-    take: 100,
+    take: 200,
   });
+
+  // Deduplicate planning docs same as strategy docs
+  const planningMap = new Map<string, typeof allPlanningDocs[0]>();
+  for (const doc of allPlanningDocs) {
+    const key = `${doc.title}::${doc.docType}`;
+    const existing = planningMap.get(key);
+    if (!existing) {
+      planningMap.set(key, doc);
+    } else {
+      if (doc.ingestedAt && !existing.ingestedAt) {
+        planningMap.set(key, doc);
+      }
+    }
+  }
+  const planningDocs = Array.from(planningMap.values());
 
   for (const doc of planningDocs) {
     addNode({
