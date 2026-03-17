@@ -308,8 +308,10 @@ export function createIngestRoutes(io: Server) {
 
       const flags = logs.flatMap(log => {
         const rawFlags = (log.reviewFlagsJson as any[]) || [];
-        return rawFlags.map(flag => ({
+        return rawFlags.map((flag, flagIndex) => ({
           ...flag,
+          status: flag.status || 'pending',
+          flagIndex,
           documentType: log.documentType,
           hierarchyLevel: log.hierarchyLevel,
           documentId: log.createdRecordId,
@@ -321,12 +323,128 @@ export function createIngestRoutes(io: Server) {
       return res.json({
         success: true,
         totalFlags: flags.length,
+        pendingFlags: flags.filter(f => !f.status || f.status === 'pending').length,
         documentsWithFlags: logs.length,
         flags,
         timestamp: new Date().toISOString(),
       });
     } catch (err) {
       console.error('[API] Failed to fetch review flags:', err);
+      return res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
+    }
+  });
+
+  /**
+   * PATCH /api/ingest/review-flags/:ingestLogId
+   * Resolve a single review flag by index.
+   * Body: { flagIndex: number, action: "accepted" | "corrected" | "dismissed", correctedValue?: string }
+   */
+  router.patch('/review-flags/:ingestLogId', async (req, res) => {
+    const { ingestLogId } = req.params;
+    const { flagIndex, action, correctedValue } = req.body;
+
+    const validActions = ['accepted', 'corrected', 'dismissed'];
+    if (typeof flagIndex !== 'number' || !validActions.includes(action)) {
+      return res.status(400).json({
+        success: false,
+        error: 'flagIndex (number) and action (accepted|corrected|dismissed) are required',
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    try {
+      const log = await prisma.ingestLog.findUnique({ where: { id: ingestLogId } });
+      if (!log) {
+        return res.status(404).json({ success: false, error: 'IngestLog not found', timestamp: new Date().toISOString() });
+      }
+
+      const flags = (log.reviewFlagsJson as any[]) || [];
+      if (flagIndex < 0 || flagIndex >= flags.length) {
+        return res.status(400).json({ success: false, error: `flagIndex ${flagIndex} out of range (0-${flags.length - 1})`, timestamp: new Date().toISOString() });
+      }
+
+      // Update the specific flag
+      flags[flagIndex] = {
+        ...flags[flagIndex],
+        status: action,
+        resolvedAt: new Date().toISOString(),
+        correctedValue: action === 'corrected' ? correctedValue : undefined,
+      };
+
+      // Recount pending flags
+      const pendingCount = flags.filter(f => !f.status || f.status === 'pending').length;
+
+      await prisma.ingestLog.update({
+        where: { id: ingestLogId },
+        data: {
+          reviewFlagsJson: flags as any,
+          reviewFlagCount: pendingCount,
+        },
+      });
+
+      return res.json({
+        success: true,
+        flag: flags[flagIndex],
+        remainingPending: pendingCount,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error('[API] Failed to resolve review flag:', err);
+      return res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
+    }
+  });
+
+  /**
+   * PATCH /api/ingest/review-flags/:ingestLogId/bulk
+   * Resolve all pending flags on an IngestLog at once.
+   * Body: { action: "accepted" | "dismissed" }
+   */
+  router.patch('/review-flags/:ingestLogId/bulk', async (req, res) => {
+    const { ingestLogId } = req.params;
+    const { action } = req.body;
+
+    if (!['accepted', 'dismissed'].includes(action)) {
+      return res.status(400).json({
+        success: false,
+        error: 'action must be "accepted" or "dismissed"',
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    try {
+      const log = await prisma.ingestLog.findUnique({ where: { id: ingestLogId } });
+      if (!log) {
+        return res.status(404).json({ success: false, error: 'IngestLog not found', timestamp: new Date().toISOString() });
+      }
+
+      const flags = (log.reviewFlagsJson as any[]) || [];
+      const now = new Date().toISOString();
+      let resolved = 0;
+
+      for (const flag of flags) {
+        if (!flag.status || flag.status === 'pending') {
+          flag.status = action;
+          flag.resolvedAt = now;
+          resolved++;
+        }
+      }
+
+      await prisma.ingestLog.update({
+        where: { id: ingestLogId },
+        data: {
+          reviewFlagsJson: flags as any,
+          reviewFlagCount: 0,
+        },
+      });
+
+      return res.json({
+        success: true,
+        resolved,
+        action,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error('[API] Failed to bulk-resolve review flags:', err);
       return res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
     }
   });

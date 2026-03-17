@@ -32,7 +32,13 @@ interface ReviewFlag {
   rawValue: string;
   confidence: number;
   reason: string;
+  status: 'pending' | 'accepted' | 'corrected' | 'dismissed';
+  flagIndex: number;
+  correctedValue?: string;
+  resolvedAt?: string;
   documentType: string;
+  hierarchyLevel: string;
+  documentId?: string;
   ingestLogId: string;
 }
 
@@ -143,7 +149,16 @@ export function DocumentIntake() {
 
   // Review flags
   const [reviewFlags, setReviewFlags] = useState<ReviewFlag[]>([]);
-  const [showFlags, setShowFlags] = useState(false);
+  const [reviewNavIndex, setReviewNavIndex] = useState(0);
+  const [editingFlagId, setEditingFlagId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+
+  // Pending flags for navigation
+  const pendingFlags = reviewFlags.filter(f => f.status === 'pending');
+  // Flags for the currently selected doc
+  const selectedDocFlags = reviewFlags.filter(
+    f => f.status === 'pending' && f.documentId && docs.some(d => d.id === f.documentId),
+  );
 
   // Refs for link lines
   const centerRef = useRef<HTMLDivElement>(null);
@@ -229,6 +244,35 @@ export function DocumentIntake() {
     fetchReviewFlags();
   }, [fetchReviewFlags]);
 
+  // ─── Resolve a Review Flag ──────────────────────────────────────────────
+
+  const resolveFlag = async (ingestLogId: string, flagIndex: number, action: string, correctedValue?: string) => {
+    try {
+      const res = await fetch(`/api/ingest/review-flags/${ingestLogId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ flagIndex, action, correctedValue }),
+      });
+      if (res.ok) {
+        await fetchReviewFlags();
+      }
+    } catch {
+      // silently fail
+    }
+  };
+
+  const navigateToFlag = (index: number) => {
+    if (pendingFlags.length === 0) return;
+    const clamped = ((index % pendingFlags.length) + pendingFlags.length) % pendingFlags.length;
+    setReviewNavIndex(clamped);
+    const flag = pendingFlags[clamped];
+    // Select the doc that owns this flag
+    if (flag.documentId) {
+      const doc = docs.find(d => d.id === flag.documentId);
+      if (doc) setSelectedDocId(doc.id);
+    }
+  };
+
   // ─── Compute Entity Matches When Doc Selected ───────────────────────────
 
   useEffect(() => {
@@ -237,8 +281,40 @@ export function DocumentIntake() {
       return;
     }
     const matches = findEntityMatches(selectedDoc.content, selectedDoc);
+
+    // Merge review flags as additional entity matches for the selected doc
+    const docFlags = reviewFlags.filter(
+      f => f.documentId && f.documentId === selectedDoc.id,
+    );
+    for (const flag of docFlags) {
+      // Try to find the rawValue in the document text for linking
+      const searchTerm = flag.rawValue;
+      if (searchTerm && searchTerm.length >= 3) {
+        const idx = selectedDoc.content.indexOf(searchTerm);
+        if (idx !== -1) {
+          // Check overlap
+          const overlaps = matches.some(m =>
+            (idx >= m.charStart && idx < m.charEnd) || (idx + searchTerm.length > m.charStart && idx + searchTerm.length <= m.charEnd)
+          );
+          if (!overlaps) {
+            matches.push({
+              id: `flag-${flag.ingestLogId}-${flag.flagIndex}`,
+              label: flag.field,
+              type: 'review-flag',
+              value: searchTerm,
+              charStart: idx,
+              charEnd: idx + searchTerm.length,
+              meta: { confidence: flag.confidence, reason: flag.reason, status: flag.status },
+              color: '#f59e0b',
+            });
+          }
+        }
+      }
+    }
+
+    matches.sort((a, b) => a.charStart - b.charStart);
     setEntityMatches(matches);
-  }, [selectedDoc]);
+  }, [selectedDoc, reviewFlags]);
 
   // ─── Draw Link Lines ────────────────────────────────────────────────────
 
@@ -583,64 +659,6 @@ export function DocumentIntake() {
         </div>
       </div>
 
-      {/* ─── Review Flags Banner ──────────────────────────────────── */}
-      {reviewFlags.length > 0 && (
-        <div style={{
-          margin: '0 0 4px',
-          background: 'rgba(245, 158, 11, 0.06)',
-          borderBottom: '1px solid rgba(245, 158, 11, 0.2)',
-        }}>
-          <button
-            onClick={() => setShowFlags(!showFlags)}
-            style={{
-              width: '100%', padding: '8px 16px',
-              background: 'none', border: 'none', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: '8px',
-              fontSize: '12px', fontWeight: 600, color: 'var(--accent-warning)',
-            }}
-          >
-            <span className="review-flags-badge">{reviewFlags.length}</span>
-            Review Flags — fields requiring manual verification
-            <span style={{ marginLeft: 'auto', fontSize: '10px', opacity: 0.6 }}>
-              {showFlags ? '▲ Hide' : '▼ Show'}
-            </span>
-          </button>
-          {showFlags && (
-            <div style={{ padding: '0 16px 12px', maxHeight: '200px', overflowY: 'auto' }}>
-              {reviewFlags.map((flag, i) => (
-                <div key={i} style={{
-                  display: 'flex', alignItems: 'flex-start', gap: '12px',
-                  padding: '8px 0', borderTop: i > 0 ? '1px solid rgba(245, 158, 11, 0.1)' : undefined,
-                  fontSize: '11px',
-                }}>
-                  <span style={{
-                    fontFamily: 'var(--font-mono)', fontWeight: 700,
-                    color: 'var(--accent-warning)', minWidth: '100px',
-                  }}>
-                    {flag.field}
-                  </span>
-                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', flex: 1 }}>
-                    {flag.rawValue}
-                  </span>
-                  <span style={{
-                    fontSize: '10px', color: 'var(--text-muted)',
-                    maxWidth: '200px', lineHeight: 1.4,
-                  }}>
-                    {flag.reason}
-                  </span>
-                  <span style={{
-                    fontSize: '9px', fontFamily: 'var(--font-mono)',
-                    color: 'var(--text-muted)', opacity: 0.6,
-                  }}>
-                    {flag.documentType}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
       {/* ─── Pipeline Animation (if active) ────────────────────────── */}
       {activeCards.filter(c => c.stage !== 'complete').length > 0 && (
         <div style={{
@@ -792,6 +810,7 @@ export function DocumentIntake() {
                     doc={d}
                     selected={selectedDocId === d.id}
                     onClick={() => setSelectedDocId(d.id)}
+                    hasPendingFlags={pendingFlags.some(f => f.documentId === d.id)}
                   />
                 ))}
               </DocGroup>
@@ -806,6 +825,7 @@ export function DocumentIntake() {
                     doc={d}
                     selected={selectedDocId === d.id}
                     onClick={() => setSelectedDocId(d.id)}
+                    hasPendingFlags={pendingFlags.some(f => f.documentId === d.id)}
                   />
                 ))}
               </DocGroup>
@@ -820,6 +840,7 @@ export function DocumentIntake() {
                     doc={d}
                     selected={selectedDocId === d.id}
                     onClick={() => setSelectedDocId(d.id)}
+                    hasPendingFlags={pendingFlags.some(f => f.documentId === d.id)}
                   />
                 ))}
               </DocGroup>
@@ -968,61 +989,262 @@ export function DocumentIntake() {
 
         {/* ─── Right: Structured Data Schema ─────────────────────── */}
         <div ref={rightRef} style={{
-          width: '280px', minWidth: '280px', overflow: 'auto',
+          width: '300px', minWidth: '300px', overflow: 'auto',
           background: 'var(--bg-primary)',
         }}>
+          {/* Review Navigation Bar */}
+          {pendingFlags.length > 0 && (
+            <div style={{
+              padding: '8px 12px',
+              background: 'rgba(245, 158, 11, 0.08)',
+              borderBottom: '1px solid rgba(245, 158, 11, 0.2)',
+              display: 'flex', alignItems: 'center', gap: '8px',
+              position: 'sticky', top: 0, zIndex: 3,
+            }}>
+              <span style={{ fontSize: '12px' }}>⚠️</span>
+              <span style={{
+                fontSize: '11px', fontWeight: 700, color: 'var(--accent-warning)',
+                flex: 1,
+              }}>
+                {pendingFlags.length} item{pendingFlags.length !== 1 ? 's' : ''} need{pendingFlags.length === 1 ? 's' : ''} review
+              </span>
+              <button
+                onClick={() => navigateToFlag(reviewNavIndex - 1)}
+                style={{
+                  padding: '2px 8px', borderRadius: '4px', border: '1px solid rgba(245, 158, 11, 0.3)',
+                  background: 'transparent', color: 'var(--accent-warning)',
+                  fontSize: '10px', fontWeight: 700, cursor: 'pointer',
+                }}
+              >
+                ◀ Prev
+              </button>
+              <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                {Math.min(reviewNavIndex + 1, pendingFlags.length)}/{pendingFlags.length}
+              </span>
+              <button
+                onClick={() => navigateToFlag(reviewNavIndex + 1)}
+                style={{
+                  padding: '2px 8px', borderRadius: '4px', border: '1px solid rgba(245, 158, 11, 0.3)',
+                  background: 'transparent', color: 'var(--accent-warning)',
+                  fontSize: '10px', fontWeight: 700, cursor: 'pointer',
+                }}
+              >
+                Next ▶
+              </button>
+            </div>
+          )}
+
           <div style={{
             padding: '12px 14px', fontSize: '11px', fontWeight: 700,
             fontFamily: 'var(--font-mono)', color: 'var(--text-muted)',
             borderBottom: '1px solid var(--border-subtle)',
-            position: 'sticky', top: 0, background: 'var(--bg-primary)', zIndex: 2,
+            position: 'sticky', top: pendingFlags.length > 0 ? '38px' : 0,
+            background: 'var(--bg-primary)', zIndex: 2,
           }}>
             STRUCTURED DATA
           </div>
 
           {selectedDoc && entityMatches.length > 0 ? (
             <div style={{ padding: '8px' }}>
-              {entityMatches.map(match => (
-                <div
-                  key={match.id}
-                  ref={el => { if (el) entityCardRefs.current.set(match.id, el); }}
-                  className={`entity-card ${hoveredEntity === match.id ? 'entity-card--active' : ''}`}
-                  style={{
-                    padding: '10px 12px', marginBottom: '6px', borderRadius: '8px',
-                    border: `1px solid ${hoveredEntity === match.id ? match.color : 'var(--border-subtle)'}`,
-                    background: hoveredEntity === match.id ? `${match.color}11` : 'var(--bg-secondary)',
-                    transition: 'all 0.2s', cursor: 'pointer',
-                  }}
-                  onMouseEnter={() => setHoveredEntity(match.id)}
-                  onMouseLeave={() => setHoveredEntity(null)}
-                  onClick={() => scrollToEntity(match.id)}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                    <div style={{
-                      width: '6px', height: '6px', borderRadius: '50%',
-                      background: match.color, flexShrink: 0,
-                    }} />
-                    <span style={{
-                      fontSize: '10px', fontWeight: 700, fontFamily: 'var(--font-mono)',
-                      color: match.color, textTransform: 'uppercase',
-                    }}>
-                      {match.type}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-bright)', lineHeight: 1.4 }}>
-                    {match.label}
-                  </div>
-                  {match.meta && (
-                    <div style={{ marginTop: '4px', fontSize: '10px', color: 'var(--text-muted)' }}>
-                      {Object.entries(match.meta).map(([k, v]) => (
-                        <span key={k} style={{ marginRight: '8px' }}>
-                          {k}: <span style={{ color: 'var(--text-secondary)' }}>{String(v)}</span>
+              {entityMatches.map(match => {
+                const isFlag = match.type === 'review-flag';
+                const flagStatus = match.meta?.status as string | undefined;
+                const isResolved = isFlag && flagStatus && flagStatus !== 'pending';
+                const flagId = match.id; // e.g. flag-{ingestLogId}-{flagIndex}
+                const isEditing = editingFlagId === flagId;
+
+                // Parse ingestLogId and flagIndex from the id
+                let flagIngestLogId = '';
+                let flagFlagIndex = -1;
+                if (isFlag) {
+                  const parts = match.id.split('-');
+                  // id format: flag-{uuid}-{index}
+                  flagFlagIndex = parseInt(parts[parts.length - 1], 10);
+                  flagIngestLogId = parts.slice(1, -1).join('-');
+                }
+
+                return (
+                  <div
+                    key={match.id}
+                    ref={el => { if (el) entityCardRefs.current.set(match.id, el); }}
+                    className={`entity-card ${hoveredEntity === match.id ? 'entity-card--active' : ''}`}
+                    style={{
+                      padding: '10px 12px', marginBottom: '6px', borderRadius: '8px',
+                      border: `1px solid ${isFlag
+                        ? (isResolved ? 'rgba(245, 158, 11, 0.15)' : 'rgba(245, 158, 11, 0.5)')
+                        : (hoveredEntity === match.id ? match.color : 'var(--border-subtle)')
+                      }`,
+                      background: isFlag
+                        ? (isResolved ? 'rgba(245, 158, 11, 0.02)' : 'rgba(245, 158, 11, 0.06)')
+                        : (hoveredEntity === match.id ? `${match.color}11` : 'var(--bg-secondary)'),
+                      transition: 'all 0.2s', cursor: 'pointer',
+                      opacity: isResolved ? 0.5 : 1,
+                    }}
+                    onMouseEnter={() => setHoveredEntity(match.id)}
+                    onMouseLeave={() => setHoveredEntity(null)}
+                    onClick={() => scrollToEntity(match.id)}
+                  >
+                    {/* Card header */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                      <div style={{
+                        width: '6px', height: '6px', borderRadius: '50%',
+                        background: match.color, flexShrink: 0,
+                      }} />
+                      <span style={{
+                        fontSize: '10px', fontWeight: 700, fontFamily: 'var(--font-mono)',
+                        color: match.color, textTransform: 'uppercase', flex: 1,
+                      }}>
+                        {isFlag ? '⚠️ REVIEW FLAG' : match.type}
+                      </span>
+                      {isResolved && (
+                        <span style={{
+                          fontSize: '9px', fontWeight: 600, padding: '1px 6px',
+                          borderRadius: '4px',
+                          background: flagStatus === 'accepted' ? 'rgba(0, 200, 83, 0.15)' : flagStatus === 'corrected' ? 'rgba(96, 165, 250, 0.15)' : 'rgba(255, 255, 255, 0.08)',
+                          color: flagStatus === 'accepted' ? 'var(--accent-success)' : flagStatus === 'corrected' ? '#60a5fa' : 'var(--text-muted)',
+                        }}>
+                          {flagStatus === 'accepted' ? '✓ Accepted' : flagStatus === 'corrected' ? '✏️ Corrected' : '✕ Dismissed'}
                         </span>
-                      ))}
+                      )}
                     </div>
-                  )}
-                </div>
-              ))}
+
+                    {/* Card body */}
+                    <div style={{
+                      fontSize: '12px', fontWeight: 600, lineHeight: 1.4,
+                      color: isResolved ? 'var(--text-muted)' : 'var(--text-bright)',
+                      textDecoration: isResolved ? 'line-through' : 'none',
+                    }}>
+                      {match.label}
+                    </div>
+
+                    {/* Meta / reason */}
+                    {isFlag && match.meta?.reason && (
+                      <div style={{
+                        marginTop: '4px', fontSize: '10px', color: 'var(--accent-warning)',
+                        lineHeight: 1.4, fontStyle: 'italic',
+                      }}>
+                        {match.meta.reason}
+                      </div>
+                    )}
+                    {isFlag && (
+                      <div style={{
+                        marginTop: '4px', fontSize: '10px', fontFamily: 'var(--font-mono)',
+                        color: 'var(--text-muted)',
+                      }}>
+                        value: <span style={{ color: 'var(--text-secondary)' }}>{match.value}</span>
+                        {match.meta?.confidence != null && (
+                          <span style={{ marginLeft: '8px' }}>
+                            conf: <span style={{ color: (match.meta.confidence as number) < 0.5 ? '#f87171' : 'var(--text-secondary)' }}>
+                              {((match.meta.confidence as number) * 100).toFixed(0)}%
+                            </span>
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Non-flag meta */}
+                    {!isFlag && match.meta && (
+                      <div style={{ marginTop: '4px', fontSize: '10px', color: 'var(--text-muted)' }}>
+                        {Object.entries(match.meta).map(([k, v]) => (
+                          <span key={k} style={{ marginRight: '8px' }}>
+                            {k}: <span style={{ color: 'var(--text-secondary)' }}>{String(v)}</span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Flag action buttons */}
+                    {isFlag && !isResolved && (
+                      <div style={{
+                        marginTop: '8px', display: 'flex', gap: '4px', flexWrap: 'wrap',
+                      }}>
+                        {isEditing ? (
+                          <>
+                            <input
+                              type="text"
+                              value={editValue}
+                              onChange={e => setEditValue(e.target.value)}
+                              onClick={e => e.stopPropagation()}
+                              style={{
+                                flex: 1, padding: '4px 8px', borderRadius: '4px',
+                                border: '1px solid rgba(96, 165, 250, 0.4)',
+                                background: 'rgba(96, 165, 250, 0.08)',
+                                color: 'var(--text-bright)', fontSize: '11px',
+                                fontFamily: 'var(--font-mono)', outline: 'none',
+                              }}
+                              autoFocus
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  resolveFlag(flagIngestLogId, flagFlagIndex, 'corrected', editValue);
+                                  setEditingFlagId(null);
+                                } else if (e.key === 'Escape') {
+                                  setEditingFlagId(null);
+                                }
+                              }}
+                            />
+                            <button
+                              onClick={e => { e.stopPropagation(); resolveFlag(flagIngestLogId, flagFlagIndex, 'corrected', editValue); setEditingFlagId(null); }}
+                              style={{
+                                padding: '3px 8px', borderRadius: '4px', border: 'none',
+                                background: 'rgba(96, 165, 250, 0.2)', color: '#60a5fa',
+                                fontSize: '10px', fontWeight: 700, cursor: 'pointer',
+                              }}
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={e => { e.stopPropagation(); setEditingFlagId(null); }}
+                              style={{
+                                padding: '3px 8px', borderRadius: '4px', border: 'none',
+                                background: 'rgba(255, 255, 255, 0.06)', color: 'var(--text-muted)',
+                                fontSize: '10px', fontWeight: 600, cursor: 'pointer',
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              onClick={e => { e.stopPropagation(); resolveFlag(flagIngestLogId, flagFlagIndex, 'accepted'); }}
+                              style={{
+                                padding: '3px 10px', borderRadius: '4px', border: 'none',
+                                background: 'rgba(0, 200, 83, 0.15)', color: 'var(--accent-success)',
+                                fontSize: '10px', fontWeight: 700, cursor: 'pointer',
+                                transition: 'all 0.15s',
+                              }}
+                            >
+                              ✓ Accept
+                            </button>
+                            <button
+                              onClick={e => { e.stopPropagation(); setEditingFlagId(flagId); setEditValue(match.value); }}
+                              style={{
+                                padding: '3px 10px', borderRadius: '4px', border: 'none',
+                                background: 'rgba(96, 165, 250, 0.15)', color: '#60a5fa',
+                                fontSize: '10px', fontWeight: 700, cursor: 'pointer',
+                                transition: 'all 0.15s',
+                              }}
+                            >
+                              ✏️ Edit
+                            </button>
+                            <button
+                              onClick={e => { e.stopPropagation(); resolveFlag(flagIngestLogId, flagFlagIndex, 'dismissed'); }}
+                              style={{
+                                padding: '3px 10px', borderRadius: '4px', border: 'none',
+                                background: 'rgba(255, 255, 255, 0.06)', color: 'var(--text-muted)',
+                                fontSize: '10px', fontWeight: 700, cursor: 'pointer',
+                                transition: 'all 0.15s',
+                              }}
+                            >
+                              ✕ Dismiss
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           ) : selectedDoc ? (
             <div style={{
@@ -1221,7 +1443,7 @@ function DocGroup({ label, children }: { label: string; children: React.ReactNod
   );
 }
 
-function DocListItem({ doc, selected, onClick }: { doc: DocItem; selected: boolean; onClick: () => void }) {
+function DocListItem({ doc, selected, onClick, hasPendingFlags }: { doc: DocItem; selected: boolean; onClick: () => void; hasPendingFlags?: boolean }) {
   return (
     <div
       onClick={onClick}
@@ -1247,6 +1469,13 @@ function DocListItem({ doc, selected, onClick }: { doc: DocItem; selected: boole
           {doc.docType}
         </div>
       </div>
+      {hasPendingFlags && (
+        <span style={{
+          width: '8px', height: '8px', borderRadius: '50%',
+          background: 'var(--accent-warning)', flexShrink: 0,
+          boxShadow: '0 0 6px rgba(245, 158, 11, 0.4)',
+        }} />
+      )}
       {doc.ingestedAt && (
         <span style={{ fontSize: '10px', color: 'var(--accent-success)', flexShrink: 0 }}>✅</span>
       )}
