@@ -9,7 +9,8 @@ import { HierarchyView } from './pages/HierarchyView';
 import { KnowledgeGraph } from './pages/KnowledgeGraph';
 import { MapView } from './pages/MapView';
 import { OrdersView } from './pages/OrdersView';
-import { ScenarioSetup } from './pages/ScenarioSetup';
+import { ScenarioDetail } from './pages/ScenarioDetail';
+import { ScenarioManager } from './pages/ScenarioManager';
 import { SpaceDashboard } from './pages/SpaceDashboard';
 import { useOverwatchStore } from './store/overwatch-store';
 
@@ -186,7 +187,7 @@ export default function App() {
                 <circle cx="12" cy="12" r="3" />
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
               </svg>
-              Scenario
+              Scenarios
             </NavLink>
           </div>
         </nav>
@@ -280,7 +281,8 @@ export default function App() {
           <Route path="/gantt" element={<GanttView />} />
           <Route path="/space" element={<SpaceDashboard />} />
           <Route path="/orders" element={<OrdersView />} />
-          <Route path="/scenario" element={<ScenarioSetup />} />
+          <Route path="/scenario" element={<ScenarioManager />} />
+          <Route path="/scenario/:id" element={<ScenarioDetail />} />
           <Route path="/decisions" element={<DecisionPanel />} />
           <Route path="/intake" element={<DocumentIntake />} />
           <Route path="/hierarchy" element={<HierarchyView />} />

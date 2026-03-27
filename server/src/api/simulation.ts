@@ -86,13 +86,38 @@ export function createSimulationRoutes(io: import('socket.io').Server) {
   });
 
   // Resume simulation
-  router.post('/resume', async (_req, res) => {
+  router.post('/resume', async (req, res) => {
     try {
-      const sim = resumeSimulation(io);
-      if (!sim) {
-        return res.status(404).json({ success: false, error: 'No paused simulation', timestamp: new Date().toISOString() });
+      const { scenarioId: bodyScenarioId } = req.body || {};
+
+      // Try in-memory resume first (sim was paused this server session)
+      const sim = resumeSimulation(io, bodyScenarioId ? String(bodyScenarioId) : undefined);
+      if (sim) {
+        return res.json({ success: true, data: { status: sim.status }, timestamp: new Date().toISOString() });
       }
-      res.json({ success: true, data: { status: sim.status }, timestamp: new Date().toISOString() });
+
+      // Fallback: check DB for a PAUSED simulation (cross-device / post-restart resume)
+      if (bodyScenarioId) {
+        const dbSim = await prisma.simulationState.findFirst({
+          where: { scenarioId: String(bodyScenarioId), status: 'PAUSED' },
+        });
+        if (dbSim) {
+          const resumed = await startSimulation(String(bodyScenarioId), io);
+          return res.json({
+            success: true,
+            data: {
+              scenarioId: resumed.scenarioId,
+              status: resumed.status,
+              simTime: resumed.simTime.toISOString(),
+              compressionRatio: resumed.compressionRatio,
+              currentAtoDay: resumed.currentAtoDay,
+            },
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+
+      return res.status(404).json({ success: false, error: 'No paused simulation', timestamp: new Date().toISOString() });
     } catch (error) {
       console.error(error);
       res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });

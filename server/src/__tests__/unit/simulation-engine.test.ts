@@ -46,6 +46,7 @@ const { mockPrisma, mockIo } = vi.hoisted(() => ({
       update: vi.fn(),
     },
     taskingOrder: {
+      findMany: vi.fn().mockResolvedValue([]),
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
   },
@@ -555,15 +556,23 @@ describe('Simulation Engine', () => {
         id: 'existing-sim',
         scenarioId: 'scen-001',
         status: 'PAUSED',
+        simTime: new Date('2026-03-05T12:00:00Z'),
+        currentAtoDay: 5,
+        compressionRatio: 720,
       });
       mockPrisma.simulationState.update.mockResolvedValue({
         id: 'existing-sim',
         scenarioId: 'scen-001',
         status: 'RUNNING',
+        simTime: new Date('2026-03-05T12:00:00Z'),
+        currentAtoDay: 5,
+        compressionRatio: 720,
       });
 
       const state = await startSimulation('scen-001', mockIo as any);
       expect(state.simId).toBe('existing-sim');
+      expect(state.simTime).toEqual(new Date('2026-03-05T12:00:00Z'));
+      expect(state.currentAtoDay).toBe(5);
       expect(mockPrisma.simulationState.update).toHaveBeenCalled();
     });
   });

@@ -36,6 +36,63 @@ scenarioRoutes.get('/', async (_req, res) => {
   }
 });
 
+// Get the most recently active scenario (for cross-device auto-detection)
+scenarioRoutes.get('/active', async (_req, res) => {
+  try {
+    // Priority 1: scenario with an active simulation (RUNNING or PAUSED)
+    const activeSim = await prisma.simulationState.findFirst({
+      where: { status: { in: ['RUNNING', 'PAUSED'] } },
+      orderBy: { updatedAt: 'desc' },
+      select: {
+        scenarioId: true,
+        status: true,
+        simTime: true,
+        currentAtoDay: true,
+        compressionRatio: true,
+      },
+    });
+
+    if (activeSim) {
+      return res.json({
+        success: true,
+        data: {
+          scenarioId: activeSim.scenarioId,
+          simulationStatus: activeSim.status,
+          simTime: activeSim.simTime?.toISOString() ?? null,
+          currentAtoDay: activeSim.currentAtoDay,
+          compressionRatio: activeSim.compressionRatio,
+        },
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // Priority 2: most recently updated scenario
+    const recentScenario = await prisma.scenario.findFirst({
+      orderBy: { updatedAt: 'desc' },
+      select: { id: true },
+    });
+
+    if (recentScenario) {
+      return res.json({
+        success: true,
+        data: {
+          scenarioId: recentScenario.id,
+          simulationStatus: null,
+          simTime: null,
+          currentAtoDay: null,
+          compressionRatio: null,
+        },
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    res.json({ success: true, data: null, timestamp: new Date().toISOString() });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
+  }
+});
+
 // ─── Ready-Made Scenarios ───────────────────────────────────────────────────
 
 function getReadyMadeDirectory() {
@@ -1011,11 +1068,253 @@ scenarioRoutes.post('/import', upload.single('file'), async (req, res) => {
   }
 });
 
-// Delete a scenario (cascade deletes all relations)
+// ─── Scenario CRUD ──────────────────────────────────────────────────────────
+
+// Create a scenario record without generating (for the "Save" flow)
+scenarioRoutes.post('/', async (req, res) => {
+  try {
+    const { name, theater, adversary, description, duration, compressionRatio } = req.body;
+    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+      return res.status(400).json({ success: false, error: 'name is required', timestamp: new Date().toISOString() });
+    }
+    const safeDuration = Math.max(1, Math.min(Number(duration) || 14, 90));
+    const safeCompression = Math.max(1, Math.min(Number(compressionRatio) || 720, 10000));
+
+    const scenario = await prisma.scenario.create({
+      data: {
+        name: name.trim(),
+        description: description || '',
+        theater: theater || 'INDOPACOM — Western Pacific',
+        adversary: adversary || 'Near-peer state adversary (Pacific)',
+        startDate: new Date('2026-03-01T00:00:00Z'),
+        endDate: new Date(Date.now() + safeDuration * 24 * 3600000),
+        classification: 'UNCLASSIFIED',
+        compressionRatio: safeCompression,
+        generationStatus: 'NOT_STARTED' as any,
+      },
+    });
+    res.status(201).json({ success: true, data: scenario, timestamp: new Date().toISOString() });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
+  }
+});
+
+// Update scenario metadata (rename, description, theater, adversary)
+scenarioRoutes.patch('/:id', async (req, res) => {
+  try {
+    const { name, description, theater, adversary } = req.body;
+    const data: Record<string, string> = {};
+    if (name !== undefined) data.name = String(name).trim();
+    if (description !== undefined) data.description = String(description);
+    if (theater !== undefined) data.theater = String(theater);
+    if (adversary !== undefined) data.adversary = String(adversary);
+
+    if (Object.keys(data).length === 0) {
+      return res.status(400).json({ success: false, error: 'No fields to update', timestamp: new Date().toISOString() });
+    }
+
+    const scenario = await prisma.scenario.update({
+      where: { id: req.params.id },
+      data,
+    });
+    res.json({ success: true, data: scenario, timestamp: new Date().toISOString() });
+  } catch (error: any) {
+    if (error.code === 'P2025') {
+      return res.status(404).json({ success: false, error: 'Scenario not found', timestamp: new Date().toISOString() });
+    }
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
+  }
+});
+
+// Delete a scenario (cascade deletes all relations via Prisma onDelete: Cascade)
 scenarioRoutes.delete('/:id', async (req, res) => {
   try {
+    // Also clean up SimulationState and standalone tables that aren't cascaded
+    await prisma.simulationState.deleteMany({ where: { scenarioId: req.params.id } });
+    await prisma.leadershipDecision.deleteMany({ where: { scenarioId: req.params.id } });
+    await prisma.ingestLog.deleteMany({ where: { scenarioId: req.params.id } });
+    await prisma.generationLog.deleteMany({ where: { scenarioId: req.params.id } });
     await prisma.scenario.delete({ where: { id: req.params.id } });
     res.json({ success: true, timestamp: new Date().toISOString() });
+  } catch (error: any) {
+    if (error.code === 'P2025') {
+      return res.status(404).json({ success: false, error: 'Scenario not found', timestamp: new Date().toISOString() });
+    }
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
+  }
+});
+
+// Duplicate a scenario (deep copy all artifacts with new IDs)
+scenarioRoutes.post('/:id/duplicate', async (req, res) => {
+  try {
+    const source = await prisma.scenario.findUnique({
+      where: { id: req.params.id },
+      include: {
+        strategies: { include: { priorities: true } },
+        planningDocs: { include: { priorities: true } },
+        units: { include: { assets: true } },
+        spaceAssets: true,
+        scenarioInjects: true,
+        taskingOrders: {
+          include: {
+            missionPackages: {
+              include: { missions: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!source) {
+      return res.status(404).json({ success: false, error: 'Scenario not found', timestamp: new Date().toISOString() });
+    }
+
+    const { name: customName } = req.body || {};
+    const newName = customName || `${source.name} (Copy)`;
+
+    // Create the new scenario
+    const newScenario = await prisma.scenario.create({
+      data: {
+        name: newName,
+        description: source.description,
+        theater: source.theater,
+        adversary: source.adversary,
+        startDate: source.startDate,
+        endDate: source.endDate,
+        classification: source.classification,
+        compressionRatio: source.compressionRatio,
+        generationStatus: source.generationStatus,
+        generationProgress: source.generationProgress,
+      },
+    });
+
+    // Clone strategies
+    for (const s of source.strategies) {
+      await prisma.strategyDocument.create({
+        data: {
+          scenarioId: newScenario.id,
+          title: s.title,
+          docType: s.docType,
+          tier: s.tier,
+          authorityLevel: s.authorityLevel,
+          content: s.content,
+          effectiveDate: s.effectiveDate,
+          priorities: {
+            create: s.priorities.map(p => ({
+              rank: p.rank,
+              objective: p.objective,
+              description: p.description,
+              effect: p.effect,
+              confidence: p.confidence,
+            })),
+          },
+        },
+      });
+    }
+
+    // Clone planning docs
+    for (const pd of source.planningDocs) {
+      await prisma.planningDocument.create({
+        data: {
+          scenarioId: newScenario.id,
+          title: pd.title,
+          docType: pd.docType,
+          content: pd.content,
+          effectiveDate: pd.effectiveDate,
+          strategyDocId: null,
+          priorities: {
+            create: pd.priorities.map(p => ({
+              rank: p.rank,
+              effect: p.effect,
+              description: p.description,
+              justification: p.justification,
+              targetId: p.targetId,
+            })),
+          },
+        },
+      });
+    }
+
+    // Clone units + assets
+    for (const u of source.units) {
+      const newUnit = await prisma.unit.create({
+        data: {
+          scenarioId: newScenario.id,
+          unitName: u.unitName,
+          unitDesignation: u.unitDesignation,
+          serviceBranch: u.serviceBranch,
+          domain: u.domain,
+          baseLocation: u.baseLocation,
+          baseLat: u.baseLat,
+          baseLon: u.baseLon,
+          affiliation: u.affiliation,
+          baseId: u.baseId,
+        },
+      });
+      for (const a of u.assets) {
+        await prisma.asset.create({
+          data: {
+            unitId: newUnit.id,
+            assetTypeId: a.assetTypeId,
+            tailNumber: a.tailNumber,
+            name: a.name,
+            status: a.status,
+          },
+        }).catch(() => { /* skip on FK issues */ });
+      }
+    }
+
+    // Clone space assets
+    for (const sa of source.spaceAssets) {
+      await prisma.spaceAsset.create({
+        data: {
+          scenarioId: newScenario.id,
+          name: sa.name,
+          constellation: sa.constellation,
+          affiliation: sa.affiliation,
+          noradId: sa.noradId,
+          tleLine1: sa.tleLine1,
+          tleLine2: sa.tleLine2,
+          capabilities: sa.capabilities,
+          status: sa.status,
+          operator: sa.operator,
+          coverageRegion: sa.coverageRegion,
+          bandwidthProvided: sa.bandwidthProvided,
+          inclination: sa.inclination,
+          eccentricity: sa.eccentricity,
+          periodMin: sa.periodMin,
+          apogeeKm: sa.apogeeKm,
+          perigeeKm: sa.perigeeKm,
+        },
+      });
+    }
+
+    // Clone injects
+    for (const inj of source.scenarioInjects) {
+      await prisma.scenarioInject.create({
+        data: {
+          scenarioId: newScenario.id,
+          title: inj.title,
+          description: inj.description,
+          injectType: inj.injectType,
+          triggerDay: inj.triggerDay,
+          triggerHour: inj.triggerHour,
+          impact: inj.impact,
+          serialNumber: inj.serialNumber,
+          mselLevel: inj.mselLevel,
+          injectMode: inj.injectMode,
+          fromEntity: inj.fromEntity,
+          toEntity: inj.toEntity,
+          expectedResponse: inj.expectedResponse,
+          objectiveTested: inj.objectiveTested,
+        },
+      });
+    }
+
+    res.status(201).json({ success: true, data: newScenario, timestamp: new Date().toISOString() });
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });

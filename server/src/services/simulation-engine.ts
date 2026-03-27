@@ -61,34 +61,69 @@ export async function startSimulation(
 
   const ratio = compressionRatio || config.sim.defaultCompression;
 
-  // Create or update db record
+  // Check for a resumable paused simulation in the DB
   const existing = await prisma.simulationState.findFirst({
     where: { scenarioId },
   });
 
+  const isPausedResume = existing?.status === 'PAUSED';
+  const resumeSimTime = isPausedResume ? new Date(existing.simTime) : new Date(scenario.startDate);
+  const resumeAtoDay = isPausedResume ? existing.currentAtoDay : 1;
+  const resumeRatio = isPausedResume && !compressionRatio ? existing.compressionRatio : ratio;
+
   const simData = {
     scenarioId,
     status: 'RUNNING',
-    simTime: scenario.startDate,
+    simTime: resumeSimTime,
     realStartTime: new Date(),
-    compressionRatio: ratio,
-    currentAtoDay: 1,
+    compressionRatio: resumeRatio,
+    currentAtoDay: resumeAtoDay,
   };
 
   const simRecord = existing
     ? await prisma.simulationState.update({ where: { id: existing.id }, data: simData })
     : await prisma.simulationState.create({ data: simData });
 
+  // Recalculate lastAtoDayGenerated and lastBDADay from existing DB records
+  // so the tick loop doesn't re-generate orders for days that already exist
+  let lastAtoDayGenerated = 0;
+  let lastBDADay = 0;
+
+  if (isPausedResume) {
+    const existingOrders = await prisma.taskingOrder.findMany({
+      where: { scenarioId },
+      select: { atoDayNumber: true },
+    });
+    lastAtoDayGenerated = existingOrders.reduce(
+      (max, o) => Math.max(max, o.atoDayNumber ?? 0), 0,
+    );
+
+    const existingBDA = await prisma.simEvent.findMany({
+      where: { scenarioId, eventType: 'BDA_RECORDED' },
+      select: { simTime: true },
+    });
+    if (existingBDA.length > 0 && scenario) {
+      lastBDADay = existingBDA.reduce((max, e) => {
+        const day = Math.floor(
+          (e.simTime.getTime() - scenario.startDate.getTime()) / (24 * 3600000),
+        ) + 1;
+        return Math.max(max, day);
+      }, 0);
+    }
+
+    console.log(`[SIM] Resuming from DB: simTime=${resumeSimTime.toISOString()}, ATO Day ${resumeAtoDay}, lastGenDay=${lastAtoDayGenerated}, lastBDADay=${lastBDADay}`);
+  }
+
   const sim: SimState = {
     scenarioId,
     simId: simRecord.id,
     status: 'RUNNING',
-    simTime: new Date(scenario.startDate),
+    simTime: resumeSimTime,
     realStartTime: new Date(),
-    compressionRatio: ratio,
-    currentAtoDay: 1,
-    lastAtoDayGenerated: 0,
-    lastBDADay: 0,
+    compressionRatio: resumeRatio,
+    currentAtoDay: resumeAtoDay,
+    lastAtoDayGenerated,
+    lastBDADay,
     isGenerating: false,
     tickInterval: null,
     positionInterval: null,
@@ -98,7 +133,7 @@ export async function startSimulation(
   };
   activeSims.set(scenarioId, sim);
 
-  console.log(`[SIM] Starting simulation for scenario ${scenarioId} at ${ratio}× compression`);
+  console.log(`[SIM] ${isPausedResume ? 'Resuming' : 'Starting'} simulation for scenario ${scenarioId} at ${resumeRatio}× compression`);
 
   // Refresh TLEs from UDL before starting position updates
   try {
@@ -107,30 +142,38 @@ export async function startSimulation(
     console.error('[SIM] UDL TLE refresh failed (continuing with existing TLEs):', err);
   }
 
-  // Pre-set lastAtoDayGenerated to prevent the tick loop from
-  // also triggering Day 1 order generation (race condition)
-  sim.lastAtoDayGenerated = 1;
-
   // Start the tick loop
   startTickLoop(scenarioId, io);
   startPositionLoop(scenarioId, io);
 
-  // Generate Day 1 orders (non-blocking to avoid holding up the response)
-  generateDayOrders(scenarioId, 1).then(() => {
-    if (activeSims.has(scenarioId)) {
-      io.to(`scenario:${scenarioId}`).emit('order:published', {
-        event: 'order:published',
-        orderId: 'Day 1',
-        orderType: 'ATO',
-        day: 1,
-      });
-    }
-  }).catch(err => {
-    console.error('[SIM] Failed to generate Day 1 orders:', err);
-    // Reset so tick loop can retry
-    const s = activeSims.get(scenarioId);
-    if (s) s.lastAtoDayGenerated = 0;
-  });
+  // Only generate Day 1 orders on a fresh start — paused resumes already have orders
+  if (!isPausedResume) {
+    // Pre-set lastAtoDayGenerated to prevent the tick loop from
+    // also triggering Day 1 order generation (race condition)
+    sim.lastAtoDayGenerated = 1;
+
+    // Generate Day 1 orders (non-blocking to avoid holding up the response)
+    generateDayOrders(scenarioId, 1).then(() => {
+      if (activeSims.has(scenarioId)) {
+        io.to(`scenario:${scenarioId}`).emit('order:published', {
+          event: 'order:published',
+          orderId: 'Day 1',
+          orderType: 'ATO',
+          day: 1,
+        });
+      }
+    }).catch(err => {
+      console.error('[SIM] Failed to generate Day 1 orders:', err);
+      // Reset so tick loop can retry
+      const s = activeSims.get(scenarioId);
+      if (s) s.lastAtoDayGenerated = 0;
+    });
+  } else {
+    // Apply events for the current sim time to restore asset states
+    applyEventsForTime(scenarioId, resumeSimTime).catch(err => {
+      console.error('[SIM] Failed to apply events on resume:', err);
+    });
+  }
 
   return sim;
 }

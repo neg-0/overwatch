@@ -250,6 +250,9 @@ interface OverwatchStore {
   stopSimulation: () => Promise<void>;
   generateScenario: (config: GenerateScenarioConfig) => Promise<ApiResponse<ScenarioSummary>>;
   deleteScenario: (id: string) => Promise<void>;
+  renameScenario: (id: string, data: { name?: string; description?: string; theater?: string; adversary?: string }) => Promise<boolean>;
+  duplicateScenario: (id: string) => Promise<string | null>;
+  createScenario: (config: { name: string; theater?: string; adversary?: string; description?: string; duration?: number }) => Promise<string | null>;
   fetchScenarioDetail: (id: string) => Promise<Record<string, unknown> | null>;
   resumeScenarioGeneration: (id: string, modelOverrides?: ModelOverrides) => Promise<ApiResponse>;
 
@@ -726,6 +729,21 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
       const data = await res.json();
       if (data.success) {
         set({ scenarios: data.data });
+
+        // Auto-detect active scenario on fresh browser (no localStorage)
+        const currentActive = get().activeScenarioId;
+        if (!currentActive && data.data.length > 0) {
+          try {
+            const activeRes = await fetch('/api/scenarios/active');
+            const activeData = await activeRes.json();
+            if (activeData.success && activeData.data?.scenarioId) {
+              console.log(`[STORE] Auto-detected active scenario: ${activeData.data.scenarioId} (sim: ${activeData.data.simulationStatus || 'none'})`);
+              get().setActiveScenario(activeData.data.scenarioId);
+            }
+          } catch (err) {
+            console.warn('[STORE] Failed to auto-detect active scenario:', err);
+          }
+        }
       }
     } catch (err) {
       console.error('[STORE] Failed to fetch scenarios:', err);
@@ -805,6 +823,59 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
       }
     } catch (err) {
       console.error('[STORE] Failed to delete scenario:', err);
+    }
+  },
+
+  renameScenario: async (id, data) => {
+    try {
+      const res = await fetch(`/api/scenarios/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const result = await res.json();
+      if (result.success) {
+        get().fetchScenarios();
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('[STORE] Failed to rename scenario:', err);
+      return false;
+    }
+  },
+
+  duplicateScenario: async (id) => {
+    try {
+      const res = await fetch(`/api/scenarios/${id}/duplicate`, { method: 'POST' });
+      const result = await res.json();
+      if (result.success && result.data?.id) {
+        get().fetchScenarios();
+        return result.data.id;
+      }
+      return null;
+    } catch (err) {
+      console.error('[STORE] Failed to duplicate scenario:', err);
+      return null;
+    }
+  },
+
+  createScenario: async (config) => {
+    try {
+      const res = await fetch('/api/scenarios', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+      const result = await res.json();
+      if (result.success && result.data?.id) {
+        get().fetchScenarios();
+        return result.data.id;
+      }
+      return null;
+    } catch (err) {
+      console.error('[STORE] Failed to create scenario:', err);
+      return null;
     }
   },
 

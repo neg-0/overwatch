@@ -108,8 +108,22 @@ if (config.nodeEnv !== 'development') {
 
 // Ping Database before announcing readiness
 prisma.$queryRaw`SELECT 1`
-  .then(() => {
+  .then(async () => {
     global.dbConnected = true;
+
+    // ── Startup Recovery: transition stale RUNNING sims to PAUSED ──
+    try {
+      const staleCount = await prisma.simulationState.updateMany({
+        where: { status: 'RUNNING' },
+        data: { status: 'PAUSED' },
+      });
+      if (staleCount.count > 0) {
+        console.log(`[STARTUP] Recovered ${staleCount.count} stale RUNNING simulation(s) → PAUSED`);
+      }
+    } catch (err) {
+      console.warn('[STARTUP] Failed to recover stale simulations:', err);
+    }
+
     startHttpServer();
   })
   .catch((err) => {
