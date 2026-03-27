@@ -60,6 +60,29 @@ const NODE_CONFIG: Record<GraphNodeType, { color: string; icon: string }> = {
 
 const NODE_RADIUS = 24;
 
+// Type-aware charge strengths — heavier repulsion for documents, lighter for derived nodes
+const NODE_CHARGE: Record<string, number> = {
+  DOCUMENT:    -600,
+  PRIORITY:    -150,
+  UNIT:        -120,
+  BASE:        -100,
+  TARGET:      -100,
+  SPACE_ASSET: -120,
+  MISSION:     -100,
+};
+
+// Link distance by relationship — hierarchy levels push apart, operational links stay tight
+const LINK_DISTANCE: Record<string, number> = {
+  DERIVES_FROM:          200,
+  IMPLEMENTS:            180,
+  ESTABLISHES_PRIORITY:  120,
+  ALLOCATES:              90,
+  TARGETS:                80,
+  SUPPORTS:               80,
+  CONFLICTS_WITH:        140,
+};
+const DEFAULT_LINK_DISTANCE = 120;
+
 // Semantic edge type colors
 const EDGE_COLORS: Record<string, string> = {
   DERIVES_FROM: '#60a5fa',
@@ -192,19 +215,27 @@ export function KnowledgeGraph() {
     [nodes]
   );
 
-  // ─── D3 Force Simulation ──────────────────────────────────────────────
+  // ─── D3 Force Simulation (Incremental) ─────────────────────────────────
 
+  // Refs to persist D3 state across React renders
+  const gRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
+  const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  const simNodesRef = useRef<SimNode[]>([]);
+  const simLinksRef = useRef<SimLink[]>([]);
+  const initialFitDoneRef = useRef(false);
+
+  // ── One-time SVG scaffold (defs, zoom, groups) ──────────────────────
   useEffect(() => {
-    if (!svgRef.current || !containerRef.current || filteredNodes.length === 0) return;
-
+    if (!svgRef.current || !containerRef.current) return;
     const svg = d3.select(svgRef.current);
     const container = containerRef.current;
     const width = container.clientWidth;
     const height = container.clientHeight;
-
     svg.attr('width', width).attr('height', height);
 
-    // Clear previous render
+    // Only scaffold once
+    if (gRef.current) return;
+
     svg.selectAll('*').remove();
 
     // Defs for arrow markers
@@ -221,26 +252,62 @@ export function KnowledgeGraph() {
       .attr('d', 'M0,-5L10,0L0,5')
       .attr('fill', 'rgba(255,255,255,0.25)');
 
-    // Create container for zoom
     const g = svg.append('g');
+    g.append('g').attr('class', 'graph-links');
+    g.append('g').attr('class', 'graph-link-labels');
+    g.append('g').attr('class', 'graph-nodes');
+    gRef.current = g;
 
     // Zoom behavior
     const zoom = d3.zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.1, 4])
-      .on('zoom', (event) => {
-        g.attr('transform', event.transform);
-      });
-
+      .on('zoom', (event) => { g.attr('transform', event.transform); });
     svg.call(zoom);
+    zoomRef.current = zoom;
 
-    // Clone data for D3 (it mutates)
-    const simNodes: SimNode[] = filteredNodes.map(n => ({ ...n }));
-    const simLinks: SimLink[] = filteredEdges
-      .filter(e => {
-        const hasSource = simNodes.some(n => n.id === e.source);
-        const hasTarget = simNodes.some(n => n.id === e.target);
-        return hasSource && hasTarget;
-      })
+    return () => {
+      simulationRef.current?.stop();
+      simulationRef.current = null;
+      gRef.current = null;
+      zoomRef.current = null;
+      simNodesRef.current = [];
+      simLinksRef.current = [];
+      initialFitDoneRef.current = false;
+    };
+  }, []); // runs once on mount
+
+  // ── Incremental data merge + simulation update ──────────────────────
+  useEffect(() => {
+    if (!svgRef.current || !containerRef.current || !gRef.current || filteredNodes.length === 0) return;
+
+    const svg = d3.select(svgRef.current);
+    const g = gRef.current;
+    const container = containerRef.current;
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+
+    // ── Merge nodes: preserve positions from previous simulation ──
+    const existingById = new Map(simNodesRef.current.map(n => [n.id, n]));
+    const mergedNodes: SimNode[] = filteredNodes.map(n => {
+      const existing = existingById.get(n.id);
+      if (existing) {
+        // Preserve position + pinned state
+        return { ...n, x: existing.x, y: existing.y, vx: existing.vx, vy: existing.vy, fx: existing.fx, fy: existing.fy };
+      }
+      // New node — place near a connected neighbor or random
+      const connectedEdge = filteredEdges.find(e => e.source === n.id || e.target === n.id);
+      const neighborId = connectedEdge ? (connectedEdge.source === n.id ? connectedEdge.target : connectedEdge.source) : null;
+      const neighbor = neighborId ? existingById.get(neighborId) : null;
+      return {
+        ...n,
+        x: neighbor ? (neighbor.x ?? width / 2) + (Math.random() - 0.5) * 80 : width / 2 + (Math.random() - 0.5) * 200,
+        y: neighbor ? (neighbor.y ?? height / 2) + (Math.random() - 0.5) * 80 : height / 2 + (Math.random() - 0.5) * 200,
+      };
+    });
+
+    const nodeIdSet = new Set(mergedNodes.map(n => n.id));
+    const mergedLinks: SimLink[] = filteredEdges
+      .filter(e => nodeIdSet.has(e.source) && nodeIdSet.has(e.target))
       .map(e => ({
         source: e.source,
         target: e.target,
@@ -249,71 +316,100 @@ export function KnowledgeGraph() {
         confidence: e.confidence,
       }));
 
-    // Force simulation — tuned for stability
-    const simulation = d3.forceSimulation<SimNode>(simNodes)
-      .force('link', d3.forceLink<SimNode, SimLink>(simLinks)
+    simNodesRef.current = mergedNodes;
+    simLinksRef.current = mergedLinks;
+
+    // ── Create or update simulation ───────────────────────────────
+    let simulation = simulationRef.current;
+    const isNew = !simulation;
+
+    if (!simulation) {
+      simulation = d3.forceSimulation<SimNode>(mergedNodes)
+        .velocityDecay(0.4)        // Higher friction — less drift
+        .alphaDecay(0.02)          // Slower decay — more time to find good layout
+        .alphaMin(0.001);          // Default — actually settle to rest
+      simulationRef.current = simulation;
+    } else {
+      simulation.nodes(mergedNodes);
+      // Gentle reheat for incremental updates (not full restart)
+      simulation.alpha(0.3).restart();
+    }
+
+    // Forces — type-aware
+    simulation
+      .force('link', d3.forceLink<SimNode, SimLink>(mergedLinks)
         .id(d => d.id)
-        .distance(120))
-      .force('charge', d3.forceManyBody().strength(-200).distanceMax(400))
-      // Weak gravity pulls everything toward center without resettling on drag
-      .force('x', d3.forceX(width / 2).strength(0.03))
-      .force('y', d3.forceY(height / 2).strength(0.03))
-      .force('collision', d3.forceCollide(NODE_RADIUS + 10))
-      .alphaDecay(0.05)    // Settle faster (default 0.0228)
-      .alphaMin(0.1);      // Stop sooner (default 0.001)
+        .distance(d => LINK_DISTANCE[d.relationship] || DEFAULT_LINK_DISTANCE)
+        .strength(d => d.weight ? Math.min(1, d.weight) : 0.5))
+      .force('charge', d3.forceManyBody<SimNode>()
+        .strength(d => NODE_CHARGE[d.type] || -300)
+        .distanceMax(600)
+        .theta(0.9))
+      .force('x', d3.forceX(width / 2).strength(0.005))   // Very weak centering
+      .force('y', d3.forceY(height / 2).strength(0.005))
+      .force('collision', d3.forceCollide<SimNode>(NODE_RADIUS + 8));
 
-    simulationRef.current = simulation;
+    // ── D3 data join — links ──────────────────────────────────────
+    const linkSel = g.select('.graph-links')
+      .selectAll<SVGLineElement, SimLink>('line')
+      .data(mergedLinks, d => `${typeof d.source === 'object' ? (d.source as SimNode).id : d.source}::${typeof d.target === 'object' ? (d.target as SimNode).id : d.target}::${d.relationship}`);
 
-    // ── Links ──
-    const link = g.append('g')
-      .attr('class', 'graph-links')
-      .selectAll('line')
-      .data(simLinks)
-      .join('line')
+    linkSel.exit().transition().duration(300).attr('stroke-opacity', 0).remove();
+
+    const linkEnter = linkSel.enter().append('line')
       .attr('stroke', d => EDGE_COLORS[d.relationship] || 'rgba(255,255,255,0.15)')
       .attr('stroke-width', d => Math.max(1, Math.min(4, (d.weight ?? 0.5) * 3)))
-      .attr('stroke-opacity', d => d.confidence ?? 0.5)
+      .attr('stroke-opacity', 0)
       .attr('marker-end', 'url(#arrowhead)');
+    linkEnter.transition().duration(500).attr('stroke-opacity', d => d.confidence ?? 0.5);
 
-    // Edge labels
-    const linkLabel = g.append('g')
-      .attr('class', 'graph-link-labels')
-      .selectAll('text')
-      .data(simLinks)
-      .join('text')
+    const link = linkEnter.merge(linkSel);
+
+    // ── D3 data join — link labels ────────────────────────────────
+    const linkLabelSel = g.select('.graph-link-labels')
+      .selectAll<SVGTextElement, SimLink>('text')
+      .data(mergedLinks, d => `${typeof d.source === 'object' ? (d.source as SimNode).id : d.source}::${typeof d.target === 'object' ? (d.target as SimNode).id : d.target}::${d.relationship}`);
+
+    linkLabelSel.exit().remove();
+    const linkLabelEnter = linkLabelSel.enter().append('text')
       .attr('class', 'graph-edge-label')
       .text(d => d.relationship)
       .attr('font-size', 9)
       .attr('fill', 'rgba(255,255,255,0.3)')
       .attr('text-anchor', 'middle');
+    const linkLabel = linkLabelEnter.merge(linkLabelSel);
 
-    // ── Nodes ──
-    const node = g.append('g')
-      .attr('class', 'graph-nodes')
-      .selectAll('g')
-      .data(simNodes)
-      .join('g')
+    // ── D3 data join — nodes ──────────────────────────────────────
+    const nodeSel = g.select('.graph-nodes')
+      .selectAll<SVGGElement, SimNode>('g.graph-node')
+      .data(mergedNodes, d => d.id);
+
+    nodeSel.exit().transition().duration(300).attr('opacity', 0).remove();
+
+    const nodeEnter = nodeSel.enter().append('g')
       .attr('class', 'graph-node')
-      .attr('cursor', 'pointer');
+      .attr('cursor', 'pointer')
+      .attr('opacity', 0);
 
-    // Node circles
-    node.append('circle')
+    // Entrance animation
+    nodeEnter.transition().duration(500).ease(d3.easeCubicOut).attr('opacity', 1);
+
+    // Circle
+    nodeEnter.append('circle')
       .attr('r', d => newNodeIdsRef.current.has(d.id) ? 0 : NODE_RADIUS)
       .attr('fill', d => NODE_CONFIG[d.type]?.color || '#666')
       .attr('fill-opacity', 0.2)
       .attr('stroke', d => NODE_CONFIG[d.type]?.color || '#666')
       .attr('stroke-width', 2);
 
-    // Animate new nodes
-    node.filter(d => newNodeIdsRef.current.has(d.id))
+    // Animate new nodes growing in
+    nodeEnter.filter(d => newNodeIdsRef.current.has(d.id))
       .select('circle')
-      .transition()
-      .duration(600)
-      .ease(d3.easeCubicOut)
+      .transition().duration(600).ease(d3.easeCubicOut)
       .attr('r', NODE_RADIUS);
 
-    // Pulse ring for new nodes
-    node.filter(d => newNodeIdsRef.current.has(d.id))
+    // Pulse ring for new arrivals
+    nodeEnter.filter(d => newNodeIdsRef.current.has(d.id))
       .append('circle')
       .attr('class', 'kg-pulse-ring')
       .attr('r', NODE_RADIUS)
@@ -321,22 +417,20 @@ export function KnowledgeGraph() {
       .attr('stroke', d => NODE_CONFIG[d.type]?.color || '#60a5fa')
       .attr('stroke-width', 3)
       .attr('stroke-opacity', 0.8)
-      .transition()
-      .duration(1200)
-      .ease(d3.easeQuadOut)
+      .transition().duration(1200).ease(d3.easeQuadOut)
       .attr('r', NODE_RADIUS * 2.5)
       .attr('stroke-opacity', 0)
       .remove();
 
-    // Node icons
-    node.append('text')
+    // Icon
+    nodeEnter.append('text')
       .attr('text-anchor', 'middle')
       .attr('dominant-baseline', 'central')
       .attr('font-size', 16)
       .text(d => NODE_CONFIG[d.type]?.icon || '●');
 
-    // Node labels
-    node.append('text')
+    // Label
+    nodeEnter.append('text')
       .attr('class', 'graph-node-label')
       .attr('y', NODE_RADIUS + 14)
       .attr('text-anchor', 'middle')
@@ -345,8 +439,8 @@ export function KnowledgeGraph() {
       .attr('font-weight', 500)
       .text(d => truncateLabel(d.label, 20));
 
-    // Sublabels
-    node.append('text')
+    // Sublabel
+    nodeEnter.append('text')
       .attr('class', 'graph-node-sublabel')
       .attr('y', NODE_RADIUS + 28)
       .attr('text-anchor', 'middle')
@@ -354,26 +448,50 @@ export function KnowledgeGraph() {
       .attr('font-size', 9)
       .text(d => d.sublabel || '');
 
-    // Track drag vs click — drag sets this flag so click handler skips
+    const node = nodeEnter.merge(nodeSel);
+
+    // ── Pin indicator ring for pinned nodes ────────────────────────
+    node.each(function (d) {
+      const sel = d3.select(this);
+      sel.select('.kg-pin-ring').remove();
+      if (d.fx != null && d.fy != null) {
+        sel.insert('circle', ':first-child')
+          .attr('class', 'kg-pin-ring')
+          .attr('r', NODE_RADIUS + 5)
+          .attr('fill', 'none')
+          .attr('stroke', 'rgba(255,255,255,0.3)')
+          .attr('stroke-width', 1)
+          .attr('stroke-dasharray', '3,3');
+      }
+    });
+
+    // Track drag vs click
     let wasDragged = false;
 
-    // Click handler — only fire on genuine clicks, not at end of a drag
+    // Click → select node
     node.on('click', (_event, d) => {
       if (wasDragged) { wasDragged = false; return; }
       const original = nodesRef.current.find(n => n.id === d.id) || null;
-      // Defer state update to avoid disrupting D3 during event handling
       requestAnimationFrame(() => setSelectedNode(original));
+    });
+
+    // Double-click → unpin node
+    node.on('dblclick', (_event, d) => {
+      d.fx = null;
+      d.fy = null;
+      // Remove pin indicator
+      d3.select(_event.currentTarget).select('.kg-pin-ring').remove();
+      simulation!.alpha(0.1).restart();
     });
 
     // Hover effects
     node
       .on('mouseenter', function (_event, d) {
-        d3.select(this).select('circle')
+        d3.select(this).select('circle:not(.kg-pin-ring):not(.kg-pulse-ring)')
           .transition().duration(200)
           .attr('fill-opacity', 0.5)
           .attr('r', NODE_RADIUS + 4);
 
-        // Highlight connected edges
         link
           .attr('stroke', l => {
             const s = typeof l.source === 'object' ? (l.source as SimNode).id : l.source;
@@ -387,7 +505,7 @@ export function KnowledgeGraph() {
           });
       })
       .on('mouseleave', function () {
-        d3.select(this).select('circle')
+        d3.select(this).select('circle:not(.kg-pin-ring):not(.kg-pulse-ring)')
           .transition().duration(200)
           .attr('fill-opacity', 0.2)
           .attr('r', NODE_RADIUS);
@@ -398,11 +516,12 @@ export function KnowledgeGraph() {
           .attr('stroke-opacity', (l: SimLink) => l.confidence ?? 0.5);
       });
 
-    // Drag behavior — canonical D3 pattern
+    // ── Drag: gentle reheat, pin on end ────────────────────────────
     const drag = d3.drag<SVGGElement, SimNode>()
       .on('start', (event, d) => {
         isDraggingRef.current = true;
-        if (!event.active) simulation.alphaTarget(0.3).restart();
+        // Gentle reheat — only enough to let the dragged node's neighbors adjust
+        if (!event.active) simulation!.alphaTarget(0.05).restart();
         d.fx = d.x;
         d.fy = d.y;
       })
@@ -413,15 +532,25 @@ export function KnowledgeGraph() {
       })
       .on('end', (event, d) => {
         isDraggingRef.current = false;
-        if (!event.active) simulation.alphaTarget(0);
-        d.fx = null;
-        d.fy = null;
+        if (!event.active) simulation!.alphaTarget(0);
+        // Keep the node pinned where the user dropped it (double-click to unpin)
+        // d.fx and d.fy remain set
+        // Add pin indicator
+        const nodeG = d3.select(event.sourceEvent.target.closest('.graph-node'));
+        nodeG.select('.kg-pin-ring').remove();
+        nodeG.insert('circle', ':first-child')
+          .attr('class', 'kg-pin-ring')
+          .attr('r', NODE_RADIUS + 5)
+          .attr('fill', 'none')
+          .attr('stroke', 'rgba(255,255,255,0.3)')
+          .attr('stroke-width', 1)
+          .attr('stroke-dasharray', '3,3');
       });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     node.call(drag as any);
 
-    // Tick
+    // ── Tick ───────────────────────────────────────────────────────
     simulation.on('tick', () => {
       link
         .attr('x1', d => (d.source as SimNode).x!)
@@ -436,30 +565,35 @@ export function KnowledgeGraph() {
       node.attr('transform', d => `translate(${d.x},${d.y})`);
     });
 
-    // Initial zoom to fit
-    setTimeout(() => {
-      const bounds = (g.node() as SVGGElement)?.getBBox();
-      if (bounds && bounds.width > 0 && bounds.height > 0) {
-        const scale = Math.min(
-          width / (bounds.width + 100),
-          height / (bounds.height + 100),
-          1.5,
-        );
-        const transform = d3.zoomIdentity
-          .translate(width / 2, height / 2)
-          .scale(scale)
-          .translate(-(bounds.x + bounds.width / 2), -(bounds.y + bounds.height / 2));
-        svg.transition().duration(750).call(zoom.transform, transform);
-      }
-    }, 1500);
+    // ── Initial zoom-to-fit (once) ────────────────────────────────
+    if (isNew && !initialFitDoneRef.current) {
+      initialFitDoneRef.current = true;
+      setTimeout(() => {
+        const bounds = (g.node() as SVGGElement)?.getBBox();
+        if (bounds && bounds.width > 0 && bounds.height > 0) {
+          const scale = Math.min(
+            width / (bounds.width + 100),
+            height / (bounds.height + 100),
+            1.5,
+          );
+          const transform = d3.zoomIdentity
+            .translate(width / 2, height / 2)
+            .scale(scale)
+            .translate(-(bounds.x + bounds.width / 2), -(bounds.y + bounds.height / 2));
+          svg.transition().duration(750).call(zoomRef.current!.transform, transform);
+        }
+      }, 1500);
+    }
 
-    return () => {
-      // Don't destroy the simulation if we're mid-drag (React re-render)
-      if (!isDraggingRef.current) {
-        simulation.stop();
-      }
-    };
+    // No teardown — simulation persists across re-renders
   }, [filteredNodes, filteredEdges]);
+
+  // ── Cleanup simulation on unmount ───────────────────────────────────
+  useEffect(() => {
+    return () => {
+      simulationRef.current?.stop();
+    };
+  }, []);
 
   // ─── Empty States ──────────────────────────────────────────────────────
 
