@@ -54,7 +54,7 @@ const NODE_CONFIG: Record<GraphNodeType, { color: string; icon: string }> = {
   UNIT: { color: '#34d399', icon: '⚔️' },
   BASE: { color: '#a78bfa', icon: '🏗' },
   TARGET: { color: '#f87171', icon: '💥' },
-  SPACE_ASSET: { color: '#38bdf8', icon: '🛰' },
+  SPACE_ASSET: { color: '#38bdf8', icon: '✦' },  // simple vector glyph (🛰 emoji kills zoom perf)
   MISSION: { color: '#fbbf24', icon: '✈️' },
 };
 
@@ -258,10 +258,30 @@ export function KnowledgeGraph() {
     g.append('g').attr('class', 'graph-nodes');
     gRef.current = g;
 
-    // Zoom behavior
+    // Zoom behavior — with LOD performance optimization
+    // During zoom: hide labels/sublabels/edge-labels + markers to keep 60fps
+    // Icons stay visible for orientation. Restored 150ms after zoom ends.
+    let zoomEndTimer: ReturnType<typeof setTimeout> | null = null;
+    let isActivelyZooming = false;
     const zoom = d3.zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.1, 4])
-      .on('zoom', (event) => { g.attr('transform', event.transform); });
+      .on('zoom', (event) => {
+        g.attr('transform', event.transform);
+        if (event.sourceEvent) {
+          if (!isActivelyZooming) {
+            isActivelyZooming = true;
+            svg.selectAll('line[marker-end]').attr('marker-end', null);
+            svg.selectAll('.graph-node-label, .graph-node-sublabel, .graph-edge-label').style('display', 'none');
+          }
+
+          if (zoomEndTimer) clearTimeout(zoomEndTimer);
+          zoomEndTimer = setTimeout(() => {
+            isActivelyZooming = false;
+            svg.selectAll('.graph-links line').attr('marker-end', 'url(#arrowhead)');
+            svg.selectAll('.graph-node-label, .graph-node-sublabel, .graph-edge-label').style('display', null);
+          }, 150);
+        }
+      });
     svg.call(zoom);
     zoomRef.current = zoom;
 
@@ -422,8 +442,9 @@ export function KnowledgeGraph() {
       .attr('stroke-opacity', 0)
       .remove();
 
-    // Icon
+    // Icon — class includes node type for per-type LOD control
     nodeEnter.append('text')
+      .attr('class', d => `graph-node-icon graph-node-icon--${d.type.toLowerCase()}`)
       .attr('text-anchor', 'middle')
       .attr('dominant-baseline', 'central')
       .attr('font-size', 16)
