@@ -73,7 +73,28 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
+const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || '';
+
 export function MapView() {
+  if (!MAPBOX_TOKEN) return <MapTokenMissing />;
+
+  return <MapViewInner />;
+}
+
+function MapTokenMissing() {
+  return (
+    <div className="page-content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+      <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+        <div style={{ fontSize: '24px', marginBottom: '8px' }}>⚠</div>
+        <div style={{ fontWeight: 700, marginBottom: '4px' }}>Map Unavailable</div>
+        <div style={{ fontSize: '12px' }}>VITE_MAPBOX_TOKEN is not configured.</div>
+        <div style={{ fontSize: '12px' }}>Set it in the Railway dashboard and redeploy.</div>
+      </div>
+    </div>
+  );
+}
+
+function MapViewInner() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markersRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
@@ -100,7 +121,7 @@ export function MapView() {
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
-    mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || '';
+    mapboxgl.accessToken = MAPBOX_TOKEN;
 
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,
