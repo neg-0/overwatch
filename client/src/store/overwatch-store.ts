@@ -436,7 +436,7 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
     // Order published
     socket.on('order:published', (data: any) => {
       console.log('[WS] Order published:', data);
-      const alerts = [...get().alerts, `${data.orderType} Day ${data.day} published`].slice(-50);
+      const alerts = [...get().alerts, `📡 ${data.orderType || 'Order'} Day ${data.day} published`].slice(-50);
       set({ alerts });
     });
 
@@ -445,6 +445,43 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
       console.log(`[WS] Graph update: +${data.addedNodes?.length || 0} nodes, +${data.addedEdges?.length || 0} edges`);
       const alerts = [...get().alerts, `🔗 KG updated: +${data.addedNodes?.length || 0} nodes`].slice(-50);
       set({ alerts });
+    });
+
+    // ─── Game Master cycle events ────────────────────────────────────────────
+    socket.on('gameMaster:generating', (data: any) => {
+      let msg: string;
+      switch (data.phase) {
+        case 'started':    msg = `⚙️ GM Day ${data.completedDay}→${data.newDay}: cycle started`; break;
+        case 'bda':        msg = `📊 BDA: assessing Day ${data.day}...`; break;
+        case 'ato':        msg = `✈️ ATO: generating Day ${data.day}...`; break;
+        case 'allocation': msg = `🛰️ Allocating space resources Day ${data.day}...`; break;
+        default:           msg = `⚙️ GM: ${data.phase} Day ${data.day ?? ''}`; break;
+      }
+      set({ alerts: [...get().alerts, msg].slice(-50) });
+    });
+
+    socket.on('gamemaster:ato-complete', (data: any) => {
+      set({ alerts: [...get().alerts, `✅ ATO Day ${data.atoDay} — ${data.missionCount} missions`].slice(-50) });
+    });
+
+    socket.on('gamemaster:bda-complete', (data: any) => {
+      set({ alerts: [...get().alerts, `✅ BDA Day ${data.atoDay} complete`].slice(-50) });
+    });
+
+    socket.on('gamemaster:inject', (data: any) => {
+      set({ alerts: [...get().alerts, `💥 ${data.injects?.length ?? 0} inject(s) fired Day ${data.atoDay}`].slice(-50) });
+    });
+
+    socket.on('gamemaster:maap-complete', (data: any) => {
+      set({ alerts: [...get().alerts, `📋 MAAP — ${data.targetCount} targets`].slice(-50) });
+    });
+
+    socket.on('gamemaster:error', (data: any) => {
+      set({ alerts: [...get().alerts, `❌ GM error [${data.action}] Day ${data.atoDay}: ${data.error}`].slice(-50) });
+    });
+
+    socket.on('gameMaster:complete', (data: any) => {
+      set({ alerts: [...get().alerts, `✅ GM Day ${data.day} cycle complete (${data.durationMs}ms)`].slice(-50) });
     });
 
     socket.on('scenario:generation-progress', (data: any) => {
