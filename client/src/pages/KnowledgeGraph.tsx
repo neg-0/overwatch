@@ -408,28 +408,42 @@ export function KnowledgeGraph() {
     simNodesRef.current = mergedNodes;
     simLinksRef.current = mergedLinks;
 
-    // ── Create or reuse simulation ────────────────────────────────
-    let simulation = simulationRef.current;
-    let isMajorChange = false;
+    // ── Phase 3: Topological Layout Prep ──────────────────────────────
+    const nodeDegrees = new Map<string, number>();
+    mergedLinks.forEach(link => {
+      const srcId = typeof link.source === 'object' ? (link.source as any).id : link.source;
+      const tgtId = typeof link.target === 'object' ? (link.target as any).id : link.target;
+      nodeDegrees.set(srcId, (nodeDegrees.get(srcId) || 0) + 1);
+      nodeDegrees.set(tgtId, (nodeDegrees.get(tgtId) || 0) + 1);
+    });
 
-    if (!simulation) {
-      simulation = d3.forceSimulation<SimNode>(mergedNodes).stop();
-      simulationRef.current = simulation;
-      isMajorChange = true;
-    } else {
-      const prevNodeCount = simulation.nodes().length;
-      isMajorChange = Math.abs(mergedNodes.length - prevNodeCount) > 50;
-      if (layoutModeRef.current !== layoutMode) {
-        layoutModeRef.current = layoutMode;
-        isMajorChange = true;
-      }
-      simulation.stop();
-      simulation.nodes(mergedNodes);
+    const docNodes = mergedNodes.filter(n => n.type === 'DOCUMENT');
+    const docXMap = new Map<string, number>();
+    if (docNodes.length > 0) {
+      const spacing = Math.max(150, width / docNodes.length);
+      const totalWidth = spacing * docNodes.length;
+      const startX = (width - totalWidth) / 2;
+      docNodes.forEach((n, idx) => {
+        docXMap.set(n.id, startX + (idx + 0.5) * spacing);
+      });
     }
 
-    // ── Configure forces — tier-constrained top-down hierarchy ────
-    // Charge scales with sqrt(50/N) so large graphs don't explode
-    // but repulsion stays meaningful (at 229 nodes: ×0.47, so DOCUMENT = -188)
+    // ── Create or reuse simulation ────────────────────────────────
+    let simulation = simulationRef.current;
+
+    if (!simulation) {
+      // Create fresh simulation and link the main alpha loop
+      simulation = d3.forceSimulation<SimNode>(mergedNodes);
+      simulationRef.current = simulation;
+    } else {
+      if (layoutModeRef.current !== layoutMode) {
+        layoutModeRef.current = layoutMode;
+      }
+      simulation.nodes(mergedNodes);
+      simulation.alpha(1).restart();
+    }
+
+    // ── Configure forces ──────────────────────────────────────────
     const nodeCount = mergedNodes.length;
     const chargeScale = nodeCount > 50 ? Math.sqrt(50 / nodeCount) : 1;
 
@@ -438,10 +452,25 @@ export function KnowledgeGraph() {
       .alphaDecay(P.alphaDecay)
       .force('link', d3.forceLink<SimNode, SimLink>(mergedLinks)
         .id(d => d.id)
-        .distance(d => (LINK_DISTANCE[d.relationship] || DEFAULT_LINK_DISTANCE) * P.linkDistScale)
-        .strength(d => d.weight ? Math.min(0.2, d.weight * 0.02) : 0.05))
+        .distance(d => {
+          const sTier = NODE_TIER[(d.source as SimNode).type] ?? 9;
+          const tTier = NODE_TIER[(d.target as SimNode).type] ?? 9;
+          return Math.abs(sTier - tTier) * 120 * P.linkDistScale;
+        })
+        .strength(d => {
+          const baseStrength = d.weight ? Math.min(0.2, d.weight * 0.05) : 0.05;
+          const srcId = typeof d.source === 'object' ? (d.source as any).id : d.source;
+          const tgtId = typeof d.target === 'object' ? (d.target as any).id : d.target;
+          const srcDeg = nodeDegrees.get(srcId) || 1;
+          const tgtDeg = nodeDegrees.get(tgtId) || 1;
+          return baseStrength / Math.max(1, srcDeg, tgtDeg);
+        }))
       .force('charge', d3.forceManyBody<SimNode>()
-        .strength(d => (NODE_CHARGE[d.type] || P.chargeStrength) * chargeScale)
+        .strength(d => {
+          const deg = nodeDegrees.get(d.id) || 1;
+          const baseCharge = (NODE_CHARGE[d.type] || P.chargeStrength) * chargeScale;
+          return baseCharge * (1 + Math.log2(deg));
+        })
         .distanceMin(P.distanceMin)
         .distanceMax(400)
         .theta(0.9));
@@ -451,71 +480,88 @@ export function KnowledgeGraph() {
         .force('x', null)
         .force('y', null)
         .force('radial', d3.forceRadial<SimNode>(
-            d => Math.max(0, tierY(d.type) - 100), // Tier height converted to ring radius
+            d => Math.max(0, (bandHeight * ((NODE_TIER[d.type] ?? 9) + 1.5)) - 50),
             width / 2,
             height / 2
-          ).strength(P.tierStrength));
+          ).strength(P.tierStrength))
+        .force('angular', (alpha: number) => {
+          const cx = width / 2;
+          const cy = height / 2;
+          
+          for (const n of mergedNodes) {
+             if (n.type === 'DOCUMENT') continue;
+             const parentId = parentOf.get(n.id);
+             if (!parentId) continue;
+             
+             const parent = existingById.get(parentId);
+             if (!parent || typeof parent.x !== 'number' || typeof parent.y !== 'number') continue;
+             
+             const px = parent.x - cx;
+             const py = parent.y - cy;
+             const pAngle = Math.atan2(py, px);
+             
+             const childX = n.x! - cx;
+             const childY = n.y! - cy;
+             const currentRadius = Math.sqrt(childX * childX + childY * childY);
+             if (currentRadius === 0) continue;
+             
+             const targetX = cx + Math.cos(pAngle) * currentRadius;
+             const targetY = cy + Math.sin(pAngle) * currentRadius;
+             
+             // GENTLER PULL TO PREVENT COLLAPSE (User bugfix)
+             // Increased from 0.05 to 0.1 so they don't get stuck!
+             n.vx! += (targetX - n.x!) * alpha * 0.1;
+             n.vy! += (targetY - n.y!) * alpha * 0.1;
+          }
+        });
     } else {
       simulation
         .force('radial', null)
-        .force('x', d3.forceX<SimNode>(width / 2).strength(P.centerStrength))
+        .force('angular', null)
+        .force('x', d3.forceX<SimNode>(d => {
+          if (d.type === 'DOCUMENT') return docXMap.get(d.id) || width / 2;
+          return width / 2;
+        }).strength(d => d.type === 'DOCUMENT' ? 1.0 : P.centerStrength))
         .force('y', d3.forceY<SimNode>(d => tierY(d.type)).strength(P.tierStrength));
     }
 
     simulation.force('collision', d3.forceCollide<SimNode>(P.collisionRadius).iterations(1));
 
-    // ── PRE-COMPUTE: chunked async ticks to avoid blocking UI ─────
-    if (isMajorChange) {
-      const totalTicks = Math.min(200, Math.max(80, mergedNodes.length));
-      const chunkSize = 40;
-      simulation.alpha(1);
-      let ticksDone = 0;
-
-      const tickChunk = () => {
-        if (!simulationRef.current || simulationRef.current !== simulation) return;
-        const end = Math.min(ticksDone + chunkSize, totalTicks);
-        for (let i = ticksDone; i < end; i++) simulation.tick();
-        ticksDone = end;
-        
-        if (ticksDone < totalTicks) {
-          setTimeout(tickChunk, 0);
-        } else if (mergedNodes.length > 0) {
-          // ── Zoom-to-fit AFTER settling ────────────────────────
-          initialFitDoneRef.current = true;
-          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-          mergedNodes.forEach(n => {
-            if (Number.isFinite(n.x) && Number.isFinite(n.y)) {
-              minX = Math.min(minX, n.x!); maxX = Math.max(maxX, n.x!);
-              minY = Math.min(minY, n.y!); maxY = Math.max(maxY, n.y!);
-            }
-          });
-          
-          const padding = 100;
-          const contentWidth = maxX - minX;
-          const contentHeight = maxY - minY;
-          
-          // Only zoom if we have a valid layout box
-          if (contentWidth > 0 && contentHeight > 0 && contentWidth < 100000) {
-            const scale = Math.max(0.05, Math.min(
-              width / (contentWidth + padding * 2),
-              height / (contentHeight + padding * 2),
-              1.5
-            ));
-            const cx = minX + contentWidth / 2;
-            const cy = minY + contentHeight / 2;
-            
-            const transform = d3.zoomIdentity
-              .translate(width / 2, height / 2)
-              .scale(scale)
-              .translate(-cx, -cy);
-              
-            d3.select(canvas).transition().duration(750)
-              .call(zoom.transform, transform);
-          }
+    // ── Zoom-to-fit Camera Frame ────────────────────────
+    const runZoomToFit = () => {
+      initialFitDoneRef.current = true;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      mergedNodes.forEach(n => {
+        if (Number.isFinite(n.x) && Number.isFinite(n.y)) {
+          minX = Math.min(minX, n.x!); maxX = Math.max(maxX, n.x!);
+          minY = Math.min(minY, n.y!); maxY = Math.max(maxY, n.y!);
         }
-      };
-      tickChunk();
-    }
+      });
+      
+      const padding = 100;
+      const contentWidth = maxX - minX;
+      const contentHeight = maxY - minY;
+      
+      if (contentWidth > 0 && contentHeight > 0 && contentWidth < 100000) {
+        const scale = Math.max(0.05, Math.min(
+          width / (contentWidth + padding * 2),
+          height / (contentHeight + padding * 2),
+          1.5
+        ));
+        const cx = minX + contentWidth / 2;
+        const cy = minY + contentHeight / 2;
+        
+        const transform = d3.zoomIdentity
+          .translate(width / 2, height / 2)
+          .scale(scale)
+          .translate(-cx, -cy);
+          
+        d3.select(canvas).transition().duration(1200)
+          .call(zoom.transform, transform);
+      }
+    };
+
+    simulation.on('end', runZoomToFit);
 
     // ── Canvas Render Loop ──────────────────────────────────────────
     const draw = () => {
@@ -647,7 +693,35 @@ export function KnowledgeGraph() {
 
     // ── Setup Interactivity (Zoom, Pan, Drag, Hover) ───────────────
     
-    // 1. Zoom
+    const d3Canvas = d3.select(canvas);
+
+    // 1. Drag Behavior (MUST BE REGISTERED BEFORE ZOOM TO CATCH POINTER EVENTS)
+    d3Canvas.call(d3.drag<HTMLCanvasElement, unknown>()
+      .subject((e) => {
+        const [mx, my] = d3.pointer(e, canvas);
+        const x = zoomTransformRef.current.invertX(mx);
+        const y = zoomTransformRef.current.invertY(my);
+        return simulation.find(x, y, NODE_RADIUS * 1.5);
+      })
+      .on('start', (e) => {
+        if (!e.active) simulation.alphaTarget(0.05).restart();
+        e.subject.fx = e.subject.x;
+        e.subject.fy = e.subject.y;
+        isDraggingRef.current = true;
+      })
+      .on('drag', (e) => {
+        wasDragged = true;
+        e.subject.fx = e.x;
+        e.subject.fy = e.y;
+        draw();
+      })
+      .on('end', (e) => {
+        if (!e.active) simulation.alphaTarget(0);
+        isDraggingRef.current = false;
+      })
+    );
+
+    // 2. Zoom
     const zoom = d3.zoom<HTMLCanvasElement, unknown>()
       .scaleExtent([0.1, 4])
       .on('zoom', (e) => {
@@ -655,12 +729,11 @@ export function KnowledgeGraph() {
         draw();
       });
     
-    const d3Canvas = d3.select(canvas);
     d3Canvas.call(zoom);
 
     // Initial Zoom-to-fit was moved to run *after* tickChunk finishes
 
-    // 2. Mouse Hit-Testing
+    // 3. Mouse Hit-Testing
     d3Canvas.on('mousemove', (e) => {
       if (isDraggingRef.current) return;
       const [mx, my] = d3.pointer(e, canvas);
@@ -685,7 +758,7 @@ export function KnowledgeGraph() {
       }
     });
 
-    // 3. Click / Double-Click
+    // 4. Click / Double-Click
     let clickTimeout: ReturnType<typeof setTimeout> | null = null;
     let wasDragged = false;
     
@@ -711,32 +784,6 @@ export function KnowledgeGraph() {
         draw();
       }
     });
-
-    // 4. Drag Behavior
-    d3Canvas.call(d3.drag<HTMLCanvasElement, unknown>()
-      .subject((e) => {
-        const [mx, my] = d3.pointer(e, canvas);
-        const x = zoomTransformRef.current.invertX(mx);
-        const y = zoomTransformRef.current.invertY(my);
-        return simulation.find(x, y, NODE_RADIUS * 1.5);
-      })
-      .on('start', (e) => {
-        if (!e.active) simulation.alphaTarget(0.05).restart();
-        e.subject.fx = e.subject.x;
-        e.subject.fy = e.subject.y;
-        isDraggingRef.current = true;
-      })
-      .on('drag', (e) => {
-        wasDragged = true;
-        e.subject.fx = e.x;
-        e.subject.fy = e.y;
-        draw();
-      })
-      .on('end', (e) => {
-        if (!e.active) simulation.alphaTarget(0);
-        isDraggingRef.current = false;
-      })
-    );
 
     // No teardown — simulation persists across re-renders
   }, [filteredNodes, filteredEdges, layoutMode, atoDay]);
@@ -836,6 +883,23 @@ export function KnowledgeGraph() {
               Radial
             </button>
           </div>
+          <button 
+            className="kg-refresh-btn"
+            onPointerDown={() => {
+              if (simulationRef.current) {
+                // User asked to unpin nodes on settle
+                simulationRef.current.nodes().forEach(n => { n.fx = null; n.fy = null; });
+                simulationRef.current.alphaTarget(0.15).restart();
+              }
+            }}
+            onPointerUp={() => simulationRef.current?.alphaTarget(0)}
+            onPointerLeave={() => simulationRef.current?.alphaTarget(0)}
+            onPointerCancel={() => simulationRef.current?.alphaTarget(0)}
+            title="Hold to actively bounce and settle the graph physics. Automatically unpins nodes."
+            style={{ marginLeft: '8px', border: '1px solid var(--border)' }}
+          >
+            ✧ Settle
+          </button>
           <button className="kg-refresh-btn" onClick={fetchGraph} disabled={loading}>
             {loading ? '⟳' : '↻'} Refresh
           </button>
