@@ -22,6 +22,13 @@ function getModel(tier: 'flagship' | 'midRange' | 'fast'): string {
   return config.llm[tier];
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function parseSafeDate(dateStr: string | undefined | null, fallback: Date = new Date()): Date {
+  if (!dateStr) return fallback;
+  const d = new Date(dateStr);
+  return isNaN(d.getTime()) ? fallback : d;
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export type HierarchyLevel = 'STRATEGY' | 'PLANNING' | 'ORDER' | 'EVENT_LIST';
@@ -545,7 +552,7 @@ async function persistStrategy(
   rawText: string,
   classification: ClassifyResult,
 ): Promise<{ createdId: string; parentLinkId?: string }> {
-  const effectiveDate = new Date(data.effectiveDate || classification.effectiveDateStr || new Date().toISOString());
+  const effectiveDate = parseSafeDate(data.effectiveDate || classification.effectiveDateStr);
 
   // Determine tier from AI output or docType mapping
   const tierMap: Record<string, number> = { NDS: 1, NMS: 2, JSCP: 3, CONPLAN: 4, OPLAN: 5 };
@@ -600,7 +607,7 @@ async function persistPlanning(
   rawText: string,
   classification: ClassifyResult,
 ): Promise<{ createdId: string; parentLinkId?: string; matchedPriorities: number[] }> {
-  const effectiveDate = new Date(data.effectiveDate || classification.effectiveDateStr || new Date().toISOString());
+  const effectiveDate = parseSafeDate(data.effectiveDate || classification.effectiveDateStr);
   const strategyDocId = await findParentStrategyDoc(scenarioId, classification);
 
   const created = await prisma.planningDocument.create({
@@ -675,8 +682,8 @@ async function persistOrder(
   rawText: string,
   classification: ClassifyResult,
 ): Promise<{ createdId: string; parentLinkId?: string; matchedPriorities: number[]; extracted: IngestResult['extracted'] }> {
-  const effectiveStart = new Date(data.effectiveStart || new Date().toISOString());
-  const effectiveEnd = new Date(data.effectiveEnd || new Date(effectiveStart.getTime() + 24 * 60 * 60 * 1000).toISOString());
+  const effectiveStart = parseSafeDate(data.effectiveStart);
+  const effectiveEnd = parseSafeDate(data.effectiveEnd, new Date(effectiveStart.getTime() + 24 * 60 * 60 * 1000));
 
   // Find parent planning doc and match priorities
   const { docId: planningDocId, matchedPriorities } = await findParentPlanningDoc(scenarioId);
@@ -901,7 +908,7 @@ async function persistMSEL(
   classification: ClassifyResult,
 ): Promise<{ createdId: string; extracted: IngestResult['extracted'] }> {
   // First, store the MSEL as a PlanningDocument (docType: 'MSEL')
-  const effectiveDate = new Date(classification.effectiveDateStr || new Date().toISOString());
+  const effectiveDate = parseSafeDate(classification.effectiveDateStr);
 
   const planningDoc = await prisma.planningDocument.create({
     data: {
