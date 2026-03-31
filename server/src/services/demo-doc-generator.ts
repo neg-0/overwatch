@@ -1,9 +1,8 @@
-import OpenAI from 'openai';
 import { config } from '../config.js';
 import prisma from '../db/prisma-client.js';
+import { getOpenAIClient } from '../lib/openai-client.js';
 
-const openai = new OpenAI({ apiKey: config.openaiApiKey });
-
+const openai = getOpenAIClient();
 // ─── Document Templates ─────────────────────────────────────────────────────
 
 const DOC_TYPES = [

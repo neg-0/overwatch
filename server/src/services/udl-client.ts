@@ -120,7 +120,7 @@ export async function fetchElsetAtEpoch(satNo: number, targetDate: Date): Promis
 
   // Try history endpoint with the epoch window
   const results = await udlGet<UDLElset[]>(
-    `/elset/history?satNo=${satNo}&epoch=${encodeURIComponent(startStr)}/${encodeURIComponent(endStr)}&orderBy=epoch%20desc&limit=1`,
+    `/elset/history?satNo=${satNo}&epoch=${encodeURIComponent(startStr)}/${encodeURIComponent(endStr)}&orderBy=epoch%20desc`,
   );
 
   if (results && results.length > 0) {

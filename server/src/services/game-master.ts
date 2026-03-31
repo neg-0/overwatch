@@ -11,7 +11,7 @@
  *   3. assessBDA — Post-mission Battle Damage Assessment
  */
 
-import OpenAI from 'openai';
+import type OpenAI from 'openai';
 import type { Server } from 'socket.io';
 import { config } from '../config.js';
 import prisma from '../db/prisma-client.js';
@@ -19,8 +19,9 @@ import { ingestDocument } from './doc-ingest.js';
 import { callLLMWithRetry } from './generation-logger.js';
 
 // ─── OpenAI Client ───────────────────────────────────────────────────────────
+import { getOpenAIClient } from '../lib/openai-client.js';
 
-const openai = new OpenAI({ apiKey: config.openaiApiKey });
+const openai = getOpenAIClient();
 
 function getModel(tier: 'flagship' | 'midRange' | 'fast'): string {
   return config.llm[tier];

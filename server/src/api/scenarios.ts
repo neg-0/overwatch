@@ -449,7 +449,7 @@ scenarioRoutes.post('/generate', async (req, res) => {
         theater: theater || 'INDOPACOM — Western Pacific',
         adversary: adversary || 'Near-peer state adversary (Pacific)',
         startDate: new Date('2026-03-01T00:00:00Z'),
-        endDate: new Date(Date.now() + safeDuration * 24 * 3600000),
+        endDate: new Date(new Date('2026-03-01T00:00:00Z').getTime() + safeDuration * 24 * 3600000),
         classification: 'UNCLASSIFIED',
         compressionRatio: safeCompression,
         generationStatus: GenerationStatus.GENERATING,
@@ -1087,10 +1087,10 @@ scenarioRoutes.post('/', async (req, res) => {
         theater: theater || 'INDOPACOM — Western Pacific',
         adversary: adversary || 'Near-peer state adversary (Pacific)',
         startDate: new Date('2026-03-01T00:00:00Z'),
-        endDate: new Date(Date.now() + safeDuration * 24 * 3600000),
+        endDate: new Date(new Date('2026-03-01T00:00:00Z').getTime() + safeDuration * 24 * 3600000),
         classification: 'UNCLASSIFIED',
         compressionRatio: safeCompression,
-        generationStatus: 'NOT_STARTED' as any,
+        generationStatus: GenerationStatus.PENDING,
       },
     });
     res.status(201).json({ success: true, data: scenario, timestamp: new Date().toISOString() });

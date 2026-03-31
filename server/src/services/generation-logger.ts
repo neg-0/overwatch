@@ -1,4 +1,5 @@
-import OpenAI from 'openai';
+import type OpenAI from 'openai';
+import { getOpenAIClient } from '../lib/openai-client.js';
 import prisma from '../db/prisma-client.js';
 import { broadcastArtifactResult } from '../websocket/ws-server.js';
 

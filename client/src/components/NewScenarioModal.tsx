@@ -76,17 +76,14 @@ export function NewScenarioModal({ open, onClose, onCreated }: NewScenarioModalP
     if (!config.name.trim()) return;
     setSaving(true);
     try {
-      const id = await createScenario(config);
-      if (id) {
-        setActiveScenario(id);
+      const result = await generateScenario({ ...config, modelOverrides });
+      if (result && result.success && result.data && result.data.id) {
         resetGenerationProgress();
-        // Trigger generation after creation
-        generateScenario({ ...config, modelOverrides }).catch(err =>
-          console.error('[MODAL] Generation failed:', err)
-        );
         resetForm();
-        onCreated(id);
+        onCreated(result.data.id);
       }
+    } catch (err) {
+      console.error('[MODAL] Generation failed:', err);
     } finally {
       setSaving(false);
     }
