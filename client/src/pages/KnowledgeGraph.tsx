@@ -529,6 +529,7 @@ export function KnowledgeGraph() {
 
     // ── Zoom-to-fit Camera Frame ────────────────────────
     const runZoomToFit = () => {
+      if (initialFitDoneRef.current) return;
       initialFitDoneRef.current = true;
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       mergedNodes.forEach(n => {
