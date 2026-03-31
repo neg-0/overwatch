@@ -353,10 +353,12 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
       });
     });
 
-    // Position updates
+    // Position updates — server wraps payload as { event, update: { missionId, ... } }
     socket.on('position:update', (data: any) => {
+      const update = data.update ?? data;
+      if (!update.missionId) return;
       const positions = new Map(get().positions);
-      positions.set(data.missionId, data);
+      positions.set(update.missionId, update);
       set({ positions });
     });
 
