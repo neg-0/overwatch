@@ -59,12 +59,13 @@ describe('Space Assets API', () => {
       expect(body.success).toBe(false);
     });
 
-    it('returns empty array when no space assets exist', async () => {
+    it('returns seed space asset by default', async () => {
       const res = await fetch(`${app.baseUrl}/api/space-assets?scenarioId=${seed.scenarioId}`);
       expect(res.status).toBe(200);
       const body: any = await res.json();
       expect(body.success).toBe(true);
-      expect(body.data).toEqual([]);
+      // Seed now creates a GPS III SV01 space asset
+      expect(body.data.length).toBeGreaterThanOrEqual(1);
     });
 
     it('returns space assets with positions when TLE data exists', async () => {
@@ -92,13 +93,14 @@ describe('Space Assets API', () => {
       const body: any = await res.json();
 
       expect(body.success).toBe(true);
-      expect(body.data).toHaveLength(1);
-      expect(body.data[0].name).toBe('GPS III SV01');
-      expect(body.data[0].position).toBeDefined();
-      expect(body.data[0].position.latitude).toBeTypeOf('number');
-      expect(body.data[0].position.longitude).toBeTypeOf('number');
-      expect(body.data[0].position.altitude_km).toBeTypeOf('number');
-      expect(body.data[0].computedAt).toBeTypeOf('string');
+      expect(body.data.length).toBeGreaterThanOrEqual(2); // seed + TLE asset
+      const tleAsset = body.data.find((a: any) => a.noradId === '48859');
+      expect(tleAsset).toBeDefined();
+      expect(tleAsset.position).toBeDefined();
+      expect(tleAsset.position.latitude).toBeTypeOf('number');
+      expect(tleAsset.position.longitude).toBeTypeOf('number');
+      expect(tleAsset.position.altitude_km).toBeTypeOf('number');
+      expect(tleAsset.computedAt).toBeTypeOf('string');
     });
 
     it('returns null position for assets without TLE or orbital params', async () => {
@@ -118,8 +120,10 @@ describe('Space Assets API', () => {
       const res = await fetch(`${app.baseUrl}/api/space-assets?scenarioId=${seed.scenarioId}`);
       const body: any = await res.json();
 
-      expect(body.data).toHaveLength(1);
-      expect(body.data[0].position).toBeNull();
+      expect(body.data.length).toBeGreaterThanOrEqual(2); // seed + no-TLE asset
+      const unknownSat = body.data.find((a: any) => a.name === 'Unknown Sat');
+      expect(unknownSat).toBeDefined();
+      expect(unknownSat.position).toBeNull();
     });
 
     it('returns approximate position for GEO assets without TLE but with orbital params', async () => {
@@ -142,9 +146,11 @@ describe('Space Assets API', () => {
       const res = await fetch(`${app.baseUrl}/api/space-assets?scenarioId=${seed.scenarioId}`);
       const body: any = await res.json();
 
-      expect(body.data).toHaveLength(1);
-      expect(body.data[0].position).toBeDefined();
-      expect(body.data[0].position.altitude_km).toBeGreaterThan(30000); // GEO altitude
+      expect(body.data.length).toBeGreaterThanOrEqual(2); // seed + GEO asset
+      const muos = body.data.find((a: any) => a.name === 'MUOS-5');
+      expect(muos).toBeDefined();
+      expect(muos.position).toBeDefined();
+      expect(muos.position.altitude_km).toBeGreaterThan(30000); // GEO altitude
     });
   });
 

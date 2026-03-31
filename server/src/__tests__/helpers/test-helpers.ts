@@ -80,6 +80,17 @@ export interface TestSeedResult {
   missionId: string;
   packageId: string;
   orderId: string;
+  baseId: string;
+  strategyDocId: string;
+  strategyPriorityId: string;
+  planningDocId: string;
+  priorityEntryId: string;
+  assetId: string;
+  assetTypeId: string;
+  spaceAssetId: string;
+  spaceNeedId: string;
+  allocationId: string;
+  targetId: string;
 }
 
 export interface FailedScenarioSeedResult {
@@ -131,6 +142,76 @@ export async function seedTestScenario(): Promise<TestSeedResult> {
     },
   });
 
+  // ─── Doctrine chain: StrategyDoc → PlanningDoc → Priorities ────────────
+
+  const stratDoc = await prisma.strategyDocument.create({
+    data: {
+      scenarioId: scenario.id,
+      title: 'Test NMS',
+      docType: 'NMS',
+      authorityLevel: 'SecDef',
+      tier: 2,
+      content: 'Test strategy content',
+      effectiveDate: start,
+    },
+  });
+
+  const stratPriority = await prisma.strategyPriority.create({
+    data: {
+      strategyDocId: stratDoc.id,
+      rank: 1,
+      objective: 'Test strategic objective',
+      description: 'Test strategic priority description',
+    },
+  });
+
+  const planDoc = await prisma.planningDocument.create({
+    data: {
+      scenarioId: scenario.id,
+      strategyDocId: stratDoc.id,
+      title: 'Test CONOP',
+      docType: 'CONOP',
+      content: 'Test planning content',
+      effectiveDate: start,
+    },
+  });
+
+  const priorityEntry = await prisma.priorityEntry.create({
+    data: {
+      planningDocId: planDoc.id,
+      strategyPriorityId: stratPriority.id,
+      rank: 1,
+      effect: 'Test planning effect',
+      description: 'Test priority entry',
+      justification: 'Test justification',
+    },
+  });
+
+  // ─── Base + Unit + Assets ──────────────────────────────────────────────
+
+  const base = await prisma.base.create({
+    data: {
+      scenarioId: scenario.id,
+      name: 'Kadena AB',
+      baseType: 'AIR_BASE',
+      country: 'JP',
+      latitude: 26.35,
+      longitude: 127.77,
+    },
+  });
+
+  const assetType = await prisma.assetType.create({
+    data: {
+      name: 'F-35A',
+      domain: 'AIR',
+      category: 'FIGHTER',
+      commsSystems: [
+        { band: 'UHF', system: 'ARC-210', role: 'primary' },
+        { band: 'EHF', system: 'AEHF Terminal', role: 'secondary' },
+      ],
+    },
+  });
+
   const unit = await prisma.unit.create({
     data: {
       scenarioId: scenario.id,
@@ -138,15 +219,46 @@ export async function seedTestScenario(): Promise<TestSeedResult> {
       unitDesignation: 'TST-1',
       serviceBranch: 'USAF',
       domain: 'AIR',
-      baseLocation: 'Test Base',
+      baseLocation: 'Kadena AB',
       baseLat: 26.35,
       baseLon: 127.77,
+      baseId: base.id,
     },
   });
+
+  const asset = await prisma.asset.create({
+    data: {
+      unitId: unit.id,
+      assetTypeId: assetType.id,
+      name: 'TST-001',
+      tailNumber: 'AF-001',
+      status: 'OPERATIONAL',
+    },
+  });
+
+  // ─── Space asset + allocation chain ────────────────────────────────────
+
+  const spaceAsset = await prisma.spaceAsset.create({
+    data: {
+      scenarioId: scenario.id,
+      name: 'GPS III SV01',
+      constellation: 'GPS',
+      status: 'OPERATIONAL',
+      capabilities: ['GPS'],
+      affiliation: 'FRIENDLY',
+      bandwidthProvided: ['UHF'],
+      inclination: 55.0,
+      periodMin: 718.0,
+      eccentricity: 0.002,
+    },
+  });
+
+  // ─── Tasking chain: Order → Package → Mission → Target ─────────────────
 
   const order = await prisma.taskingOrder.create({
     data: {
       scenarioId: scenario.id,
+      planningDocId: planDoc.id,
       orderType: 'ATO',
       orderId: 'ATO-TEST-001',
       issuingAuthority: 'TEST/CC',
@@ -181,6 +293,18 @@ export async function seedTestScenario(): Promise<TestSeedResult> {
     },
   });
 
+  const target = await prisma.missionTarget.create({
+    data: {
+      missionId: mission.id,
+      targetId: 'TGT-TEST-001',
+      targetName: 'Test Target Alpha',
+      targetCategory: 'AIRFIELD',
+      desiredEffect: 'DESTROY',
+      latitude: 20.0,
+      longitude: 122.0,
+    },
+  });
+
   // Create waypoints for position interpolation
   await prisma.waypoint.createMany({
     data: [
@@ -200,12 +324,50 @@ export async function seedTestScenario(): Promise<TestSeedResult> {
     },
   });
 
+  // ─── Space need + allocation ───────────────────────────────────────────
+
+  const spaceNeed = await prisma.spaceNeed.create({
+    data: {
+      missionId: mission.id,
+      capabilityType: 'GPS',
+      priority: 1,
+      startTime: start,
+      endTime: end,
+      missionCriticality: 'CRITICAL',
+      fallbackCapability: 'GPS_MILITARY',
+      riskIfDenied: 'Loss of precision navigation',
+      priorityEntryId: priorityEntry.id,
+    },
+  });
+
+  const allocation = await prisma.spaceAllocation.create({
+    data: {
+      spaceNeedId: spaceNeed.id,
+      spaceAssetId: spaceAsset.id,
+      status: 'FULFILLED',
+      riskLevel: 'LOW',
+      rationale: 'Coverage window matches need',
+      allocatedCapability: 'GPS',
+    },
+  });
+
   return {
     scenarioId: scenario.id,
     unitId: unit.id,
     missionId: mission.id,
     packageId: pkg.id,
     orderId: order.id,
+    baseId: base.id,
+    strategyDocId: stratDoc.id,
+    strategyPriorityId: stratPriority.id,
+    planningDocId: planDoc.id,
+    priorityEntryId: priorityEntry.id,
+    assetId: asset.id,
+    assetTypeId: assetType.id,
+    spaceAssetId: spaceAsset.id,
+    spaceNeedId: spaceNeed.id,
+    allocationId: allocation.id,
+    targetId: target.id,
   };
 }
 
@@ -423,6 +585,8 @@ export async function createTestApp(): Promise<TestApp> {
   const { baseRoutes } = await import('../../api/bases.js');
   const { airspaceRoutes } = await import('../../api/airspace.js');
   const { assetRoutes } = await import('../../api/assets.js');
+  const { timelineRoutes } = await import('../../api/timeline.js');
+  const { unitPositionRoutes } = await import('../../api/unit-positions.js');
   const { setupWebSocket } = await import('../../websocket/ws-server.js');
 
   const app = express();
@@ -462,6 +626,8 @@ export async function createTestApp(): Promise<TestApp> {
   app.use('/api/bases', baseRoutes);
   app.use('/api/airspace', airspaceRoutes);
   app.use('/api/assets', assetRoutes);
+  app.use('/api/timeline', timelineRoutes);
+  app.use('/api/units', unitPositionRoutes);
 
   return new Promise((resolve) => {
     httpServer.listen(0, () => {

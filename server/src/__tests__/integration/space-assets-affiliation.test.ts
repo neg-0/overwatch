@@ -179,16 +179,17 @@ describe('Space Assets — Affiliation Integration', () => {
       const body: any = await res.json();
 
       expect(body.success).toBe(true);
-      expect(body.data).toHaveLength(4);
+      // 4 locally seeded + 1 from enriched seed = 5
+      expect(body.data).toHaveLength(5);
 
       const friendly = body.data.filter((a: any) => a.affiliation === 'FRIENDLY');
       const hostile = body.data.filter((a: any) => a.affiliation === 'HOSTILE');
 
-      expect(friendly).toHaveLength(2);
+      expect(friendly).toHaveLength(3); // 2 local + 1 seed
       expect(hostile).toHaveLength(2);
 
-      // Verify specific assets
-      const gps = body.data.find((a: any) => a.name === 'GPS III SV01');
+      // Verify specific assets — find by constellation to avoid name collisions with seed
+      const gps = body.data.find((a: any) => a.constellation === 'GPS III');
       expect(gps.affiliation).toBe('FRIENDLY');
       expect(gps.constellation).toBe('GPS III');
 
@@ -205,7 +206,7 @@ describe('Space Assets — Affiliation Integration', () => {
       );
       const body: any = await res.json();
 
-      const gps = body.data.find((a: any) => a.name === 'GPS III SV01');
+      const gps = body.data.find((a: any) => a.constellation === 'GPS III');
       expect(gps.capabilities).toEqual(['GPS', 'PNT']);
 
       const liana = body.data.find((a: any) => a.name === 'Liana-4');
@@ -295,7 +296,7 @@ describe('Space Assets — Affiliation Integration', () => {
       const friendlyAssets = await prisma.spaceAsset.findMany({
         where: { scenarioId: seed.scenarioId, affiliation: 'FRIENDLY' },
       });
-      expect(friendlyAssets).toHaveLength(2);
+      expect(friendlyAssets).toHaveLength(3); // 2 local + 1 seed
       expect(friendlyAssets.every((a) => a.affiliation === 'FRIENDLY')).toBe(true);
 
       const hostileAssets = await prisma.spaceAsset.findMany({

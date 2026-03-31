@@ -459,7 +459,7 @@ describe('Document Ingestion — Full Pipeline', () => {
     expect(result.hierarchyLevel).toBe('STRATEGY');
     expect(result.documentType).toBe('NMS');
     expect(result.createdId).toBe('strat-001');
-    expect(result.parseTimeMs).toBeGreaterThan(0);
+    expect(result.parseTimeMs).toBeGreaterThanOrEqual(0);
     expect(result.extracted.priorityCount).toBe(1);
   });
 

@@ -122,7 +122,7 @@ describe('Bases API', () => {
       const kadena = body.data.find((b: any) => b.name === 'Kadena Air Base');
       expect(kadena).toBeDefined();
       expect(kadena.unitCount).toBe(1);
-      expect(kadena.assetCount).toBeGreaterThanOrEqual(1);
+      expect(kadena.totalAssets).toBeGreaterThanOrEqual(1);
     });
 
     it('returns OPFOR bases', async () => {
