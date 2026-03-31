@@ -9,6 +9,7 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,            // Tests share server state — run serial
+  globalSetup: './e2e/global-setup.ts',
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   workers: 1,
@@ -37,7 +38,7 @@ export default defineConfig({
       timeout: 15_000,
       reuseExistingServer: !process.env.CI,
       env: {
-        DATABASE_URL: 'postgresql://overwatch:overwatch123@localhost:5432/overwatch_test',
+        DATABASE_URL: 'postgresql://dustinstringer@localhost:5432/overwatch_test',
         NODE_ENV: 'test',
       },
     },

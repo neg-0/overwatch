@@ -313,7 +313,7 @@ describe('Ingest Lifecycle E2E', () => {
   it('retrieves ingest logs via GET /api/ingest/log after ingestion', async () => {
     setupStrategyIngestion();
 
-    await fetch(`${app.baseUrl}/api/ingest`, {
+    const res = await fetch(`${app.baseUrl}/api/ingest`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -321,6 +321,7 @@ describe('Ingest Lifecycle E2E', () => {
         rawText: 'Log retrieval E2E test doc',
       }),
     });
+    await res.json();
 
     const logRes = await fetch(`${app.baseUrl}/api/ingest/log?scenarioId=${seed.scenarioId}`);
     expect(logRes.status).toBe(200);
