@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(xargs head:*)",
+      "Bash(git push:*)",
+      "Bash(xargs grep:*)",
+      "Bash(grep -E \"\\\\.ts$\")"
     ]
   }
 }
