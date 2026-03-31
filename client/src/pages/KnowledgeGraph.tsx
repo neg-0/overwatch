@@ -13,7 +13,11 @@ type GraphNodeType =
   | 'BASE'
   | 'TARGET'
   | 'SPACE_ASSET'
-  | 'MISSION';
+  | 'SPACE_NEED'
+  | 'MISSION'
+  | 'ASSET'
+  | 'PACKAGE'
+  | 'ALLOCATION';
 
 interface GraphNode {
   id: string;
@@ -55,58 +59,113 @@ const NODE_CONFIG: Record<GraphNodeType, { color: string; icon: string }> = {
   BASE: { color: '#a78bfa', icon: '🏗' },
   TARGET: { color: '#f87171', icon: '💥' },
   SPACE_ASSET: { color: '#38bdf8', icon: '✦' },  // simple vector glyph (🛰 emoji kills zoom perf)
+  SPACE_NEED: { color: '#c084fc', icon: '📡' },
   MISSION: { color: '#fbbf24', icon: '✈️' },
+  ASSET: { color: '#4ade80', icon: '🔧' },
+  PACKAGE: { color: '#fb923c', icon: '📦' },
+  ALLOCATION: { color: '#94a3b8', icon: '⬡' },  // default gray; overridden by status
+};
+
+// Status-based coloring for ALLOCATION nodes (space allocation health)
+const ALLOCATION_STATUS_COLORS: Record<string, string> = {
+  FULFILLED:  '#4ade80',  // green — healthy
+  PARTIAL:    '#fbbf24',  // amber — degraded coverage
+  CONTENTION: '#fb923c',  // orange — multiple needs competing
+  DEGRADED:   '#f97316',  // dark orange — capability reduced
+  PENDING:    '#94a3b8',  // gray — not yet resolved
+  DENIED:     '#ef4444',  // red — no coverage available
 };
 
 const NODE_RADIUS = 24;
 
 // Type-aware charge strengths — heavier repulsion for documents, lighter for derived nodes
 const NODE_CHARGE: Record<string, number> = {
-  DOCUMENT:    -600,
+  DOCUMENT:    -400,
   PRIORITY:    -150,
   UNIT:        -120,
   BASE:        -100,
   TARGET:      -100,
   SPACE_ASSET: -120,
+  SPACE_NEED:  -100,
   MISSION:     -100,
+  ASSET:       -80,
+  PACKAGE:     -200,
+  ALLOCATION:  -80,
+};
+
+// Hierarchy tier map — used for vertical band layout (top → bottom)
+const NODE_TIER: Record<string, number> = {
+  DOCUMENT: 0,      // Strategy/Planning/Order docs — top of hierarchy
+  PRIORITY: 1,      // Priorities derived from documents
+  PACKAGE: 2,       // Mission packages from orders
+  UNIT: 2,          // Units — peer to packages
+  MISSION: 3,       // Individual missions within packages
+  TARGET: 3,        // Targets assigned to missions (same tier)
+  BASE: 3,          // Bases — peer to missions
+  ASSET: 3,         // Assets — peer to missions
+  SPACE_NEED: 4,    // Space needs from missions
+  ALLOCATION: 5,    // Space allocations resolving needs
+  SPACE_ASSET: 5,   // Space assets (same tier as allocations)
 };
 
 // Link distance by relationship — hierarchy levels push apart, operational links stay tight
 const LINK_DISTANCE: Record<string, number> = {
   DERIVES_FROM:          200,
-  IMPLEMENTS:            180,
+  DIRECTS:               180,
   ESTABLISHES_PRIORITY:  120,
-  ALLOCATES:              90,
+  ALLOCATED_TO:           90,
+  RESOLVED_BY:            60,
   TARGETS:                80,
-  SUPPORTS:               80,
-  CONFLICTS_WITH:        140,
+  SUPPORTS_MISSION:       80,
+  AUTHORIZES:            160,
+  ASSIGNS_MISSION:       100,
+  CONTAINS_PACKAGE:      100,
+  EXECUTES:              100,
+  STATIONED_AT:          120,
+  REQUIRES:               90,
+  PROVIDES_COVERAGE:      80,
+  HAS_ASSET:              60,
+  PREFERS:                90,
+  NEEDS_BAND:            150,
 };
 const DEFAULT_LINK_DISTANCE = 120;
 
 // Semantic edge type colors
 const EDGE_COLORS: Record<string, string> = {
-  DERIVES_FROM: '#60a5fa',
-  IMPLEMENTS: '#34d399',
-  ALLOCATES: '#fbbf24',
-  TARGETS: '#f87171',
-  SUPPORTS: '#a78bfa',
-  CONFLICTS_WITH: '#fb7185',
+  DERIVES_FROM:         '#60a5fa',
+  DIRECTS:              '#34d399',
+  ESTABLISHES_PRIORITY: '#f59e0b',
+  ALLOCATED_TO:         '#fbbf24',
+  RESOLVED_BY:          '#fbbf24',
+  TARGETS:              '#f87171',
+  SUPPORTS_MISSION:     '#a78bfa',
+  AUTHORIZES:           '#818cf8',
+  ASSIGNS_MISSION:      '#fb923c',
+  CONTAINS_PACKAGE:     '#fb923c',
+  EXECUTES:             '#34d399',
+  STATIONED_AT:         '#a78bfa',
+  REQUIRES:             '#c084fc',
+  PROVIDES_COVERAGE:    '#38bdf8',
+  HAS_ASSET:            '#4ade80',
+  PREFERS:              '#94a3b8',
+  NEEDS_BAND:           '#e879f9',
 };
 
 // Types that are always visible (relationship graph)
-const CORE_TYPES: Set<GraphNodeType> = new Set(['DOCUMENT', 'PRIORITY', 'MISSION', 'TARGET']);
+const CORE_TYPES: Set<GraphNodeType> = new Set(['DOCUMENT', 'PRIORITY', 'MISSION', 'TARGET', 'SPACE_NEED', 'PACKAGE', 'ALLOCATION']);
 // Types hidden by default (raw ORBAT data — too many disconnected nodes)
-const ORBAT_TYPES: Set<GraphNodeType> = new Set(['UNIT', 'BASE', 'SPACE_ASSET']);
+const ORBAT_TYPES: Set<GraphNodeType> = new Set(['UNIT', 'BASE', 'SPACE_ASSET', 'ASSET']);
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function KnowledgeGraph() {
   const activeScenarioId = useOverwatchStore(s => s.activeScenarioId);
   const socket = useOverwatchStore(s => s.socket);
-  const svgRef = useRef<SVGSVGElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
   const isDraggingRef = useRef(false);
+  const hoveredNodeIdRef = useRef<string | null>(null);
 
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
@@ -114,11 +173,25 @@ export function KnowledgeGraph() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState({ nodes: 0, edges: 0 });
-  const [showOrbat, setShowOrbat] = useState(false);
+  const [orbatMode, setOrbatMode] = useState<'off' | 'active' | 'all'>('off');
+  const [layoutMode, setLayoutMode] = useState<'hierarchy' | 'radial'>('hierarchy');
+  const layoutModeRef = useRef<'hierarchy' | 'radial'>('hierarchy');
   const [atoDay, setAtoDay] = useState<number | null>(null);
   const [overlayExpanded, setOverlayExpanded] = useState(true);
   const newNodeIdsRef = useRef<Set<string>>(new Set());
   const nodesRef = useRef<GraphNode[]>([]);
+
+  // ─── Physics Constants ───────────────────────────────────────────────
+  const PHYSICS = useMemo(() => ({
+    distanceMin: 20,
+    centerStrength: 0.015,    // even weaker horizontal centering so nodes can unpack
+    tierStrength: 0.5,        // strong vertical tier enforcement
+    velocityDecay: 0.75,
+    alphaDecay: 0.04,
+    collisionRadius: 36,      // NODE_RADIUS + padding
+    linkDistScale: 1.0,
+    chargeStrength: -200,     // fallback charge
+  }), []);
 
   // Ingest state from Zustand (persists across page navigation)
   const ingestCards = useOverwatchStore(s => s.ingestCards);
@@ -201,14 +274,36 @@ export function KnowledgeGraph() {
   // ─── Filtered Data ──────────────────────────────────────────────────────
 
   const filteredNodes = useMemo(() => {
-    if (showOrbat) return nodes;
-    return nodes.filter(n => CORE_TYPES.has(n.type));
-  }, [nodes, showOrbat]);
+    if (orbatMode === 'all') return nodes;
+
+    const coreNodes = nodes.filter(n => CORE_TYPES.has(n.type));
+    if (orbatMode === 'off') return coreNodes;
+
+    // ACTIVE mode: Core Nodes + ORBAT nodes attached to operations
+    const coreNodeIds = new Set(coreNodes.map(n => n.id));
+    const activeOrbatIds = new Set<string>();
+
+    // Pass 1: Direct connection to CORE node
+    edges.forEach(e => {
+      if (coreNodeIds.has(e.source) && !coreNodeIds.has(e.target)) activeOrbatIds.add(e.target);
+      if (coreNodeIds.has(e.target) && !coreNodeIds.has(e.source)) activeOrbatIds.add(e.source);
+    });
+
+    // Pass 2: Second hop (e.g. Asset attached to Unit assigned to Mission)
+    edges.forEach(e => {
+      if (activeOrbatIds.has(e.source) && !coreNodeIds.has(e.target)) activeOrbatIds.add(e.target);
+      if (activeOrbatIds.has(e.target) && !coreNodeIds.has(e.source)) activeOrbatIds.add(e.source);
+    });
+
+    return nodes.filter(n => coreNodeIds.has(n.id) || activeOrbatIds.has(n.id));
+  }, [nodes, edges, orbatMode]);
 
   const filteredEdges = useMemo(() => {
     const nodeIds = new Set(filteredNodes.map(n => n.id));
     return edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
   }, [edges, filteredNodes]);
+
+  // (batching system removed — all filtered nodes render directly)
 
   const orbatCount = useMemo(() =>
     nodes.filter(n => ORBAT_TYPES.has(n.type)).length,
@@ -218,396 +313,433 @@ export function KnowledgeGraph() {
   // ─── D3 Force Simulation (Incremental) ─────────────────────────────────
 
   // Refs to persist D3 state across React renders
-  const gRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
-  const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  const zoomRef = useRef<d3.ZoomBehavior<HTMLCanvasElement, unknown> | null>(null);
+  const zoomTransformRef = useRef<d3.ZoomTransform>(d3.zoomIdentity);
   const simNodesRef = useRef<SimNode[]>([]);
   const simLinksRef = useRef<SimLink[]>([]);
   const initialFitDoneRef = useRef(false);
 
-  // ── One-time SVG scaffold (defs, zoom, groups) ──────────────────────
+  // ── Pre-computed layout + render ─────────────────────────────────────
   useEffect(() => {
-    if (!svgRef.current || !containerRef.current) return;
-    const svg = d3.select(svgRef.current);
+    if (!canvasRef.current || !containerRef.current || filteredNodes.length === 0) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
     const container = containerRef.current;
-    const width = container.clientWidth;
-    const height = container.clientHeight;
-    svg.attr('width', width).attr('height', height);
+    const width = container.clientWidth || 1000;
+    const height = container.clientHeight || 800;
+    const P = PHYSICS;
 
-    // Only scaffold once
-    if (gRef.current) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
 
-    svg.selectAll('*').remove();
-
-    // Defs for arrow markers
-    const defs = svg.append('defs');
-    defs.append('marker')
-      .attr('id', 'arrowhead')
-      .attr('viewBox', '0 -5 10 10')
-      .attr('refX', NODE_RADIUS + 10)
-      .attr('refY', 0)
-      .attr('markerWidth', 6)
-      .attr('markerHeight', 6)
-      .attr('orient', 'auto')
-      .append('path')
-      .attr('d', 'M0,-5L10,0L0,5')
-      .attr('fill', 'rgba(255,255,255,0.25)');
-
-    const g = svg.append('g');
-    g.append('g').attr('class', 'graph-links');
-    g.append('g').attr('class', 'graph-link-labels');
-    g.append('g').attr('class', 'graph-nodes');
-    gRef.current = g;
-
-    // Zoom behavior — with LOD performance optimization
-    // During zoom: hide labels/sublabels/edge-labels + markers to keep 60fps
-    // Icons stay visible for orientation. Restored 150ms after zoom ends.
-    let zoomEndTimer: ReturnType<typeof setTimeout> | null = null;
-    let isActivelyZooming = false;
-    const zoom = d3.zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.1, 4])
-      .on('zoom', (event) => {
-        g.attr('transform', event.transform);
-        if (event.sourceEvent) {
-          if (!isActivelyZooming) {
-            isActivelyZooming = true;
-            svg.selectAll('line[marker-end]').attr('marker-end', null);
-            svg.selectAll('.graph-node-label, .graph-node-sublabel, .graph-edge-label').style('display', 'none');
-          }
-
-          if (zoomEndTimer) clearTimeout(zoomEndTimer);
-          zoomEndTimer = setTimeout(() => {
-            isActivelyZooming = false;
-            svg.selectAll('.graph-links line').attr('marker-end', 'url(#arrowhead)');
-            svg.selectAll('.graph-node-label, .graph-node-sublabel, .graph-edge-label').style('display', null);
-          }, 150);
-        }
-      });
-    svg.call(zoom);
-    zoomRef.current = zoom;
-
-    return () => {
-      simulationRef.current?.stop();
-      simulationRef.current = null;
-      gRef.current = null;
-      zoomRef.current = null;
-      simNodesRef.current = [];
-      simLinksRef.current = [];
-      initialFitDoneRef.current = false;
-    };
-  }, []); // runs once on mount
-
-  // ── Incremental data merge + simulation update ──────────────────────
-  useEffect(() => {
-    if (!svgRef.current || !containerRef.current || !gRef.current || filteredNodes.length === 0) return;
-
-    const svg = d3.select(svgRef.current);
-    const g = gRef.current;
-    const container = containerRef.current;
-    const width = container.clientWidth;
-    const height = container.clientHeight;
-
-    // ── Merge nodes: preserve positions from previous simulation ──
+    // ── Build node + link arrays ──────────────────────────────────
     const existingById = new Map(simNodesRef.current.map(n => [n.id, n]));
-    const mergedNodes: SimNode[] = filteredNodes.map(n => {
+    const mergedNodes: SimNode[] = [];
+    const seenNodeIds = new Set<string>();
+
+    // Build adjacency lookup so new nodes can be placed near parents
+    const parentOf = new Map<string, string>();
+    for (const e of filteredEdges) {
+      if (!parentOf.has(e.target)) parentOf.set(e.target, e.source);
+    }
+
+    // Sort nodes by tier so hierarchy places parents before children
+    const sortedNodes = [...filteredNodes].sort((a, b) =>
+      (NODE_TIER[a.type] ?? 9) - (NODE_TIER[b.type] ?? 9)
+    );
+
+    // Tier-based Y-band: scale layout height with node count so tiers don't compress
+    const maxTier = 5; // ALLOCATION/SPACE_ASSET
+    const layoutHeight = Math.max(height, sortedNodes.length * 6); // ~6px per node minimum
+    const bandHeight = layoutHeight / (maxTier + 2);
+    const tierY = (type: string) => bandHeight * ((NODE_TIER[type] ?? 9) + 1);
+
+    for (const n of sortedNodes) {
+      if (seenNodeIds.has(n.id)) continue;
+      seenNodeIds.add(n.id);
+
       const existing = existingById.get(n.id);
       if (existing) {
-        // Preserve position + pinned state
-        return { ...n, x: existing.x, y: existing.y, vx: existing.vx, vy: existing.vy, fx: existing.fx, fy: existing.fy };
+        Object.assign(existing, { type: n.type, label: n.label, sublabel: n.sublabel, meta: n.meta });
+        if (!Number.isFinite(existing.x!)) existing.x = width / 2;
+        if (!Number.isFinite(existing.y!)) existing.y = tierY(n.type);
+        if (!Number.isFinite(existing.vx!)) existing.vx = 0;
+        if (!Number.isFinite(existing.vy!)) existing.vy = 0;
+        mergedNodes.push(existing);
+      } else {
+        // New node — place near parent if linked, else scatter within tier band
+        const parentId = parentOf.get(n.id);
+        const parentNode = parentId ? existingById.get(parentId) : null;
+        let initX: number;
+        let initY: number;
+
+        if (parentNode && Number.isFinite(parentNode.x!) && Number.isFinite(parentNode.y!)) {
+          const angle = Math.random() * Math.PI * 2;
+          const dist = 60 + Math.random() * 40;
+          initX = parentNode.x! + Math.cos(angle) * dist;
+          initY = parentNode.y! + Math.sin(angle) * dist;
+        } else {
+          initX = width * (0.15 + Math.random() * 0.7);
+          initY = tierY(n.type) + (Math.random() - 0.5) * bandHeight * 0.4;
+        }
+
+        mergedNodes.push({
+          ...n,
+          x: initX, y: initY,
+          vx: 0, vy: 0,
+          fx: null, fy: null,
+        });
       }
-      // New node — place near a connected neighbor or random
-      const connectedEdge = filteredEdges.find(e => e.source === n.id || e.target === n.id);
-      const neighborId = connectedEdge ? (connectedEdge.source === n.id ? connectedEdge.target : connectedEdge.source) : null;
-      const neighbor = neighborId ? existingById.get(neighborId) : null;
-      return {
-        ...n,
-        x: neighbor ? (neighbor.x ?? width / 2) + (Math.random() - 0.5) * 80 : width / 2 + (Math.random() - 0.5) * 200,
-        y: neighbor ? (neighbor.y ?? height / 2) + (Math.random() - 0.5) * 80 : height / 2 + (Math.random() - 0.5) * 200,
-      };
-    });
+    }
 
     const nodeIdSet = new Set(mergedNodes.map(n => n.id));
     const mergedLinks: SimLink[] = filteredEdges
       .filter(e => nodeIdSet.has(e.source) && nodeIdSet.has(e.target))
       .map(e => ({
-        source: e.source,
-        target: e.target,
-        relationship: e.relationship,
-        weight: e.weight,
-        confidence: e.confidence,
+        source: e.source, target: e.target,
+        relationship: e.relationship, weight: e.weight, confidence: e.confidence,
       }));
 
     simNodesRef.current = mergedNodes;
     simLinksRef.current = mergedLinks;
 
-    // ── Create or update simulation ───────────────────────────────
+    // ── Create or reuse simulation ────────────────────────────────
     let simulation = simulationRef.current;
-    const isNew = !simulation;
+    let isMajorChange = false;
 
     if (!simulation) {
-      simulation = d3.forceSimulation<SimNode>(mergedNodes)
-        .velocityDecay(0.4)        // Higher friction — less drift
-        .alphaDecay(0.02)          // Slower decay — more time to find good layout
-        .alphaMin(0.001);          // Default — actually settle to rest
+      simulation = d3.forceSimulation<SimNode>(mergedNodes).stop();
       simulationRef.current = simulation;
+      isMajorChange = true;
     } else {
+      const prevNodeCount = simulation.nodes().length;
+      isMajorChange = Math.abs(mergedNodes.length - prevNodeCount) > 50;
+      if (layoutModeRef.current !== layoutMode) {
+        layoutModeRef.current = layoutMode;
+        isMajorChange = true;
+      }
+      simulation.stop();
       simulation.nodes(mergedNodes);
-      // Gentle reheat for incremental updates (not full restart)
-      simulation.alpha(0.3).restart();
     }
 
-    // Forces — type-aware
+    // ── Configure forces — tier-constrained top-down hierarchy ────
+    // Charge scales with sqrt(50/N) so large graphs don't explode
+    // but repulsion stays meaningful (at 229 nodes: ×0.47, so DOCUMENT = -188)
+    const nodeCount = mergedNodes.length;
+    const chargeScale = nodeCount > 50 ? Math.sqrt(50 / nodeCount) : 1;
+
     simulation
+      .velocityDecay(P.velocityDecay)
+      .alphaDecay(P.alphaDecay)
       .force('link', d3.forceLink<SimNode, SimLink>(mergedLinks)
         .id(d => d.id)
-        .distance(d => LINK_DISTANCE[d.relationship] || DEFAULT_LINK_DISTANCE)
-        .strength(d => d.weight ? Math.min(1, d.weight) : 0.5))
+        .distance(d => (LINK_DISTANCE[d.relationship] || DEFAULT_LINK_DISTANCE) * P.linkDistScale)
+        .strength(d => d.weight ? Math.min(0.2, d.weight * 0.02) : 0.05))
       .force('charge', d3.forceManyBody<SimNode>()
-        .strength(d => NODE_CHARGE[d.type] || -300)
-        .distanceMax(600)
-        .theta(0.9))
-      .force('x', d3.forceX(width / 2).strength(0.005))   // Very weak centering
-      .force('y', d3.forceY(height / 2).strength(0.005))
-      .force('collision', d3.forceCollide<SimNode>(NODE_RADIUS + 8));
+        .strength(d => (NODE_CHARGE[d.type] || P.chargeStrength) * chargeScale)
+        .distanceMin(P.distanceMin)
+        .distanceMax(400)
+        .theta(0.9));
 
-    // ── D3 data join — links ──────────────────────────────────────
-    const linkSel = g.select('.graph-links')
-      .selectAll<SVGLineElement, SimLink>('line')
-      .data(mergedLinks, d => `${typeof d.source === 'object' ? (d.source as SimNode).id : d.source}::${typeof d.target === 'object' ? (d.target as SimNode).id : d.target}::${d.relationship}`);
+    if (layoutMode === 'radial') {
+      simulation
+        .force('x', null)
+        .force('y', null)
+        .force('radial', d3.forceRadial<SimNode>(
+            d => Math.max(0, tierY(d.type) - 100), // Tier height converted to ring radius
+            width / 2,
+            height / 2
+          ).strength(P.tierStrength));
+    } else {
+      simulation
+        .force('radial', null)
+        .force('x', d3.forceX<SimNode>(width / 2).strength(P.centerStrength))
+        .force('y', d3.forceY<SimNode>(d => tierY(d.type)).strength(P.tierStrength));
+    }
 
-    linkSel.exit().transition().duration(300).attr('stroke-opacity', 0).remove();
+    simulation.force('collision', d3.forceCollide<SimNode>(P.collisionRadius).iterations(1));
 
-    const linkEnter = linkSel.enter().append('line')
-      .attr('stroke', d => EDGE_COLORS[d.relationship] || 'rgba(255,255,255,0.15)')
-      .attr('stroke-width', d => Math.max(1, Math.min(4, (d.weight ?? 0.5) * 3)))
-      .attr('stroke-opacity', 0)
-      .attr('marker-end', 'url(#arrowhead)');
-    linkEnter.transition().duration(500).attr('stroke-opacity', d => d.confidence ?? 0.5);
+    // ── PRE-COMPUTE: chunked async ticks to avoid blocking UI ─────
+    if (isMajorChange) {
+      const totalTicks = Math.min(200, Math.max(80, mergedNodes.length));
+      const chunkSize = 40;
+      simulation.alpha(1);
+      let ticksDone = 0;
 
-    const link = linkEnter.merge(linkSel);
+      const tickChunk = () => {
+        if (!simulationRef.current || simulationRef.current !== simulation) return;
+        const end = Math.min(ticksDone + chunkSize, totalTicks);
+        for (let i = ticksDone; i < end; i++) simulation.tick();
+        ticksDone = end;
+        
+        if (ticksDone < totalTicks) {
+          setTimeout(tickChunk, 0);
+        } else if (mergedNodes.length > 0) {
+          // ── Zoom-to-fit AFTER settling ────────────────────────
+          initialFitDoneRef.current = true;
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          mergedNodes.forEach(n => {
+            if (Number.isFinite(n.x) && Number.isFinite(n.y)) {
+              minX = Math.min(minX, n.x!); maxX = Math.max(maxX, n.x!);
+              minY = Math.min(minY, n.y!); maxY = Math.max(maxY, n.y!);
+            }
+          });
+          
+          const padding = 100;
+          const contentWidth = maxX - minX;
+          const contentHeight = maxY - minY;
+          
+          // Only zoom if we have a valid layout box
+          if (contentWidth > 0 && contentHeight > 0 && contentWidth < 100000) {
+            const scale = Math.max(0.05, Math.min(
+              width / (contentWidth + padding * 2),
+              height / (contentHeight + padding * 2),
+              1.5
+            ));
+            const cx = minX + contentWidth / 2;
+            const cy = minY + contentHeight / 2;
+            
+            const transform = d3.zoomIdentity
+              .translate(width / 2, height / 2)
+              .scale(scale)
+              .translate(-cx, -cy);
+              
+            d3.select(canvas).transition().duration(750)
+              .call(zoom.transform, transform);
+          }
+        }
+      };
+      tickChunk();
+    }
 
-    // ── D3 data join — link labels ────────────────────────────────
-    const linkLabelSel = g.select('.graph-link-labels')
-      .selectAll<SVGTextElement, SimLink>('text')
-      .data(mergedLinks, d => `${typeof d.source === 'object' ? (d.source as SimNode).id : d.source}::${typeof d.target === 'object' ? (d.target as SimNode).id : d.target}::${d.relationship}`);
+    // ── Canvas Render Loop ──────────────────────────────────────────
+    const draw = () => {
+      ctx.save();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(dpr, dpr);
 
-    linkLabelSel.exit().remove();
-    const linkLabelEnter = linkLabelSel.enter().append('text')
-      .attr('class', 'graph-edge-label')
-      .text(d => d.relationship)
-      .attr('font-size', 9)
-      .attr('fill', 'rgba(255,255,255,0.3)')
-      .attr('text-anchor', 'middle');
-    const linkLabel = linkLabelEnter.merge(linkLabelSel);
+      const transform = zoomTransformRef.current;
+      ctx.translate(transform.x, transform.y);
+      ctx.scale(transform.k, transform.k);
 
-    // ── D3 data join — nodes ──────────────────────────────────────
-    const nodeSel = g.select('.graph-nodes')
-      .selectAll<SVGGElement, SimNode>('g.graph-node')
-      .data(mergedNodes, d => d.id);
+      const isZoomedOut = transform.k < 0.4;
+      const hoveredId = hoveredNodeIdRef.current;
 
-    nodeSel.exit().transition().duration(300).attr('opacity', 0).remove();
+      // Draw Edges
+      for (const link of mergedLinks) {
+        const source = link.source as SimNode;
+        const target = link.target as SimNode;
+        if (!source || !target || !Number.isFinite(source.x) || !Number.isFinite(target.x)) continue;
 
-    const nodeEnter = nodeSel.enter().append('g')
-      .attr('class', 'graph-node')
-      .attr('cursor', 'pointer')
-      .attr('opacity', 0);
+        const isHighlighted = hoveredId && (source.id === hoveredId || target.id === hoveredId);
 
-    // Entrance animation
-    nodeEnter.transition().duration(500).ease(d3.easeCubicOut).attr('opacity', 1);
+        ctx.beginPath();
+        ctx.moveTo(source.x!, source.y!);
+        ctx.lineTo(target.x!, target.y!);
 
-    // Circle
-    nodeEnter.append('circle')
-      .attr('r', d => newNodeIdsRef.current.has(d.id) ? 0 : NODE_RADIUS)
-      .attr('fill', d => NODE_CONFIG[d.type]?.color || '#666')
-      .attr('fill-opacity', 0.2)
-      .attr('stroke', d => NODE_CONFIG[d.type]?.color || '#666')
-      .attr('stroke-width', 2);
+        ctx.strokeStyle = (isHighlighted && hoveredId)
+          ? (source.id === hoveredId ? (NODE_CONFIG[source.type]?.color || '#fff') : (NODE_CONFIG[target.type]?.color || '#fff'))
+          : (EDGE_COLORS[link.relationship] || 'rgba(255,255,255,0.15)');
 
-    // Animate new nodes growing in
-    nodeEnter.filter(d => newNodeIdsRef.current.has(d.id))
-      .select('circle')
-      .transition().duration(600).ease(d3.easeCubicOut)
-      .attr('r', NODE_RADIUS);
+        ctx.lineWidth = isHighlighted ? 3 : Math.max(1, Math.min(3, (link.weight ?? 0.5) * 2));
+        ctx.globalAlpha = isHighlighted ? 1 : Math.max(0.2, (link.confidence ?? 0.5));
+        ctx.stroke();
 
-    // Pulse ring for new arrivals
-    nodeEnter.filter(d => newNodeIdsRef.current.has(d.id))
-      .append('circle')
-      .attr('class', 'kg-pulse-ring')
-      .attr('r', NODE_RADIUS)
-      .attr('fill', 'none')
-      .attr('stroke', d => NODE_CONFIG[d.type]?.color || '#60a5fa')
-      .attr('stroke-width', 3)
-      .attr('stroke-opacity', 0.8)
-      .transition().duration(1200).ease(d3.easeQuadOut)
-      .attr('r', NODE_RADIUS * 2.5)
-      .attr('stroke-opacity', 0)
-      .remove();
+        // Arrowhead (simple triangle)
+        const dx = target.x! - source.x!;
+        const dy = target.y! - source.y!;
+        const angle = Math.atan2(dy, dx);
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        if (dist > NODE_RADIUS) {
+          const targetX = target.x! - Math.cos(angle) * (NODE_RADIUS + 4);
+          const targetY = target.y! - Math.sin(angle) * (NODE_RADIUS + 4);
+          ctx.beginPath();
+          ctx.moveTo(targetX, targetY);
+          ctx.lineTo(targetX - 7 * Math.cos(angle - Math.PI / 6), targetY - 7 * Math.sin(angle - Math.PI / 6));
+          ctx.lineTo(targetX - 7 * Math.cos(angle + Math.PI / 6), targetY - 7 * Math.sin(angle + Math.PI / 6));
+          ctx.fillStyle = ctx.strokeStyle;
+          ctx.globalAlpha = isHighlighted ? 1 : 0.4;
+          ctx.fill();
+        }
 
-    // Icon — class includes node type for per-type LOD control
-    nodeEnter.append('text')
-      .attr('class', d => `graph-node-icon graph-node-icon--${d.type.toLowerCase()}`)
-      .attr('text-anchor', 'middle')
-      .attr('dominant-baseline', 'central')
-      .attr('font-size', 16)
-      .text(d => NODE_CONFIG[d.type]?.icon || '●');
+        // Link Label
+        if ((!isZoomedOut || isHighlighted) && dist > 40) {
+          const midX = (source.x! + target.x!) / 2;
+          const midY = (source.y! + target.y!) / 2;
+          ctx.font = '9px var(--font-mono, monospace)';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = isHighlighted ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.3)';
+          ctx.globalAlpha = 1;
+          ctx.fillText(link.relationship, midX, midY);
+        }
+      }
 
-    // Label
-    nodeEnter.append('text')
-      .attr('class', 'graph-node-label')
-      .attr('y', NODE_RADIUS + 14)
-      .attr('text-anchor', 'middle')
-      .attr('fill', 'rgba(255,255,255,0.85)')
-      .attr('font-size', 11)
-      .attr('font-weight', 500)
-      .text(d => truncateLabel(d.label, 20));
+      // Draw Nodes
+      for (const node of mergedNodes) {
+        if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) continue;
+        const isHovered = node.id === hoveredId;
 
-    // Sublabel
-    nodeEnter.append('text')
-      .attr('class', 'graph-node-sublabel')
-      .attr('y', NODE_RADIUS + 28)
-      .attr('text-anchor', 'middle')
-      .attr('fill', 'rgba(255,255,255,0.4)')
-      .attr('font-size', 9)
-      .text(d => d.sublabel || '');
+        // Base color
+        let color = NODE_CONFIG[node.type]?.color || '#666';
+        if (node.type === 'ALLOCATION' && node.meta?.status) {
+          color = ALLOCATION_STATUS_COLORS[node.meta.status as string] || color;
+        }
 
-    const node = nodeEnter.merge(nodeSel);
+        const currentRadius = isHovered ? NODE_RADIUS + 4 : NODE_RADIUS;
 
-    // ── Pin indicator ring for pinned nodes ────────────────────────
-    node.each(function (d) {
-      const sel = d3.select(this);
-      sel.select('.kg-pin-ring').remove();
-      if (d.fx != null && d.fy != null) {
-        sel.insert('circle', ':first-child')
-          .attr('class', 'kg-pin-ring')
-          .attr('r', NODE_RADIUS + 5)
-          .attr('fill', 'none')
-          .attr('stroke', 'rgba(255,255,255,0.3)')
-          .attr('stroke-width', 1)
-          .attr('stroke-dasharray', '3,3');
+        // Circle fill
+        ctx.beginPath();
+        ctx.arc(node.x!, node.y!, currentRadius, 0, 2 * Math.PI);
+        ctx.fillStyle = color;
+        ctx.globalAlpha = isHovered ? 0.6 : 0.2;
+        ctx.fill();
+
+        // Circle stroke
+        ctx.globalAlpha = 1;
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = color;
+        ctx.stroke();
+
+        // Pin ring
+        if (node.fx != null && node.fy != null) {
+          ctx.beginPath();
+          ctx.arc(node.x!, node.y!, currentRadius + 5, 0, 2 * Math.PI);
+          ctx.setLineDash([3, 3]);
+          ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
+        // Icon
+        ctx.fillStyle = '#fff';
+        ctx.font = '16px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(NODE_CONFIG[node.type]?.icon || '●', node.x!, node.y!);
+
+        // Text Labels (LOD)
+        if (!isZoomedOut || isHovered) {
+          ctx.fillStyle = 'rgba(255,255,255,0.9)';
+          ctx.font = '500 11px system-ui, sans-serif';
+          ctx.fillText(truncateLabel(node.label, 20), node.x!, node.y! + NODE_RADIUS + 14);
+
+          if (node.sublabel) {
+            ctx.fillStyle = 'rgba(255,255,255,0.5)';
+            ctx.font = '9px system-ui, sans-serif';
+            ctx.fillText(node.sublabel, node.x!, node.y! + NODE_RADIUS + 26);
+          }
+        }
+      }
+
+      ctx.restore();
+    };
+
+    simulation.on('tick', draw);
+    draw();
+
+    // ── Setup Interactivity (Zoom, Pan, Drag, Hover) ───────────────
+    
+    // 1. Zoom
+    const zoom = d3.zoom<HTMLCanvasElement, unknown>()
+      .scaleExtent([0.1, 4])
+      .on('zoom', (e) => {
+        zoomTransformRef.current = e.transform;
+        draw();
+      });
+    
+    const d3Canvas = d3.select(canvas);
+    d3Canvas.call(zoom);
+
+    // Initial Zoom-to-fit was moved to run *after* tickChunk finishes
+
+    // 2. Mouse Hit-Testing
+    d3Canvas.on('mousemove', (e) => {
+      if (isDraggingRef.current) return;
+      const [mx, my] = d3.pointer(e, canvas);
+      const x = zoomTransformRef.current.invertX(mx);
+      const y = zoomTransformRef.current.invertY(my);
+      
+      const node = simulation.find(x, y, NODE_RADIUS * 1.5);
+      const newHoverId = node ? node.id : null;
+      
+      if (newHoverId !== hoveredNodeIdRef.current) {
+        hoveredNodeIdRef.current = newHoverId;
+        canvas.style.cursor = newHoverId ? 'pointer' : 'grab';
+        draw();
       }
     });
 
-    // Track drag vs click
+    d3Canvas.on('mouseleave', () => {
+      if (!isDraggingRef.current && hoveredNodeIdRef.current) {
+        hoveredNodeIdRef.current = null;
+        canvas.style.cursor = 'grab';
+        draw();
+      }
+    });
+
+    // 3. Click / Double-Click
+    let clickTimeout: ReturnType<typeof setTimeout> | null = null;
     let wasDragged = false;
-
-    // Click → select node
-    node.on('click', (_event, d) => {
+    
+    d3Canvas.on('click', (e) => {
       if (wasDragged) { wasDragged = false; return; }
-      const original = nodesRef.current.find(n => n.id === d.id) || null;
-      requestAnimationFrame(() => setSelectedNode(original));
+      const hoveredId = hoveredNodeIdRef.current;
+      const node = nodesRef.current.find(n => n.id === hoveredId) || null;
+      
+      if (clickTimeout) clearTimeout(clickTimeout);
+      clickTimeout = setTimeout(() => {
+        requestAnimationFrame(() => setSelectedNode(node));
+      }, 250); 
     });
 
-    // Double-click → unpin node
-    node.on('dblclick', (_event, d) => {
-      d.fx = null;
-      d.fy = null;
-      // Remove pin indicator
-      d3.select(_event.currentTarget).select('.kg-pin-ring').remove();
-      simulation!.alpha(0.1).restart();
+    d3Canvas.on('dblclick', (e) => {
+      if (clickTimeout) clearTimeout(clickTimeout);
+      const hoveredId = hoveredNodeIdRef.current;
+      const node = mergedNodes.find(n => n.id === hoveredId);
+      if (node) {
+        node.fx = null;
+        node.fy = null;
+        simulation.alpha(0.1).restart();
+        draw();
+      }
     });
 
-    // Hover effects
-    node
-      .on('mouseenter', function (_event, d) {
-        d3.select(this).select('circle:not(.kg-pin-ring):not(.kg-pulse-ring)')
-          .transition().duration(200)
-          .attr('fill-opacity', 0.5)
-          .attr('r', NODE_RADIUS + 4);
-
-        link
-          .attr('stroke', l => {
-            const s = typeof l.source === 'object' ? (l.source as SimNode).id : l.source;
-            const t = typeof l.target === 'object' ? (l.target as SimNode).id : l.target;
-            return (s === d.id || t === d.id) ? NODE_CONFIG[d.type]?.color || '#fff' : 'rgba(255,255,255,0.15)';
-          })
-          .attr('stroke-width', l => {
-            const s = typeof l.source === 'object' ? (l.source as SimNode).id : l.source;
-            const t = typeof l.target === 'object' ? (l.target as SimNode).id : l.target;
-            return (s === d.id || t === d.id) ? 3 : 1.5;
-          });
+    // 4. Drag Behavior
+    d3Canvas.call(d3.drag<HTMLCanvasElement, unknown>()
+      .subject((e) => {
+        const [mx, my] = d3.pointer(e, canvas);
+        const x = zoomTransformRef.current.invertX(mx);
+        const y = zoomTransformRef.current.invertY(my);
+        return simulation.find(x, y, NODE_RADIUS * 1.5);
       })
-      .on('mouseleave', function () {
-        d3.select(this).select('circle:not(.kg-pin-ring):not(.kg-pulse-ring)')
-          .transition().duration(200)
-          .attr('fill-opacity', 0.2)
-          .attr('r', NODE_RADIUS);
-
-        link
-          .attr('stroke', (l: SimLink) => EDGE_COLORS[l.relationship] || 'rgba(255,255,255,0.15)')
-          .attr('stroke-width', (l: SimLink) => Math.max(1, Math.min(4, (l.weight ?? 0.5) * 3)))
-          .attr('stroke-opacity', (l: SimLink) => l.confidence ?? 0.5);
-      });
-
-    // ── Drag: gentle reheat, pin on end ────────────────────────────
-    const drag = d3.drag<SVGGElement, SimNode>()
-      .on('start', (event, d) => {
+      .on('start', (e) => {
+        if (!e.active) simulation.alphaTarget(0.05).restart();
+        e.subject.fx = e.subject.x;
+        e.subject.fy = e.subject.y;
         isDraggingRef.current = true;
-        // Gentle reheat — only enough to let the dragged node's neighbors adjust
-        if (!event.active) simulation!.alphaTarget(0.05).restart();
-        d.fx = d.x;
-        d.fy = d.y;
       })
-      .on('drag', (event, d) => {
+      .on('drag', (e) => {
         wasDragged = true;
-        d.fx = event.x;
-        d.fy = event.y;
+        e.subject.fx = e.x;
+        e.subject.fy = e.y;
+        draw();
       })
-      .on('end', (event, d) => {
+      .on('end', (e) => {
+        if (!e.active) simulation.alphaTarget(0);
         isDraggingRef.current = false;
-        if (!event.active) simulation!.alphaTarget(0);
-        // Keep the node pinned where the user dropped it (double-click to unpin)
-        // d.fx and d.fy remain set
-        // Add pin indicator
-        const nodeG = d3.select(event.sourceEvent.target.closest('.graph-node'));
-        nodeG.select('.kg-pin-ring').remove();
-        nodeG.insert('circle', ':first-child')
-          .attr('class', 'kg-pin-ring')
-          .attr('r', NODE_RADIUS + 5)
-          .attr('fill', 'none')
-          .attr('stroke', 'rgba(255,255,255,0.3)')
-          .attr('stroke-width', 1)
-          .attr('stroke-dasharray', '3,3');
-      });
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    node.call(drag as any);
-
-    // ── Tick ───────────────────────────────────────────────────────
-    simulation.on('tick', () => {
-      link
-        .attr('x1', d => (d.source as SimNode).x!)
-        .attr('y1', d => (d.source as SimNode).y!)
-        .attr('x2', d => (d.target as SimNode).x!)
-        .attr('y2', d => (d.target as SimNode).y!);
-
-      linkLabel
-        .attr('x', d => ((d.source as SimNode).x! + (d.target as SimNode).x!) / 2)
-        .attr('y', d => ((d.source as SimNode).y! + (d.target as SimNode).y!) / 2);
-
-      node.attr('transform', d => `translate(${d.x},${d.y})`);
-    });
-
-    // ── Initial zoom-to-fit (once) ────────────────────────────────
-    if (isNew && !initialFitDoneRef.current) {
-      initialFitDoneRef.current = true;
-      setTimeout(() => {
-        const bounds = (g.node() as SVGGElement)?.getBBox();
-        if (bounds && bounds.width > 0 && bounds.height > 0) {
-          const scale = Math.min(
-            width / (bounds.width + 100),
-            height / (bounds.height + 100),
-            1.5,
-          );
-          const transform = d3.zoomIdentity
-            .translate(width / 2, height / 2)
-            .scale(scale)
-            .translate(-(bounds.x + bounds.width / 2), -(bounds.y + bounds.height / 2));
-          svg.transition().duration(750).call(zoomRef.current!.transform, transform);
-        }
-      }, 1500);
-    }
+      })
+    );
 
     // No teardown — simulation persists across re-renders
-  }, [filteredNodes, filteredEdges]);
+  }, [filteredNodes, filteredEdges, layoutMode, atoDay]);
 
   // ── Cleanup simulation on unmount ───────────────────────────────────
   useEffect(() => {
@@ -661,15 +793,49 @@ export function KnowledgeGraph() {
           <span className="kg-stat">{filteredNodes.length} nodes</span>
           <span className="kg-stat">{filteredEdges.length} edges</span>
           {orbatCount > 0 && (
-            <button
-              className={`kg-refresh-btn ${showOrbat ? 'active' : ''}`}
-              onClick={() => setShowOrbat(!showOrbat)}
-              title={showOrbat ? 'Hide ORBAT nodes (units/bases/space assets)' : `Show ${orbatCount} ORBAT nodes`}
-              style={showOrbat ? { background: 'var(--accent-primary)', color: '#000' } : undefined}
-            >
-              {showOrbat ? `⚔️ ${orbatCount} ORBAT` : `+ ${orbatCount} ORBAT`}
-            </button>
+            <div style={{ display: 'flex', gap: '2px', background: 'var(--bg-tertiary)', padding: '2px', borderRadius: '4px' }}>
+              <button
+                className={`kg-refresh-btn ${orbatMode === 'off' ? 'active' : ''}`}
+                onClick={() => setOrbatMode('off')}
+                title="Only show Core Nodes (Documents, Missions, Targets)"
+                style={orbatMode === 'off' ? { background: 'var(--accent-primary)', color: '#000' } : { border: 'none' }}
+              >
+                ORBAT: Off
+              </button>
+              <button
+                className={`kg-refresh-btn ${orbatMode === 'active' ? 'active' : ''}`}
+                onClick={() => setOrbatMode('active')}
+                title="Show ORBAT units attached to active operations"
+                style={orbatMode === 'active' ? { background: 'var(--accent-primary)', color: '#000' } : { border: 'none' }}
+              >
+                Active
+              </button>
+              <button
+                className={`kg-refresh-btn ${orbatMode === 'all' ? 'active' : ''}`}
+                onClick={() => setOrbatMode('all')}
+                title={`Show all ${orbatCount} ORBAT nodes in database`}
+                style={orbatMode === 'all' ? { background: 'var(--accent-primary)', color: '#000' } : { border: 'none' }}
+              >
+                All
+              </button>
+            </div>
           )}
+          <div style={{ display: 'flex', gap: '2px', background: 'var(--bg-tertiary)', padding: '2px', borderRadius: '4px', marginLeft: '8px' }}>
+            <button
+               className={`kg-refresh-btn ${layoutMode === 'hierarchy' ? 'active' : ''}`}
+               onClick={() => setLayoutMode('hierarchy')}
+               style={layoutMode === 'hierarchy' ? { background: 'var(--accent-primary)', color: '#000' } : { border: 'none' }}
+            >
+              Hierarchy
+            </button>
+             <button
+               className={`kg-refresh-btn ${layoutMode === 'radial' ? 'active' : ''}`}
+               onClick={() => setLayoutMode('radial')}
+               style={layoutMode === 'radial' ? { background: 'var(--accent-primary)', color: '#000' } : { border: 'none' }}
+            >
+              Radial
+            </button>
+          </div>
           <button className="kg-refresh-btn" onClick={fetchGraph} disabled={loading}>
             {loading ? '⟳' : '↻'} Refresh
           </button>
@@ -697,7 +863,7 @@ export function KnowledgeGraph() {
       {/* ─── Legend ──────────────────────────────────────────────────── */}
       <div className="kg-legend">
         {Object.entries(NODE_CONFIG)
-          .filter(([type]) => showOrbat || CORE_TYPES.has(type as GraphNodeType))
+          .filter(([type]) => orbatMode !== 'off' || CORE_TYPES.has(type as GraphNodeType))
           .map(([type, cfg]) => (
             <div key={type} className="kg-legend__item">
               <span className="kg-legend__dot" style={{ backgroundColor: cfg.color }} />
@@ -721,7 +887,9 @@ export function KnowledgeGraph() {
             <span>Building knowledge graph…</span>
           </div>
         )}
-        <svg ref={svgRef} className="kg-svg" />
+        <canvas ref={canvasRef} className="kg-canvas-element" style={{ display: 'block', width: '100%', height: '100%' }} />
+
+
       </div>
 
       {/* ─── Detail Sidebar ─────────────────────────────────────────── */}
@@ -851,7 +1019,8 @@ function IngestCardMini({ card }: { card: IngestCard }) {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function truncateLabel(label: string, max: number): string {
+function truncateLabel(label: string | undefined | null, max: number): string {
+  if (!label) return '';
   return label.length > max ? label.slice(0, max - 1) + '…' : label;
 }
 

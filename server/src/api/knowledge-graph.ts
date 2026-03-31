@@ -11,7 +11,10 @@ export type GraphNodeType =
   | 'TARGET'
   | 'SPACE_ASSET'
   | 'SPACE_NEED'
-  | 'MISSION';
+  | 'MISSION'
+  | 'ASSET'
+  | 'PACKAGE'
+  | 'ALLOCATION';
 
 export interface GraphNode {
   id: string;
@@ -141,7 +144,7 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
 
     // Planning doc → strategy doc
     if (doc.strategyDocId) {
-      addEdge({ source: doc.strategyDocId, target: doc.id, relationship: 'IMPLEMENTS' });
+      addEdge({ source: doc.strategyDocId, target: doc.id, relationship: 'DIRECTS' });
     }
 
     // Planning priorities
@@ -157,7 +160,7 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
 
       // Trace to strategy priority
       if (p.strategyPriorityId) {
-        addEdge({ source: p.strategyPriorityId, target: p.id, relationship: 'DERIVES' });
+        addEdge({ source: p.strategyPriorityId, target: p.id, relationship: 'DERIVES_FROM' });
       }
     }
   }
@@ -205,14 +208,29 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
       addEdge({ source: need.priorityEntryId, target: need.id, relationship: 'REQUIRES' });
     }
 
-    // SpaceNeed → SpaceAsset (via allocations)
+    // SpaceNeed → preferred SpaceAsset (pre-allocation preference)
+    if (need.spaceAssetId) {
+      addEdge({ source: need.id, target: need.spaceAssetId, relationship: 'PREFERS' });
+    }
+
+    // SpaceNeed → SpaceAllocation → SpaceAsset
     for (const alloc of need.allocations) {
+      addNode({
+        id: alloc.id,
+        type: 'ALLOCATION',
+        label: `${alloc.allocatedCapability || need.capabilityType}`,
+        sublabel: `${alloc.status}${alloc.riskLevel ? ' · ' + alloc.riskLevel : ''}`,
+        meta: {
+          status: alloc.status,
+          rationale: alloc.rationale,
+          riskLevel: alloc.riskLevel,
+          contentionGroup: alloc.contentionGroup,
+          allocatedCapability: alloc.allocatedCapability,
+        },
+      });
+      addEdge({ source: need.id, target: alloc.id, relationship: 'ALLOCATED_TO' });
       if (alloc.spaceAssetId) {
-        addEdge({
-          source: need.id,
-          target: alloc.spaceAssetId,
-          relationship: `ALLOCATED_TO${alloc.status ? ` (${alloc.status})` : ''}`,
-        });
+        addEdge({ source: alloc.id, target: alloc.spaceAssetId, relationship: 'RESOLVED_BY' });
       }
     }
   }
@@ -229,6 +247,48 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
       sublabel: base.baseType,
       meta: { country: base.country, lat: base.latitude, lon: base.longitude },
     });
+  }
+
+  // ─── Space Assets ──────────────────────────────────────────────────────────
+
+  const spaceAssets = await prisma.spaceAsset.findMany({
+    where: { scenarioId },
+    include: {
+      allocations: {
+        include: { spaceNeed: true }
+      }
+    },
+    take: 100,
+  });
+
+  for (const sa of spaceAssets) {
+    addNode({
+      id: sa.id,
+      type: 'SPACE_ASSET',
+      label: sa.name,
+      sublabel: sa.constellation,
+      meta: { capabilities: sa.capabilities, status: sa.status, bandwidthProvided: sa.bandwidthProvided },
+    });
+
+    // Sub-loop: Connect Space Asset to the Missions it is allocated to
+    for (const alloc of sa.allocations) {
+      if (alloc.spaceNeed?.missionId) {
+        addEdge({ source: sa.id, target: alloc.spaceNeed.missionId, relationship: 'PROVIDES_COVERAGE' });
+      }
+    }
+  }
+
+  // ─── Comms Dependency Index (Infrastructure Layer) ────────────────────────
+  // Map band names to the space assets that provide them
+  // Used by Asset nodes to emit NEEDS_BAND edges (visible in ORBAT toggle)
+  const bandToSpaceAssets = new Map<string, string[]>();
+  for (const sa of spaceAssets) {
+    if (sa.affiliation !== 'FRIENDLY') continue;
+    for (const band of sa.bandwidthProvided) {
+      const existing = bandToSpaceAssets.get(band) || [];
+      existing.push(sa.id);
+      bandToSpaceAssets.set(band, existing);
+    }
   }
 
   // ─── Units ─────────────────────────────────────────────────────────────────
@@ -260,33 +320,42 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
     if (unit.baseId) {
       addEdge({ source: unit.id, target: unit.baseId, relationship: 'STATIONED_AT' });
     }
-  }
 
-  // ─── Space Assets ──────────────────────────────────────────────────────────
+    // ─── Assets (per unit) ──────────────────────────────────────────────────
+    for (const asset of unit.assets) {
+      addNode({
+        id: asset.id,
+        type: 'ASSET',
+        label: asset.tailNumber || asset.name || asset.assetType?.name || 'Asset',
+        sublabel: asset.assetType?.name,
+        meta: {
+          status: asset.status,
+          platform: asset.assetType?.name,
+          domain: asset.assetType?.domain,
+          category: asset.assetType?.category,
+        },
+      });
+      addEdge({ source: unit.id, target: asset.id, relationship: 'HAS_ASSET' });
 
-  const spaceAssets = await prisma.spaceAsset.findMany({
-    where: { scenarioId },
-    include: {
-      allocations: {
-        include: { spaceNeed: true }
-      }
-    },
-    take: 100,
-  });
-
-  for (const sa of spaceAssets) {
-    addNode({
-      id: sa.id,
-      type: 'SPACE_ASSET',
-      label: sa.name,
-      sublabel: sa.constellation,
-      meta: { capabilities: sa.capabilities, status: sa.status },
-    });
-
-    // Sub-loop: Connect Space Asset to the Missions it is allocated to
-    for (const alloc of sa.allocations) {
-      if (alloc.spaceNeed?.missionId) {
-        addEdge({ source: sa.id, target: alloc.spaceNeed.missionId, relationship: 'PROVIDES_COVERAGE' });
+      // Comms → satellite infrastructure dependency
+      // Only primary comms — shows critical dependency, not full comms suite
+      // Links to ALL providers — edge count = redundancy (many) or vulnerability (few/one)
+      if (asset.assetType?.commsSystems) {
+        const comms = asset.assetType.commsSystems as Array<{ band: string; system: string; role: string }>;
+        for (const comm of comms) {
+          if (comm.role !== 'primary') continue;
+          const providers = bandToSpaceAssets.get(comm.band);
+          if (providers) {
+            for (const providerId of providers) {
+              addEdge({
+                source: asset.id,
+                target: providerId,
+                relationship: 'NEEDS_BAND',
+                weight: 2,
+              });
+            }
+          }
+        }
       }
     }
   }
@@ -326,6 +395,16 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
     }
 
     for (const pkg of order.missionPackages) {
+      // ─── Mission Package node ──────────────────────────────────────────
+      addNode({
+        id: pkg.id,
+        type: 'PACKAGE',
+        label: pkg.packageId,
+        sublabel: `${pkg.missionType} (P${pkg.priorityRank})`,
+        meta: { effectDesired: pkg.effectDesired, priorityRank: pkg.priorityRank },
+      });
+      addEdge({ source: order.id, target: pkg.id, relationship: 'CONTAINS_PACKAGE' });
+
       for (const mission of pkg.missions) {
         addNode({
           id: mission.id,
@@ -335,8 +414,8 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
           meta: { domain: mission.domain, status: mission.status },
         });
 
-        // Mission → order
-        addEdge({ source: order.id, target: mission.id, relationship: 'ASSIGNS_MISSION' });
+        // Mission → package
+        addEdge({ source: pkg.id, target: mission.id, relationship: 'ASSIGNS_MISSION' });
 
         // Mission → unit
         if (mission.unitId) {
@@ -422,7 +501,7 @@ export async function buildIngestDelta(
       });
 
       if (doc.strategyDocId) {
-        edges.push({ source: doc.strategyDocId, target: doc.id, relationship: 'IMPLEMENTS' });
+        edges.push({ source: doc.strategyDocId, target: doc.id, relationship: 'DIRECTS' });
       }
 
       for (const p of doc.priorities) {
@@ -436,7 +515,7 @@ export async function buildIngestDelta(
         edges.push({ source: doc.id, target: p.id, relationship: 'ESTABLISHES_PRIORITY', weight: 11 - p.rank });
 
         if (p.strategyPriorityId) {
-          edges.push({ source: p.strategyPriorityId, target: p.id, relationship: 'DERIVES' });
+          edges.push({ source: p.strategyPriorityId, target: p.id, relationship: 'DERIVES_FROM' });
         }
       }
       break;
@@ -468,6 +547,16 @@ export async function buildIngestDelta(
       }
 
       for (const pkg of order.missionPackages) {
+        // ─── Mission Package node ──────────────────────────────────────────
+        nodes.push({
+          id: pkg.id,
+          type: 'PACKAGE',
+          label: pkg.packageId,
+          sublabel: `${pkg.missionType} (P${pkg.priorityRank})`,
+          meta: { effectDesired: pkg.effectDesired, priorityRank: pkg.priorityRank },
+        });
+        edges.push({ source: order.id, target: pkg.id, relationship: 'CONTAINS_PACKAGE' });
+
         for (const mission of pkg.missions) {
           nodes.push({
             id: mission.id,
@@ -476,7 +565,7 @@ export async function buildIngestDelta(
             sublabel: `${mission.missionType} (${mission.platformType})`,
             meta: { domain: mission.domain, status: mission.status },
           });
-          edges.push({ source: order.id, target: mission.id, relationship: 'ASSIGNS_MISSION' });
+          edges.push({ source: pkg.id, target: mission.id, relationship: 'ASSIGNS_MISSION' });
 
           if (mission.unitId) {
             edges.push({ source: mission.unitId, target: mission.id, relationship: 'EXECUTES' });
