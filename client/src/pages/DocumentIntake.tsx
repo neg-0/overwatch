@@ -405,8 +405,9 @@ export function DocumentIntake() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           scenarioId: activeScenarioId,
-          rawText: rawText.trim(),
+          rawText: rawText,
           sourceHint: hint === 'auto' ? undefined : hint,
+          sourceDocId: docId,
         }),
       });
       if (!res.ok) {

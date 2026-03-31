@@ -229,7 +229,7 @@ export function createIngestRoutes(io: Server) {
    * Body: { scenarioId: string, rawText: string, sourceHint?: string }
    */
   router.post('/', async (req, res) => {
-    const { scenarioId, rawText, sourceHint } = req.body;
+    const { scenarioId, rawText, sourceHint, sourceDocId } = req.body;
 
     if (!scenarioId) {
       return res.status(400).json({ success: false, error: 'scenarioId is required', timestamp: new Date().toISOString() });
@@ -240,7 +240,7 @@ export function createIngestRoutes(io: Server) {
     }
 
     try {
-      const result = await ingestDocument(scenarioId, rawText, sourceHint, io);
+      const result = await ingestDocument(scenarioId, rawText, sourceHint, io, typeof sourceDocId === 'string' ? sourceDocId : undefined);
       return res.json({ ...result, timestamp: new Date().toISOString() });
     } catch (err) {
       console.error('[API] Ingestion failed:', err);

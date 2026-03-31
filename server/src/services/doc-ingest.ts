@@ -187,12 +187,12 @@ export interface IngestResult {
 const CLASSIFY_PROMPT = `You are a military document classifier. Analyze the following document and determine:
 
 1. **hierarchyLevel**: One of:
-   - "STRATEGY" — High-level directives from general officers (NMS, Campaign Plans, JFC Guidance, Component Directives)
-   - "PLANNING" — Staff-level documents (JIPTL, JPEL, SPINS, ACO, MAAP, Component Priority Lists)
-   - "ORDER" — Tactical-level orders (ATO, MTO, STO, OPORD, EXORD, FRAGORD)
+   - "STRATEGY" — High-level directives from senior commanders: NDS, NMS, JSCP, CONPLAN, OPLAN, Campaign Plans, JFC Guidance, Component Directives. NOTE: CONPLAN (Contingency Plan) and OPLAN (Operations Plan) issued by a combatant commander are STRATEGY, NOT planning or order documents.
+   - "PLANNING" — Staff-level planning products (JIPTL, JPEL, SPINS, ACO, MAAP, Component Priority Lists). These support execution planning, not strategic direction.
+   - "ORDER" — Tactical-level execution orders (ATO, MTO, STO, OPORD, EXORD, FRAGORD)
    - "EVENT_LIST" — Exercise event lists (MSEL, scenario inject lists, exercise event schedules)
 
-2. **documentType**: Specific type (NMS, CAMPAIGN_PLAN, JFC_GUIDANCE, COMPONENT_GUIDANCE, JIPTL, JPEL, SPINS, ACO, MAAP, ATO, MTO, STO, OPORD, EXORD, FRAGORD, MSEL)
+2. **documentType**: Specific type (NDS, NMS, JSCP, CONPLAN, OPLAN, CAMPAIGN_PLAN, JFC_GUIDANCE, COMPONENT_GUIDANCE, JIPTL, JPEL, SPINS, ACO, MAAP, ATO, MTO, STO, OPORD, EXORD, FRAGORD, MSEL)
 
 3. **sourceFormat**: The format the document is written in:
    - "USMTF" — Slash-delimited USMTF message (MSGID/ATO/...)
@@ -1009,6 +1009,7 @@ export async function ingestDocument(
   rawText: string,
   sourceHint?: string,
   io?: Server,
+  sourceDocId?: string,
 ): Promise<IngestResult> {
   const startTime = Date.now();
   const inputHash = crypto.createHash('sha256').update(rawText).digest('hex');
@@ -1157,7 +1158,24 @@ export async function ingestDocument(
   // The original docs (from scenario generation) have ingestedAt = null.
   try {
     const now = new Date();
-    if (classification.hierarchyLevel === 'STRATEGY') {
+    if (sourceDocId) {
+      // Prefer ID-based stamping — immune to content mismatch and classification errors.
+      // Try both tables since classification may disagree with where the generator stored the doc.
+      const [stratResult, planResult] = await Promise.all([
+        prisma.strategyDocument.updateMany({
+          where: { id: sourceDocId, scenarioId, ingestedAt: null },
+          data: { ingestedAt: now },
+        }),
+        prisma.planningDocument.updateMany({
+          where: { id: sourceDocId, scenarioId, ingestedAt: null },
+          data: { ingestedAt: now },
+        }),
+      ]);
+      const stamped = stratResult.count + planResult.count;
+      if (stamped === 0) {
+        console.warn(`[INGEST] sourceDocId ${sourceDocId} not found in strategy or planning tables (already ingested?)`);
+      }
+    } else if (classification.hierarchyLevel === 'STRATEGY') {
       await prisma.strategyDocument.updateMany({
         where: { scenarioId, content: rawText, ingestedAt: null },
         data: { ingestedAt: now },
