@@ -6,7 +6,7 @@ JOINT INTEGRATED PRIORITIZED TARGET LIST (SIMULATION)
 Operation: PACIFIC SHIELD (SIMULATION)
 ATO Cycle: 2026-01 (Training Cycle)
 Effective Dates: 2026-03-01 0000Z — 2026-03-07 2359Z
-Classification: FOR OFFICIAL USE ONLY — TRAINING/SIMULATED CONTENT
+Classification: FOR EXERCISE USE ONLY — TRAINING/SIMULATED CONTENT
 Issuing Authority: J3 Targeting, Combined Joint Task Force — PACIFIC SHIELD (SIM)
 
 PURPOSE:
@@ -161,7 +161,7 @@ Priority 5 (Protective & Sustainment Tasks)
 - Reporting: On-demand status to CJTF-PACSHLD (SIM) J3.
 
 ADMINISTRATIVE NOTES (SIM)
-- Classification Reminder: This document and its contents are simulation-only and marked FOR OFFICIAL USE ONLY — TRAINING/SIMULATED CONTENT. Do not apply to real-world targeting or operations.
+- Classification Reminder: This document and its contents are simulation-only and marked FOR EXERCISE USE ONLY — TRAINING/SIMULATED CONTENT. Do not apply to real-world targeting or operations.
 - Changes & Amendments: J3 Targeting to publish JIPTL updates at 24-hour cycles or as operationally required. Urgent changes to be promulgated via secure exercise channels.
 - Exercise Safety: Range control, safety officers, and maritime authorities must be briefed and approve all live-effect training events. All live munitions events in training to use inert/controlled effects unless otherwise authorized by range control.
 

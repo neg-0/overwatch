@@ -8,7 +8,7 @@ SUBJECT: OPLAN (U) — Western Pacific Multi-Domain Joint Integration and Resili
 
 DATE: 01 MAR 2026
 
-CLASSIFICATION: UNCLASSIFIED // FOUO
+CLASSIFICATION: UNCLASSIFIED // FOR EXERCISE USE ONLY
 
 REFERENCES:
 a. Memorandum, CJCS, “JSCP — INDOPACOM Western Pacific Multi-Domain Joint Integration and Resilience (MDJIR) Tasking (1–15 March 2026),” dated 01 MAR 2026.

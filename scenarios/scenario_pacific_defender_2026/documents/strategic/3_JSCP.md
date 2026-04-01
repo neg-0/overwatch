@@ -8,7 +8,7 @@ SUBJECT: Joint Strategic Capabilities Plan (JSCP) — INDOPACOM Western Pacific 
 
 DATE: 01 MAR 2026
 
-CLASSIFICATION: UNCLASSIFIED // FOUO
+CLASSIFICATION: UNCLASSIFIED // FOR EXERCISE USE ONLY
 
 
 1. PURPOSE.
@@ -184,4 +184,4 @@ CLASSIFICATION: UNCLASSIFIED // FOUO
 
     f. CJCS-ready capability and planning feedback produced. USINDOPACOM delivers prioritized observations and recommendations aligned to CJCSI 3170.01, highlighting gaps and investment priorities in resilient C2, contested logistics, space support alternatives, EMS maneuver, and combined interoperability for the Western Pacific operating environment.
 
-UNCLASSIFIED // FOUO
+UNCLASSIFIED // FOR EXERCISE USE ONLY

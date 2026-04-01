@@ -45,7 +45,7 @@ MEMORANDUM FOR: [appropriate recipient]
 FROM: [appropriate authority]
 SUBJECT: [document type and title]
 DATE: [effective date in military format]
-CLASSIFICATION: UNCLASSIFIED // FOUO
+CLASSIFICATION: UNCLASSIFIED // FOR EXERCISE USE ONLY
 
 Then include numbered paragraphs covering:
 1. PURPOSE
@@ -1082,7 +1082,7 @@ FORMAT REQUIREMENTS (per CJCSM 3500.03F):
    - Document title: "MASTER SCENARIO EVENTS LIST (MSEL)"
    - Exercise/Operation name
    - EXCON issuing authority
-   - Classification: UNCLASSIFIED // FOUO
+   - Classification: UNCLASSIFIED // FOR EXERCISE USE ONLY
    - Effective period
    - References (CJCSM 3500.03F, JP 3-0, JP 5-0)
 

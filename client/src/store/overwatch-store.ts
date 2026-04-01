@@ -488,6 +488,8 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
     });
 
     socket.on('scenario:generation-progress', (data: any) => {
+      if (data.scenarioId && data.scenarioId !== get().activeScenarioId) return;
+      
       set({
         generationProgress: {
           step: data.step,
@@ -503,8 +505,18 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
     });
 
     socket.on('scenario:artifact-result', (data: ArtifactResult & { scenarioId: string }) => {
+      if (data.scenarioId && data.scenarioId !== get().activeScenarioId) return;
+
       console.log(`[WS] Artifact result: ${data.artifact} → ${data.status}`);
-      set({ artifactResults: [...get().artifactResults, data] });
+      set(state => {
+        const index = state.artifactResults.findIndex(a => a.artifact === data.artifact && a.step === data.step);
+        if (index >= 0) {
+          const newArray = [...state.artifactResults];
+          newArray[index] = data;
+          return { artifactResults: newArray };
+        }
+        return { artifactResults: [...state.artifactResults, data] };
+      });
     });
 
     // ─── Ingest Pipeline Events (global so they persist across navigation) ───
@@ -674,10 +686,14 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
     const signal = abortController.signal;
 
     const socket = get().socket;
+    const prevScenarioId = get().activeScenarioId;
     if (socket?.connected) {
+      if (prevScenarioId && prevScenarioId !== id) {
+        socket.emit('leave:scenario', prevScenarioId);
+      }
       socket.emit('join:scenario', id);
     }
-    set({ activeScenarioId: id });
+    set({ activeScenarioId: id, artifactResults: [] }); // Clear artifacts when switching!
     localStorage.setItem('ow_activeScenarioId', id);
 
     // Core hydration (existing)
@@ -835,10 +851,14 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
       const data = await res.json();
       if (data.success) {
         const socket = get().socket;
+        const prevScenarioId = get().activeScenarioId;
         if (socket?.connected) {
+          if (prevScenarioId && prevScenarioId !== data.data.id) {
+            socket.emit('leave:scenario', prevScenarioId);
+          }
           socket.emit('join:scenario', data.data.id);
         }
-        set({ activeScenarioId: data.data.id });
+        set({ activeScenarioId: data.data.id, artifactResults: [] });
         get().fetchScenarios();
         get().fetchScenarioTimeRange(data.data.id);
       }

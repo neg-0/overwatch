@@ -226,7 +226,7 @@ MEMORANDUM FOR: [appropriate recipient]
 FROM: [appropriate authority]
 SUBJECT: [document type and title]
 DATE: [effective date in military format]
-CLASSIFICATION: UNCLASSIFIED // FOUO
+CLASSIFICATION: UNCLASSIFIED // FOR EXERCISE USE ONLY
 
 Then include numbered paragraphs covering:
 1. PURPOSE

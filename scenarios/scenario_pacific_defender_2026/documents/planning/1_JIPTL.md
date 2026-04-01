@@ -6,7 +6,7 @@ JOINT INTEGRATED PRIORITIZED TARGET LIST (JIPTL)
 Operation: INDOPACOM SHIELD — Multi-Domain Joint Integration and Resilience (MDJIR) (Exercise)
 ATO Cycle: Cycle 03 (Exercise ATO/ACO Development)
 Effective Dates: 010000Z MAR 2026 — 152359Z MAR 2026
-Classification: UNCLASSIFIED // FOUO (Exercise)
+Classification: UNCLASSIFIED // FOR EXERCISE USE ONLY
 Issuing Authority: USINDOPACOM J3/J5 Targeting Cell (Exercise TOC)
 
 PURPOSE: This JIPTL provides prioritized target nominations for exercise MDJIR in support of theater strategic priorities: integrated deterrence, campaign resilience, contested logistics mitigation, and preservation of allied access in the Western Pacific. This document traces target priorities to National Defense Strategy extract and CJCS NMS Theater Annex effects and supports joint targeting, ATO/ACO development, and assessment in a degraded SATCOM / contested C2 environment. All entries are exercise-only, non-actionable, and use fictionalized data.

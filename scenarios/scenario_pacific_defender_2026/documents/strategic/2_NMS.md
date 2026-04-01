@@ -8,7 +8,7 @@ SUBJECT: National Military Strategy (NMS) Theater Annex — Western Pacific (IND
 
 DATE: 01 MAR 2026
 
-CLASSIFICATION: UNCLASSIFIED // FOUO
+CLASSIFICATION: UNCLASSIFIED // FOR EXERCISE USE ONLY
 
 
 1. PURPOSE.
@@ -196,4 +196,4 @@ CLASSIFICATION: UNCLASSIFIED // FOUO
 
     f. Capability and Planning Feedback Produced. USINDOPACOM provides CJCS-ready observations and recommendations identifying capability gaps, policy/process friction points, and priority investments—particularly in resilient C2, contested logistics, space support alternatives, and coalition interoperability—consistent with CJCSI 3170.01 and joint lessons learned processes.
 
-UNCLASSIFIED // FOUO
+UNCLASSIFIED // FOR EXERCISE USE ONLY
