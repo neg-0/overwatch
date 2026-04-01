@@ -59,13 +59,20 @@ export function SpaceDashboard() {
   const [selectedDay, setSelectedDay] = useState<number>(simulation.currentAtoDay || 1);
   const [loading, setLoading] = useState(false);
 
-  // Fetch allocations when day or scenario changes
+  const isSimActive = simulation.status === 'RUNNING' || simulation.status === 'PAUSED';
+  const report = isSimActive ? (allocationReport as any) : null;
+  const allocations = report?.allocations || [];
+  const contentions = report?.contentionEvents || [];
+  const summary = report?.summary || {};
+
+  // Only fetch allocations when the simulation is active — pre-sim, coverage
+  // windows don't exist yet so every need shows DENIED (misleading).
   useEffect(() => {
-    if (activeScenarioId && selectedDay > 0) {
+    if (activeScenarioId && selectedDay > 0 && isSimActive) {
       setLoading(true);
       fetchAllocations(activeScenarioId, selectedDay).finally(() => setLoading(false));
     }
-  }, [activeScenarioId, selectedDay, fetchAllocations]);
+  }, [activeScenarioId, selectedDay, fetchAllocations, isSimActive]);
 
   // Keep selectedDay in sync with simulation
   useEffect(() => {
@@ -73,12 +80,6 @@ export function SpaceDashboard() {
       setSelectedDay(simulation.currentAtoDay);
     }
   }, [simulation.currentAtoDay]);
-
-  const report = allocationReport as any;
-  const isSimActive = simulation.status === 'RUNNING' || simulation.status === 'PAUSED';
-  const allocations = report?.allocations || [];
-  const contentions = report?.contentionEvents || [];
-  const summary = report?.summary || {};
 
   // Filter by capability if selected
   const filteredAllocations = selectedCapability
@@ -128,7 +129,32 @@ export function SpaceDashboard() {
       </div>
 
       <div className="content-body">
-        {/* ─── Stats Row ─────────────────────────────────────── */}
+        {/* ─── Pre-simulation explainer ─────────────────────── */}
+        {!isSimActive && (
+          <div style={{
+            padding: '24px', borderRadius: '10px', marginBottom: '20px',
+            background: 'rgba(116,185,255,0.06)', border: '1px solid rgba(116,185,255,0.15)',
+          }}>
+            <h3 style={{ margin: '0 0 8px', fontSize: '15px', color: 'var(--accent-info)' }}>
+              📡 Awaiting Simulation
+            </h3>
+            <p style={{ margin: '0 0 12px', fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+              Space allocation data is computed during simulation runtime. The simulation propagates
+              satellite positions, calculates coverage windows (AOS/LOS), then matches them against
+              mission space needs.
+            </p>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', fontSize: '12px', color: 'var(--text-muted)' }}>
+              <span style={{ padding: '3px 8px', borderRadius: '6px', background: 'rgba(255,255,255,0.06)' }}>1. Scenario generates missions with space needs</span>
+              <span style={{ opacity: 0.4 }}>→</span>
+              <span style={{ padding: '3px 8px', borderRadius: '6px', background: 'rgba(255,255,255,0.06)' }}>2. Sim propagates satellites &amp; computes coverage</span>
+              <span style={{ opacity: 0.4 }}>→</span>
+              <span style={{ padding: '3px 8px', borderRadius: '6px', background: 'rgba(255,255,255,0.06)' }}>3. Allocator matches needs to assets</span>
+            </div>
+          </div>
+        )}
+
+        {/* ─── Stats Row (only when sim is active) ────────────── */}
+        {isSimActive && (
         <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
           <div className="stat-card">
             <span className="stat-label">Total Needs</span>
@@ -157,8 +183,11 @@ export function SpaceDashboard() {
             </span>
           </div>
         </div>
+        )}
 
         {/* ─── Allocation Cards ──────────────────────────────── */}
+        {/* ─── Allocation Cards (only when sim is active) ──── */}
+        {isSimActive && (
         <div style={{ marginBottom: 20 }}>
           <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, color: 'var(--text-bright)' }}>
             Allocation Status
@@ -222,6 +251,7 @@ export function SpaceDashboard() {
             </div>
           )}
         </div>
+        )}
 
         {/* ─── Contention Events ─────────────────────────────── */}
         {filteredContentions.length > 0 && (

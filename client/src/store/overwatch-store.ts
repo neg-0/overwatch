@@ -233,7 +233,7 @@ interface OverwatchStore {
   ingestCards: IngestCard[];
   ingestBatchStatus: BatchStatus | null;
   ingestBatchInProgress: boolean;
-  ingestToasts: string[];
+  ingestToasts: { id: number; msg: string }[];
 
   // Hierarchy + allocation data
   hierarchyData: Record<string, unknown> | null;
@@ -277,7 +277,8 @@ interface OverwatchStore {
 
   // Ingest actions
   setIngestBatchInProgress: (val: boolean) => void;
-  clearIngestToast: (index: number) => void;
+  clearIngestToast: (id: number) => void;
+  addIngestToast: (msg: string) => void;
 }
 
 // Module-level AbortController for setActiveScenario race condition prevention
@@ -566,19 +567,20 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
             : c,
         ),
       });
-      const docType = data.documentType || 'Document';
-      const DOC_TYPE_ICONS: Record<string, string> = {
-        FRAGORD: '⚡', ATO: '✈️', MTO: '🚢', STO: '🛰️',
-        OPORD: '📋', EXORD: '🎯', SPINS: '📡', ACO: '🗺️',
-        NDS: '🏛️', NMS: '⭐', JSCP: '📊', CONPLAN: '📐',
-        OPLAN: '📑', JIPTL: '🎯', INTEL_REPORT: '🔍',
-        MSEL: '💥', MAAP: '📋',
-      };
-      const icon = DOC_TYPE_ICONS[docType] || '📄';
-      const entityCount = (data.extracted?.missionCount || 0) + (data.extracted?.priorityCount || 0);
-      set({
-        ingestToasts: [...get().ingestToasts.slice(-4), `${icon} ${docType} ingested — ${entityCount} entities (${data.parseTimeMs}ms)`],
-      });
+      // Only show per-document toast when NOT in a batch (batch:complete summarizes)
+      if (!get().ingestBatchInProgress) {
+        const docType = data.documentType || 'Document';
+        const DOC_TYPE_ICONS: Record<string, string> = {
+          FRAGORD: '⚡', ATO: '✈️', MTO: '🚢', STO: '🛰️',
+          OPORD: '📋', EXORD: '🎯', SPINS: '📡', ACO: '🗺️',
+          NDS: '🏛️', NMS: '⭐', JSCP: '📊', CONPLAN: '📐',
+          OPLAN: '📑', JIPTL: '🎯', INTEL_REPORT: '🔍',
+          MSEL: '💥', MAAP: '📋',
+        };
+        const icon = DOC_TYPE_ICONS[docType] || '📄';
+        const entityCount = (data.extracted?.missionCount || 0) + (data.extracted?.priorityCount || 0);
+        get().addIngestToast(`${icon} ${docType} ingested — ${entityCount} entities (${data.parseTimeMs}ms)`);
+      }
     });
 
     socket.on('batch:started', (data: any) => {
@@ -629,10 +631,10 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
           }),
         },
         ingestBatchInProgress: false,
-        ingestToasts: [...get().ingestToasts.slice(-4),
-          `Batch complete: ${data.succeeded}/${data.total} succeeded${data.failed > 0 ? `, ${data.failed} failed` : ''}`,
-        ],
       });
+      get().addIngestToast(
+        `Batch complete: ${data.succeeded}/${data.total} succeeded${data.failed > 0 ? `, ${data.failed} failed` : ''}`,
+      );
       // Auto-dismiss batch panel after 10s
       setTimeout(() => set({ ingestBatchStatus: null }), 10000);
     });
@@ -1126,8 +1128,18 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
     set({ ingestBatchInProgress: val });
   },
 
-  clearIngestToast: (index: number) => {
-    set({ ingestToasts: get().ingestToasts.filter((_, i) => i !== index) });
+  clearIngestToast: (id: number) => {
+    set({ ingestToasts: get().ingestToasts.filter(t => t.id !== id) });
+  },
+
+  addIngestToast: (msg: string) => {
+    const id = Date.now() + Math.random();
+    const toast = { id, msg };
+    set({ ingestToasts: [...get().ingestToasts.slice(-4), toast] });
+    // Auto-dismiss after 5 seconds
+    setTimeout(() => {
+      set({ ingestToasts: get().ingestToasts.filter(t => t.id !== id) });
+    }, 5000);
   },
 
   resolveDecision: async (scenarioId: string, decisionEventId: string, action: string) => {

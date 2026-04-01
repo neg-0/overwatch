@@ -173,7 +173,19 @@ export async function allocateSpaceResources(
         contentionGroup: null,
       });
     } else {
-      // Contention! Sort by priority (lower = higher priority)
+      // Contention! Multiple needs competing for the same capability.
+      // First, check whether any asset actually provides coverage —
+      // if not, contention resolution is moot and everyone is DENIED.
+      const hasCoverage = spaceAssets.some(a =>
+        a.capabilities.includes(group.capability as any) &&
+        a.coverageWindows.some(cw =>
+          cw.capabilityType === group.capability &&
+          cw.startTime <= group.timeEnd &&
+          cw.endTime >= group.timeStart,
+        ),
+      );
+
+      // Sort by priority (lower rank = higher priority)
       const sorted = [...group.needs].sort((a, b) => {
         // First by traced strategy priority rank
         const aRank = a.need.priorityEntry?.strategyPriority?.rank ?? 99;
@@ -190,13 +202,13 @@ export async function allocateSpaceResources(
         return a.packagePriority - b.packagePriority;
       });
 
-      // Winner gets FULFILLED, losers get DEGRADED (if fallback) or DENIED
+      // Winner gets FULFILLED (only if coverage exists), losers get DEGRADED (if fallback) or DENIED
       const contentionCompetitors: ContentionEvent['competitors'] = [];
       let resolution = '';
 
       for (let i = 0; i < sorted.length; i++) {
         const entry = sorted[i];
-        const isWinner = i === 0;
+        const isWinner = i === 0 && hasCoverage;
 
         let status: string;
         let allocatedCapability: string | null;
@@ -212,12 +224,16 @@ export async function allocateSpaceResources(
         } else if (entry.need.fallbackCapability) {
           status = 'DEGRADED';
           allocatedCapability = entry.need.fallbackCapability;
-          rationale = `Lost ${group.capability} contention to higher-priority mission. Degraded to ${entry.need.fallbackCapability}`;
+          rationale = hasCoverage
+            ? `Lost ${group.capability} contention to higher-priority mission. Degraded to ${entry.need.fallbackCapability}`
+            : `No ${group.capability} coverage available. Degraded to ${entry.need.fallbackCapability}`;
           riskLevel = entry.need.missionCriticality === 'CRITICAL' ? 'HIGH' : 'MODERATE';
         } else {
           status = 'DENIED';
           allocatedCapability = null;
-          rationale = `Lost ${group.capability} contention, no fallback available. ${entry.need.riskIfDenied || ''}`;
+          rationale = hasCoverage
+            ? `Lost ${group.capability} contention, no fallback available. ${entry.need.riskIfDenied || ''}`
+            : `No operational ${group.capability} asset with coverage window. ${entry.need.riskIfDenied || ''}`;
           riskLevel = entry.need.missionCriticality === 'CRITICAL' ? 'CRITICAL' : 'HIGH';
         }
 

@@ -1544,6 +1544,40 @@ async function generateOrder(
               }
             }
 
+            // ─── Derive coverage point for space needs ────────────────────────
+            // Space coverage computation requires a lat/lon to check satellite
+            // line-of-sight. Use the mission's first target, or first significant
+            // waypoint (IP/TGT/CP), or any available waypoint.
+            let coverageLat: number | null = null;
+            let coverageLon: number | null = null;
+
+            // Best: use first target coordinate
+            if (msn.targets?.length) {
+              const tgt = msn.targets[0];
+              if (tgt.latitude && tgt.longitude) {
+                coverageLat = tgt.latitude;
+                coverageLon = tgt.longitude;
+              }
+            }
+            // Fallback: use first IP/TGT/CP waypoint
+            if (coverageLat == null && msn.waypoints?.length) {
+              const sigWp = msn.waypoints.find((wp: any) =>
+                ['IP', 'TGT', 'CP', 'ORBIT', 'CAP', 'PATROL'].includes(wp.waypointType),
+              );
+              if (sigWp && sigWp.latitude && sigWp.longitude) {
+                coverageLat = sigWp.latitude;
+                coverageLon = sigWp.longitude;
+              }
+            }
+            // Last resort: any waypoint with valid coordinates
+            if (coverageLat == null && msn.waypoints?.length) {
+              const anyWp = msn.waypoints.find((wp: any) => wp.latitude && wp.longitude);
+              if (anyWp) {
+                coverageLat = anyWp.latitude;
+                coverageLon = anyWp.longitude;
+              }
+            }
+
             // Space needs (AI-generated, supplementary)
             if (msn.spaceNeeds) {
               for (const sn of msn.spaceNeeds) {
@@ -1563,6 +1597,8 @@ async function generateOrder(
                     startTime: snStart,
                     endTime: snEnd,
                     fulfilled: false,
+                    coverageLat,
+                    coverageLon,
                   },
                 });
               }
@@ -1609,6 +1645,8 @@ async function generateOrder(
                           role: comm.role,
                           commsBand: comm.band,
                           systemName: comm.system,
+                          coverageLat,
+                          coverageLon,
                         },
                       });
                     }
@@ -1627,6 +1665,8 @@ async function generateOrder(
                       fulfilled: false,
                       role: 'primary',
                       systemName: `GPS-${missionAssetType.gpsType}`,
+                      coverageLat,
+                      coverageLon,
                     },
                   });
                 }
@@ -1643,6 +1683,8 @@ async function generateOrder(
                       fulfilled: false,
                       role: 'primary',
                       systemName: 'LINK16',
+                      coverageLat,
+                      coverageLon,
                     },
                   });
                 }

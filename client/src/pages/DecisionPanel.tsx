@@ -54,11 +54,14 @@ function StatusBadge({ status }: { status: 'GREEN' | 'AMBER' | 'RED' }) {
 
 export function DecisionPanel() {
   const scenarioId = useOverwatchStore(s => s.activeScenarioId);
+  const simulation = useOverwatchStore(s => s.simulation);
   const spaceGaps = useOverwatchStore(s => s.spaceGaps);
   const coverageWindows = useOverwatchStore(s => s.coverageWindows);
   const alerts = useOverwatchStore(s => s.alerts);
   const pendingDecisions = useOverwatchStore(s => s.pendingDecisions);
   const resolveDecision = useOverwatchStore(s => s.resolveDecision);
+
+  const isSimActive = simulation.status === 'RUNNING' || simulation.status === 'PAUSED';
 
   const [assessment, setAssessment] = useState<Assessment | null>(null);
   const [coas, setCoas] = useState<COA[]>([]);
@@ -230,6 +233,24 @@ export function DecisionPanel() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Pre-simulation context banner */}
+        {scenarioId && !isSimActive && (
+          <div style={{
+            marginBottom: '16px', padding: '14px 16px', borderRadius: '10px',
+            background: 'rgba(116,185,255,0.06)', border: '1px solid rgba(116,185,255,0.15)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+              <span style={{ fontSize: '14px' }}>ℹ️</span>
+              <strong style={{ fontSize: '13px', color: 'var(--accent-info)' }}>Pre-Simulation Assessment</strong>
+            </div>
+            <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+              Coverage and gap data require the simulation to propagate satellite positions and compute
+              coverage windows. The assessment below shows mission readiness and identifies potential issues,
+              but coverage metrics will reflect 0% until the simulation is running.
+            </p>
           </div>
         )}
 

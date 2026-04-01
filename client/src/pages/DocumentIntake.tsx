@@ -129,6 +129,7 @@ export function DocumentIntake() {
   const batchInProgress = useOverwatchStore(s => s.ingestBatchInProgress);
   const toasts = useOverwatchStore(s => s.ingestToasts);
   const setIngestBatchInProgress = useOverwatchStore(s => s.setIngestBatchInProgress);
+  const addIngestToast = useOverwatchStore(s => s.addIngestToast);
 
   // Doc list (page-local — re-fetched on mount)
   const [docs, setDocs] = useState<DocItem[]>([]);
@@ -412,15 +413,11 @@ export function DocumentIntake() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Ingest failed' }));
-        useOverwatchStore.setState(s => ({
-          ingestToasts: [...s.ingestToasts.slice(-4), `❌ Ingestion failed: ${err.error || 'Unknown error'}`],
-        }));
+        addIngestToast(`❌ Ingestion failed: ${err.error || 'Unknown error'}`);
         return;
       }
     } catch {
-      useOverwatchStore.setState(s => ({
-        ingestToasts: [...s.ingestToasts.slice(-4), '❌ Ingestion failed'],
-      }));
+      addIngestToast('❌ Ingestion failed');
     } finally {
       if (docId) {
         setSubmitting(prev => {
@@ -455,16 +452,12 @@ export function DocumentIntake() {
       });
       const json = await res.json();
       if (!json.success) {
-        useOverwatchStore.setState(s => ({
-          ingestToasts: [...s.ingestToasts.slice(-4), `Batch failed: ${json.error || 'Unknown'}`],
-        }));
+        addIngestToast(`Batch failed: ${json.error || 'Unknown'}`);
         setIngestBatchInProgress(false);
       }
       // batchInProgress will be cleared when batch:complete fires in the store
     } catch {
-      useOverwatchStore.setState(s => ({
-        ingestToasts: [...s.ingestToasts.slice(-4), 'Batch ingest failed'],
-      }));
+      addIngestToast('Batch ingest failed');
       setIngestBatchInProgress(false);
     }
   };
@@ -485,9 +478,7 @@ export function DocumentIntake() {
           });
           const json = await res.json();
           if (!res.ok) {
-        useOverwatchStore.setState(s => ({
-          ingestToasts: [...s.ingestToasts.slice(-4), `❌ Upload failed: ${json.error || 'Unknown error'}`],
-        }));
+            addIngestToast(`❌ Upload failed: ${json.error || 'Unknown error'}`);
             return;
           }
           setShowImport(false);
@@ -510,9 +501,7 @@ export function DocumentIntake() {
       setImportText('');
       setImportFile(null);
     } catch {
-      useOverwatchStore.setState(s => ({
-        ingestToasts: [...s.ingestToasts.slice(-4), '❌ Import failed'],
-      }));
+      addIngestToast('❌ Import failed');
     } finally {
       // import modal handles its own close state
     }
@@ -1433,8 +1422,8 @@ export function DocumentIntake() {
 
       {/* ─── Toast Notifications ───────────────────────────────── */}
       <div className="intake-toasts">
-        {toasts.map((msg, i) => (
-          <div key={i} className="toast animate-slide-up">{msg}</div>
+        {toasts.map(toast => (
+          <div key={toast.id} className="toast toast-auto-dismiss">{toast.msg}</div>
         ))}
       </div>
     </div>
