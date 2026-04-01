@@ -250,6 +250,23 @@ function startTickLoop(scenarioId: string, io: Server) {
     const scenario = await prisma.scenario.findUnique({ where: { id: scenarioId } });
     if (!activeSims.has(scenarioId) || activeSims.get(scenarioId)!.status !== 'RUNNING') return; // re-check after await
     if (scenario) {
+      // Check sim end BEFORE generating new days — prevents runaway day generation
+      if (currentSim.simTime >= scenario.endDate) {
+        // Clamp to exact end so the final tick doesn't overshoot
+        currentSim.simTime = scenario.endDate;
+        console.log('[SIM] Scenario end date reached, stopping');
+        io.to(`scenario:${scenarioId}`).emit('simulation:tick', {
+          event: 'simulation:tick',
+          simTime: currentSim.simTime.toISOString(),
+          realTime: new Date().toISOString(),
+          ratio: currentSim.compressionRatio,
+          atoDay: currentSim.currentAtoDay,
+          status: 'COMPLETE',
+        });
+        stopSimulation(scenarioId);
+        return;
+      }
+
       const daysSinceStart = Math.floor(
         (currentSim.simTime.getTime() - scenario.startDate.getTime()) / (24 * 3600000),
       ) + 1;
@@ -259,13 +276,6 @@ function startTickLoop(scenarioId: string, io: Server) {
       if (daysSinceStart > currentSim.lastAtoDayGenerated) {
         await runGameMasterCycle(scenarioId, io, daysSinceStart);
         if (!activeSims.has(scenarioId)) return;
-      }
-
-      // Check sim end
-      if (currentSim.simTime >= scenario.endDate) {
-        console.log('[SIM] Scenario end date reached, stopping');
-        stopSimulation(scenarioId);
-        return;
       }
     }
 

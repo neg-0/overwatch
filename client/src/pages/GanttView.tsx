@@ -356,47 +356,116 @@ interface TimeAxisProps {
   atoPeriod: { start: string; end: string } | null;
 }
 
+// Logical sub-tick intervals in hours, smallest → largest
+const TICK_INTERVALS_H = [0.5, 1, 2, 4, 6, 12, 24];
+const MIN_PX_PER_TICK = 48; // minimum pixels between sub-tick labels
+const MIN_PX_PER_DAY_LABEL = 36; // minimum pixels to show a day label
+
 function TimeAxisHeader({ periodStartMs, periodDurMs, maxAtoDay, atoPeriod }: TimeAxisProps) {
-  // Generate day boundary labels
-  const dayLabels = useMemo(() => {
+  const axisRef = useRef<HTMLDivElement>(null);
+  const [axisWidth, setAxisWidth] = useState(800);
+
+  // Measure available width for the time axis area
+  useEffect(() => {
+    const el = axisRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        setAxisWidth(entry.contentRect.width);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Day bands — always generated, but label text is conditionally shown
+  const dayBands = useMemo(() => {
     if (!atoPeriod || periodDurMs <= 0) {
       return Array.from({ length: maxAtoDay }, (_, i) => ({
-        label: `ATO DAY ${i + 1}`,
+        label: `DAY ${i + 1}`,
+        showLabel: true,
         left: (i / maxAtoDay) * 100,
         width: (1 / maxAtoDay) * 100,
       }));
     }
-    const labels: { label: string; left: number; width: number }[] = [];
     const totalHours = periodDurMs / 3600000;
-    const days = Math.ceil(totalHours / 24);
-    for (let d = 0; d < days; d++) {
+    const totalDays = Math.ceil(totalHours / 24);
+    const pxPerDay = axisWidth / totalDays;
+
+    // Determine how often to show a day label (every 1, 2, 5, 10… days)
+    let labelStep = 1;
+    if (pxPerDay < MIN_PX_PER_DAY_LABEL) {
+      const steps = [2, 5, 10, 15, 30, 60];
+      for (const s of steps) {
+        if ((pxPerDay * s) >= MIN_PX_PER_DAY_LABEL) { labelStep = s; break; }
+      }
+      if (pxPerDay * 60 < MIN_PX_PER_DAY_LABEL) labelStep = 60;
+    }
+
+    const bands: { label: string; showLabel: boolean; left: number; width: number }[] = [];
+    for (let d = 0; d < totalDays; d++) {
       const dayStartMs = periodStartMs + d * 24 * 3600000;
       const dayEndMs = Math.min(periodStartMs + (d + 1) * 24 * 3600000, periodStartMs + periodDurMs);
-      labels.push({
-        label: `DAY ${d + 1}`,
+      bands.push({
+        label: pxPerDay >= 60 ? `DAY ${d + 1}` : `D${d + 1}`,
+        showLabel: d % labelStep === 0,
         left: pct(dayStartMs, periodStartMs, periodDurMs),
         width: pct(dayEndMs, periodStartMs, periodDurMs) - pct(dayStartMs, periodStartMs, periodDurMs),
       });
     }
-    return labels;
-  }, [atoPeriod, periodStartMs, periodDurMs, maxAtoDay]);
+    return bands;
+  }, [atoPeriod, periodStartMs, periodDurMs, maxAtoDay, axisWidth]);
 
-  // Generate hour tick marks (every 6h)
-  const hourTicks = useMemo(() => {
+  // Sub-ticks — dynamically choose interval
+  const subTicks = useMemo(() => {
     if (!atoPeriod || periodDurMs <= 0) return [];
-    const ticks: { label: string; left: number }[] = [];
-    const totalHours = Math.ceil(periodDurMs / 3600000);
-    for (let h = 0; h <= totalHours; h += 6) {
+
+    const totalHours = periodDurMs / 3600000;
+    const pxPerHour = axisWidth / totalHours;
+
+    // Pick the smallest interval where labels don't overlap
+    let intervalH = 24;
+    for (const candidate of TICK_INTERVALS_H) {
+      if (pxPerHour * candidate >= MIN_PX_PER_TICK) {
+        intervalH = candidate;
+        break;
+      }
+    }
+
+    // If even 24h ticks would overlap, show nothing
+    if (pxPerHour * 24 < MIN_PX_PER_TICK) return [];
+
+    const ticks: { label: string; left: number; isMajor: boolean }[] = [];
+    // Align to the first clean boundary from periodStart
+    const startDate = new Date(periodStartMs);
+    const startHourUTC = startDate.getUTCHours() + startDate.getUTCMinutes() / 60;
+    const firstAlignedH = intervalH >= 1
+      ? Math.ceil(startHourUTC / intervalH) * intervalH - startHourUTC
+      : Math.ceil(startHourUTC * 2) / 2 - startHourUTC; // align 30m
+
+    for (let h = firstAlignedH; h <= totalHours; h += intervalH) {
       const tickMs = periodStartMs + h * 3600000;
-      if (tickMs > periodStartMs + periodDurMs) break;
+      if (tickMs < periodStartMs || tickMs > periodStartMs + periodDurMs) continue;
       const d = new Date(tickMs);
+      const hours = d.getUTCHours();
+      const mins = d.getUTCMinutes();
+      const isMidnight = hours === 0 && mins === 0;
+
+      // Skip midnight ticks — already shown as day dividers
+      if (isMidnight) continue;
+
+      const label = mins > 0
+        ? `${String(hours).padStart(2, '0')}${String(mins).padStart(2, '0')}Z`
+        : `${String(hours).padStart(2, '0')}00Z`;
+
       ticks.push({
-        label: `${String(d.getUTCHours()).padStart(2, '0')}00Z`,
+        label,
         left: pct(tickMs, periodStartMs, periodDurMs),
+        isMajor: hours % 12 === 0,
       });
     }
     return ticks;
-  }, [atoPeriod, periodStartMs, periodDurMs]);
+  }, [atoPeriod, periodStartMs, periodDurMs, axisWidth]);
 
   return (
     <div className="gantt-header" style={{ display: 'flex' }}>
@@ -405,16 +474,16 @@ function TimeAxisHeader({ periodStartMs, periodDurMs, maxAtoDay, atoPeriod }: Ti
         MISSION / CALLSIGN
       </div>
       {/* Time axis */}
-      <div style={{ flex: 1, position: 'relative', borderLeft: '1px solid var(--border-subtle)' }}>
-        {/* Day bands */}
-        <div style={{ position: 'relative', height: '18px' }}>
-          {dayLabels.map((dl, i) => (
+      <div ref={axisRef} style={{ flex: 1, position: 'relative', borderLeft: '1px solid var(--border-subtle)' }}>
+        {/* Day bands — top tier */}
+        <div style={{ position: 'relative', height: '20px' }}>
+          {dayBands.map((band, i) => (
             <div key={i} style={{
               position: 'absolute',
-              left: `${dl.left}%`,
-              width: `${dl.width}%`,
+              left: `${band.left}%`,
+              width: `${band.width}%`,
               height: '100%',
-              borderRight: '1px dashed var(--border-subtle)',
+              borderRight: '1px solid var(--border-subtle)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -422,29 +491,29 @@ function TimeAxisHeader({ periodStartMs, periodDurMs, maxAtoDay, atoPeriod }: Ti
               fontWeight: 700,
               color: 'var(--text-muted)',
               overflow: 'hidden',
+              background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)',
             }}>
-              {dl.label}
+              {band.showLabel ? band.label : ''}
             </div>
           ))}
         </div>
-        {/* Hour ticks */}
-        {hourTicks.length > 0 && (
-          <div style={{ position: 'relative', height: '14px', borderTop: '1px solid var(--border-subtle)' }}>
-            {hourTicks.map((tick, i) => (
-              <div key={i} style={{
-                position: 'absolute',
-                left: `${tick.left}%`,
-                transform: 'translateX(-50%)',
-                fontSize: '9px',
-                color: 'var(--text-muted)',
-                whiteSpace: 'nowrap',
-                top: '2px',
-              }}>
-                {tick.label}
-              </div>
-            ))}
-          </div>
-        )}
+        {/* Sub-ticks — bottom tier */}
+        <div style={{ position: 'relative', height: '16px', borderTop: '1px solid var(--border-subtle)' }}>
+          {subTicks.map((tick, i) => (
+            <div key={i} style={{
+              position: 'absolute',
+              left: `${tick.left}%`,
+              transform: 'translateX(-50%)',
+              fontSize: '9px',
+              color: tick.isMajor ? 'var(--text-secondary)' : 'var(--text-muted)',
+              fontWeight: tick.isMajor ? 600 : 400,
+              whiteSpace: 'nowrap',
+              top: '2px',
+            }}>
+              {tick.label}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
