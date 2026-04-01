@@ -45,6 +45,8 @@ export function ScenarioManager() {
   const [readyMadeScenarios, setReadyMadeScenarios] = useState<any[]>([]);
   const [loadingReadyMade, setLoadingReadyMade] = useState<string | null>(null);
   const [simStates, setSimStates] = useState<Record<string, any>>({});
+  const [demoMode, setDemoMode] = useState<boolean>(false);
+  const [demoStats, setDemoStats] = useState<{ count: number } | null>(null);
 
   useEffect(() => {
     fetchHealth();
@@ -52,6 +54,17 @@ export function ScenarioManager() {
     fetch('/api/scenarios/ready-made')
       .then(res => res.json())
       .then(data => { if (data.success) setReadyMadeScenarios(data.data); })
+      .catch(() => {});
+
+    // Fetch config
+    fetch('/api/config/demo-mode')
+      .then(res => res.json())
+      .then(data => setDemoMode(data.enabled))
+      .catch(() => {});
+    
+    fetch('/api/config/cache-stats')
+      .then(res => res.json())
+      .then(data => setDemoStats(data))
       .catch(() => {});
   }, [fetchHealth, fetchScenarios]);
 
@@ -137,6 +150,21 @@ export function ScenarioManager() {
     return { label: 'NEW', cls: 'badge-inactive' };
   };
 
+  const toggleDemoMode = async () => {
+    const nextState = !demoMode;
+    try {
+      const res = await fetch('/api/config/demo-mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: nextState })
+      });
+      const data = await res.json();
+      if (data.success) setDemoMode(data.enabled);
+    } catch (err) {
+      console.error('Failed to toggle demo mode', err);
+    }
+  };
+
   return (
     <>
       <div className="content-header">
@@ -202,6 +230,38 @@ export function ScenarioManager() {
               }}
             />
           </label>
+
+          <div style={{ flex: 1 }} /> {/* Spacer */}
+
+          {/* Demo Mode Toggle */}
+          <button
+            className="btn"
+            onClick={toggleDemoMode}
+            style={{
+              padding: '10px 20px',
+              fontSize: '14px',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              background: demoMode ? 'rgba(16, 185, 129, 0.1)' : 'var(--bg-tertiary)',
+              border: `1px solid ${demoMode ? 'rgba(16, 185, 129, 0.4)' : 'var(--border-subtle)'}`,
+              color: demoMode ? 'var(--accent-success)' : 'var(--text-secondary)',
+            }}
+          >
+            <div style={{
+              width: '10px',
+              height: '10px',
+              borderRadius: '50%',
+              background: demoMode ? 'var(--accent-success)' : 'var(--text-muted)'
+            }} />
+            {demoMode ? 'Demo Mode Active' : 'Demo Mode Off'}
+            {demoStats && (
+              <span style={{ fontSize: '11px', opacity: 0.7, marginLeft: '4px' }}>
+                ({demoStats.count} cached)
+              </span>
+            )}
+          </button>
         </div>
 
         {/* ─── Ready-Made Scenarios ────────────────────────────────────── */}

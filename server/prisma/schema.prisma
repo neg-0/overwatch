@@ -752,3 +752,23 @@ model AirspaceStructure {
   @@index([scenarioId])
   @@map("airspace_structures")
 }
+
+// ─── LLM Response Cache ──────────────────────────────────────────────────────
+// Always-write cache for all LLM responses. When demo mode is enabled at
+// runtime, the OpenAI client proxy checks this cache before making live calls.
+
+model LlmCache {
+  id           String   @id @default(uuid())
+  cacheKey     String   @unique          // SHA-256 hash of prompt content (16-char hex)
+  schemaName   String                    // JSON schema name or "TEXT"
+  response     String   @db.Text         // Full LLM response content
+  model        String                    // Model used (gpt-5.2, gpt-5-mini, etc.)
+  promptTokens Int?
+  outputTokens Int?
+  createdAt    DateTime @default(now())
+  lastHitAt    DateTime @default(now())  // Track usage for potential pruning
+  hitCount     Int      @default(1)      // Track popularity
+
+  @@index([cacheKey])
+  @@map("llm_cache")
+}

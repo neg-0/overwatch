@@ -96,7 +96,7 @@ async function assembleScenarioContext(scenarioId: string): Promise<{
     (scenario.endDate.getTime() - scenario.startDate.getTime()) / (1000 * 60 * 60 * 24),
   );
 
-  const context = `${scenario.name} — ${scenario.description || 'Military exercise scenario'}. ` +
+  const context = `${scenario.description || 'Military exercise scenario'}. ` +
     `Theater: ${scenario.theater || 'INDOPACOM'}. Adversary: ${scenario.adversary || 'Near-peer threat'}. ` +
     `Duration: ${durationDays} days.`;
 

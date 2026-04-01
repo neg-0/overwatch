@@ -9,7 +9,6 @@ export const config = {
   mapboxToken: process.env.MAPBOX_TOKEN || '',
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
   nodeEnv: process.env.NODE_ENV || 'development',
-  demoMode: (process.env.DEMO_MODE as 'playback' | 'record' | 'false') || 'false',
 
   // LLM model tiers — defaults to GPT-5 series
   llm: {
