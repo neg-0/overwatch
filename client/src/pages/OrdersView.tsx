@@ -17,16 +17,17 @@ interface Order {
 interface MissionTarget {
   id: string;
   targetName: string;
-  latitude?: number;
-  longitude?: number;
-  desiredEffect?: string;
-  priority?: number;
+  latitude: number;
+  longitude: number;
+  desiredEffect: string;
+  priorityRank?: number;
+  targetCategory?: string;
 }
 
 interface SupportReq {
   id: string;
-  reqType: string;
-  quantity?: number;
+  supportType: string;
+  details?: string;
 }
 
 interface TimeWindow {
@@ -38,7 +39,12 @@ interface TimeWindow {
 
 interface SpaceNeed {
   id: string;
-  capabilityNeeded: string;
+  capabilityType: string;
+  systemName?: string;
+  role: string;
+  commsBand?: string;
+  priority: number;
+  fulfilled: boolean;
   spaceAsset?: { id: string; name: string; type: string };
 }
 
@@ -69,7 +75,7 @@ interface MissionPackageDetail {
 interface OrderDetail extends Order {
   classification?: string;
   sourceFormat?: string;
-  confidence?: number;
+  confidence?: number | null;
   missionPackages: MissionPackageDetail[];
 }
 
@@ -207,7 +213,7 @@ function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelProps) {
                   </>
                 )}
 
-                {order.confidence !== undefined && (
+                {order.confidence != null && (
                   <>
                     <span className="gantt-detail-label">Confidence</span>
                     <span className="gantt-detail-value">{(order.confidence * 100).toFixed(0)}%</span>
@@ -317,13 +323,11 @@ function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelProps) {
                                 {tgt.targetName}
                               </span>
                               <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                                {[tgt.desiredEffect, tgt.priority !== undefined ? `Pri ${tgt.priority}` : null].filter(Boolean).join(' · ')}
+                                {[tgt.desiredEffect, tgt.priorityRank !== undefined ? `Pri ${tgt.priorityRank}` : null, tgt.targetCategory].filter(Boolean).join(' · ')}
                               </div>
-                              {tgt.latitude !== undefined && tgt.longitude !== undefined && (
-                                <div style={{ fontSize: '9px', fontFamily: 'var(--font-mono)', color: 'rgba(255,255,255,0.25)' }}>
-                                  {tgt.latitude.toFixed(4)}°, {tgt.longitude.toFixed(4)}°
-                                </div>
-                              )}
+                              <div style={{ fontSize: '9px', fontFamily: 'var(--font-mono)', color: 'rgba(255,255,255,0.25)' }}>
+                                {tgt.latitude.toFixed(4)}°, {tgt.longitude.toFixed(4)}°
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -337,8 +341,8 @@ function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelProps) {
                           </div>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px' }}>
                             {mission.supportReqs.map(req => (
-                              <span key={req.id} style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '3px', background: 'rgba(255,255,255,0.06)', color: 'var(--text-secondary)', fontWeight: 600 }}>
-                                {req.reqType}{req.quantity ? ` ×${req.quantity}` : ''}
+                              <span key={req.id} title={req.details} style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '3px', background: 'rgba(255,255,255,0.06)', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                                {req.supportType}
                               </span>
                             ))}
                           </div>
@@ -352,10 +356,18 @@ function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelProps) {
                             Space Support
                           </div>
                           {mission.spaceNeeds.map(sn => (
-                            <div key={sn.id} style={{ padding: '4px 6px', borderLeft: '2px solid #8b5cf6', marginBottom: '4px', background: 'rgba(139,92,246,0.05)', borderRadius: '0 3px 3px 0' }}>
-                              <div style={{ fontSize: '10px', fontWeight: 600, color: '#a78bfa' }}>
-                                {sn.capabilityNeeded}
+                            <div key={sn.id} style={{ padding: '4px 6px', borderLeft: `2px solid ${sn.fulfilled ? '#10b981' : '#8b5cf6'}`, marginBottom: '4px', background: sn.fulfilled ? 'rgba(16,185,129,0.05)' : 'rgba(139,92,246,0.05)', borderRadius: '0 3px 3px 0' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                <span style={{ fontSize: '10px', fontWeight: 600, color: sn.fulfilled ? '#34d399' : '#a78bfa' }}>
+                                  {sn.capabilityType}
+                                </span>
+                                <span style={{ fontSize: '9px', color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                                  {sn.role}{sn.commsBand ? ` · ${sn.commsBand}` : ''}
+                                </span>
                               </div>
+                              {sn.systemName && (
+                                <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{sn.systemName}</div>
+                              )}
                               {sn.spaceAsset && (
                                 <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
                                   {sn.spaceAsset.name} ({sn.spaceAsset.type})
