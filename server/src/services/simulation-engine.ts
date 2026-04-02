@@ -61,12 +61,13 @@ export async function startSimulation(
 
   const ratio = compressionRatio || config.sim.defaultCompression;
 
-  // Check for a resumable paused simulation in the DB
+  // Check for a resumable simulation in the DB
   const existing = await prisma.simulationState.findFirst({
     where: { scenarioId },
   });
 
-  const isPausedResume = existing?.status === 'PAUSED';
+  // Treat both PAUSED and orphaned RUNNING records as resumes (e.g. server restart mid-run)
+  const isPausedResume = existing != null && (existing.status === 'PAUSED' || existing.status === 'RUNNING');
   const resumeSimTime = isPausedResume ? new Date(existing.simTime) : new Date(scenario.startDate);
   const resumeAtoDay = isPausedResume ? existing.currentAtoDay : 1;
   const resumeRatio = isPausedResume && !compressionRatio ? existing.compressionRatio : ratio;
@@ -84,35 +85,33 @@ export async function startSimulation(
     ? await prisma.simulationState.update({ where: { id: existing.id }, data: simData })
     : await prisma.simulationState.create({ data: simData });
 
-  // Recalculate lastAtoDayGenerated and lastBDADay from existing DB records
-  // so the tick loop doesn't re-generate orders for days that already exist
+  // Always restore lastAtoDayGenerated and lastBDADay from DB so the tick loop
+  // never regenerates ATOs or BDA that already exist — ATOs are codified once created.
   let lastAtoDayGenerated = 0;
   let lastBDADay = 0;
 
-  if (isPausedResume) {
-    const existingOrders = await prisma.taskingOrder.findMany({
-      where: { scenarioId },
-      select: { atoDayNumber: true },
-    });
-    lastAtoDayGenerated = existingOrders.reduce(
-      (max, o) => Math.max(max, o.atoDayNumber ?? 0), 0,
-    );
+  const existingOrders = await prisma.taskingOrder.findMany({
+    where: { scenarioId },
+    select: { atoDayNumber: true },
+  });
+  lastAtoDayGenerated = existingOrders.reduce(
+    (max, o) => Math.max(max, o.atoDayNumber ?? 0), 0,
+  );
 
-    const existingBDA = await prisma.simEvent.findMany({
-      where: { scenarioId, eventType: 'BDA_RECORDED' },
-      select: { simTime: true },
-    });
-    if (existingBDA.length > 0 && scenario) {
-      lastBDADay = existingBDA.reduce((max, e) => {
-        const day = Math.floor(
-          (e.simTime.getTime() - scenario.startDate.getTime()) / (24 * 3600000),
-        ) + 1;
-        return Math.max(max, day);
-      }, 0);
-    }
-
-    console.log(`[SIM] Resuming from DB: simTime=${resumeSimTime.toISOString()}, ATO Day ${resumeAtoDay}, lastGenDay=${lastAtoDayGenerated}, lastBDADay=${lastBDADay}`);
+  const existingBDA = await prisma.simEvent.findMany({
+    where: { scenarioId, eventType: 'BDA_RECORDED' },
+    select: { simTime: true },
+  });
+  if (existingBDA.length > 0 && scenario) {
+    lastBDADay = existingBDA.reduce((max, e) => {
+      const day = Math.floor(
+        (e.simTime.getTime() - scenario.startDate.getTime()) / (24 * 3600000),
+      ) + 1;
+      return Math.max(max, day);
+    }, 0);
   }
+
+  console.log(`[SIM] ${isPausedResume ? 'Resuming' : 'Starting'} scenario ${scenarioId}: lastGenDay=${lastAtoDayGenerated}, lastBDADay=${lastBDADay}`);
 
   const sim: SimState = {
     scenarioId,
@@ -146,8 +145,8 @@ export async function startSimulation(
   startTickLoop(scenarioId, io);
   startPositionLoop(scenarioId, io);
 
-  // Only generate Day 1 orders on a fresh start — paused resumes already have orders
-  if (!isPausedResume) {
+  // Generate Day 1 orders only if none exist yet — ATOs are codified once created
+  if (!isPausedResume && lastAtoDayGenerated === 0) {
     // Pre-set lastAtoDayGenerated to prevent the tick loop from
     // also triggering Day 1 order generation (race condition)
     sim.lastAtoDayGenerated = 1;
@@ -168,7 +167,7 @@ export async function startSimulation(
       const s = activeSims.get(scenarioId);
       if (s) s.lastAtoDayGenerated = 0;
     });
-  } else {
+  } else if (isPausedResume) {
     // Apply events for the current sim time to restore asset states
     applyEventsForTime(scenarioId, resumeSimTime).catch(err => {
       console.error('[SIM] Failed to apply events on resume:', err);
@@ -331,6 +330,21 @@ async function runGameMasterCycle(scenarioId: string, io: Server, newDay: number
   if (!currentSim) return;
 
   const completedDay = newDay - 1;
+
+  // ATOs are codified once generated — never regenerate an existing day.
+  // This protects against seeks, reloads, stop+start, and server restarts.
+  const existingATO = await prisma.taskingOrder.findFirst({
+    where: { scenarioId, atoDayNumber: newDay },
+    select: { id: true },
+  });
+  if (existingATO) {
+    console.log(`[SIM] Day ${newDay} ATO already codified — skipping regeneration`);
+    currentSim.lastAtoDayGenerated = newDay;
+    if (completedDay > 0 && completedDay > currentSim.lastBDADay) {
+      currentSim.lastBDADay = completedDay;
+    }
+    return;
+  }
 
   // Pause tick processing
   currentSim.isGenerating = true;
