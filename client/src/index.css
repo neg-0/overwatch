@@ -968,6 +968,22 @@ body {
   font-weight: 600;
 }
 
+/* ─── Orders Table ───────────────────────────────────────────────────────── */
+
+.orders-table tr.orders-row {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.orders-table tr.orders-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.orders-table tr.orders-row--selected {
+  background: rgba(0, 212, 255, 0.06);
+  outline: 1px solid rgba(0, 212, 255, 0.2);
+}
+
 /* ─── Gantt Detail Panel ─────────────────────────────────────────────────── */
 
 .gantt-detail-panel {
