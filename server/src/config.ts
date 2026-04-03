@@ -6,6 +6,8 @@ export const config = {
   databaseUrl: process.env.DATABASE_URL || 'file:./overwatch.db',
   databaseProvider: (process.env.DATABASE_PROVIDER || 'postgresql') as 'postgresql' | 'sqlite',
   openaiApiKey: process.env.OPENAI_API_KEY || '',
+  askSageApiKey: process.env.ASKSAGE_API_KEY || '',
+  llmProvider: (process.env.LLM_PROVIDER || 'openai') as 'openai' | 'asksage',
   mapboxToken: process.env.MAPBOX_TOKEN || '',
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
   nodeEnv: process.env.NODE_ENV || 'development',
@@ -33,7 +35,9 @@ export const config = {
 };
 
 // Startup validation — warn about missing critical config
-if (!config.openaiApiKey) {
+if (config.llmProvider === 'asksage' && !config.askSageApiKey) {
+  console.warn('[config] WARNING: LLM_PROVIDER=asksage but ASKSAGE_API_KEY is not set');
+} else if (config.llmProvider === 'openai' && !config.openaiApiKey) {
   console.warn('[config] WARNING: OPENAI_API_KEY is not set — all LLM generation features will fail');
 }
 if (!config.mapboxToken) {

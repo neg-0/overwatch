@@ -94,7 +94,17 @@ export function getOpenAIClient(): OpenAI {
     return singletonProxy;
   }
 
-  const realClient = new OpenAI({ apiKey: config.openaiApiKey || 'mock-key-for-demo-mode' });
+  const isAskSage = config.llmProvider === 'asksage';
+  const realClient = new OpenAI({
+    apiKey: isAskSage
+      ? config.askSageApiKey || 'mock-key-for-demo-mode'
+      : config.openaiApiKey || 'mock-key-for-demo-mode',
+    ...(isAskSage && { baseURL: 'https://api.asksage.ai/server/openai/v1' }),
+  });
+
+  if (isAskSage) {
+    console.log('[LLM] Using AskSage provider (OpenAI-compatible endpoint)');
+  }
 
   singletonProxy = new Proxy(realClient, {
     get(target, prop) {
