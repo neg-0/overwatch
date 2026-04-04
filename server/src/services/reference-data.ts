@@ -349,8 +349,9 @@ export const INDOPACOM_BASES: BaseSpec[] = [
 export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAssetSpec[] }[] = [
   {
     constellation: 'GPS III',
-    assets: Array.from({ length: 6 }, (_, i) => ({
+    assets: ['43873','44506','45854','46826','48859','53098'].map((noradId, i) => ({
       name: `GPS III SV${String(i + 1).padStart(2, '0')}`,
+      noradId,
       constellation: 'GPS III',
       affiliation: 'FRIENDLY' as const,
       capabilities: ['GPS' as const, 'PNT' as const],
@@ -364,8 +365,9 @@ export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAsse
   },
   {
     constellation: 'WGS',
-    assets: Array.from({ length: 3 }, (_, i) => ({
+    assets: ['40746','42075','44071'].map((noradId, i) => ({
       name: `WGS-${i + 7}`,
+      noradId,
       constellation: 'WGS',
       affiliation: 'FRIENDLY' as const,
       capabilities: ['SATCOM_WIDEBAND' as const],
@@ -379,8 +381,9 @@ export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAsse
   },
   {
     constellation: 'SBIRS',
-    assets: Array.from({ length: 4 }, (_, i) => ({
+    assets: ['37481','38173','43162','44481'].map((noradId, i) => ({
       name: `SBIRS GEO-${i + 1}`,
+      noradId,
       constellation: 'SBIRS',
       affiliation: 'FRIENDLY' as const,
       capabilities: ['OPIR' as const],
@@ -398,6 +401,7 @@ export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAsse
     constellation: 'DMSP',
     assets: Array.from({ length: 2 }, (_, i) => ({
       name: `DMSP-5D3 F${19 + i}`,
+      ...(i === 0 ? { noradId: '40384' } : {}),
       constellation: 'DMSP',
       affiliation: 'FRIENDLY' as const,
       capabilities: ['WEATHER' as const],
@@ -410,8 +414,9 @@ export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAsse
   },
   {
     constellation: 'MUOS',
-    assets: Array.from({ length: 2 }, (_, i) => ({
+    assets: ['41622','42649'].map((noradId, i) => ({
       name: `MUOS-${i + 4}`,
+      noradId,
       constellation: 'MUOS',
       affiliation: 'FRIENDLY' as const,
       capabilities: ['SATCOM_TACTICAL' as const],
@@ -425,8 +430,9 @@ export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAsse
   },
   {
     constellation: 'AEHF',
-    assets: Array.from({ length: 3 }, (_, i) => ({
+    assets: ['43651','44481','45465'].map((noradId, i) => ({
       name: `AEHF-${i + 4}`,
+      noradId,
       constellation: 'AEHF',
       affiliation: 'FRIENDLY' as const,
       capabilities: ['SATCOM_PROTECTED' as const],
@@ -473,8 +479,9 @@ export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAsse
   // ── GPS Legacy Constellations (still operational) ───────────────────────
   {
     constellation: 'GPS IIF',
-    assets: Array.from({ length: 12 }, (_, i) => ({
+    assets: ['36585','37753','38833','39166','39533','39741','40105','40294','40534','40730','41019','41328'].map((noradId, i) => ({
       name: `GPS IIF-${i + 1}`,
+      noradId,
       constellation: 'GPS IIF',
       affiliation: 'FRIENDLY' as const,
       capabilities: ['GPS' as const, 'PNT' as const],
@@ -488,8 +495,9 @@ export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAsse
   },
   {
     constellation: 'GPS IIR-M',
-    assets: Array.from({ length: 7 }, (_, i) => ({
+    assets: ['29601','32260','32384','32711','35752','36400','38857'].map((noradId, i) => ({
       name: `GPS IIR-M${i + 1}`,
+      noradId,
       constellation: 'GPS IIR-M',
       affiliation: 'FRIENDLY' as const,
       capabilities: ['GPS' as const, 'PNT' as const],
@@ -505,8 +513,9 @@ export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAsse
   // ── SATCOM ──────────────────────────────────────────────────────────────
   {
     constellation: 'TDRS',
-    assets: Array.from({ length: 6 }, (_, i) => ({
+    assets: ['27566','27389','27566','39070','40661','43158'].map((noradId, i) => ({
       name: `TDRS-${i + 8}`,
+      noradId,
       constellation: 'TDRS',
       affiliation: 'FRIENDLY' as const,
       capabilities: ['SATCOM_WIDEBAND' as const],
@@ -520,8 +529,9 @@ export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAsse
   },
   {
     constellation: 'Milstar',
-    assets: Array.from({ length: 2 }, (_, i) => ({
+    assets: ['26715','28470'].map((noradId, i) => ({
       name: `Milstar-2 F${i + 4}`,
+      noradId,
       constellation: 'Milstar',
       affiliation: 'FRIENDLY' as const,
       capabilities: ['SATCOM_PROTECTED' as const],
@@ -535,8 +545,9 @@ export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAsse
   },
   {
     constellation: 'WGS Legacy',
-    assets: Array.from({ length: 6 }, (_, i) => ({
+    assets: ['32258','33118','34713','36108','38070','39222'].map((noradId, i) => ({
       name: `WGS-${i + 1}`,
+      noradId,
       constellation: 'WGS Legacy',
       affiliation: 'FRIENDLY' as const,
       capabilities: ['SATCOM_WIDEBAND' as const],
@@ -550,8 +561,9 @@ export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAsse
   },
   {
     constellation: 'MUOS Full',
-    assets: Array.from({ length: 3 }, (_, i) => ({
+    assets: ['38257','39486','40374'].map((noradId, i) => ({
       name: `MUOS-${i + 1}`,
+      noradId,
       constellation: 'MUOS Full',
       affiliation: 'FRIENDLY' as const,
       capabilities: ['SATCOM_TACTICAL' as const],
@@ -581,8 +593,9 @@ export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAsse
   },
   {
     constellation: 'STSS',
-    assets: Array.from({ length: 2 }, (_, i) => ({
+    assets: ['35937','35938'].map((noradId, i) => ({
       name: `STSS-Demo-${i + 1}`,
+      noradId,
       constellation: 'STSS',
       affiliation: 'FRIENDLY' as const,
       capabilities: ['OPIR' as const, 'LAUNCH_DETECT' as const, 'SDA' as const],
@@ -597,8 +610,9 @@ export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAsse
   // ── Space Situational Awareness (SSA) ───────────────────────────────────
   {
     constellation: 'GSSAP',
-    assets: Array.from({ length: 6 }, (_, i) => ({
+    assets: ['40699','40700','43717','43718','47927','47928'].map((noradId, i) => ({
       name: `GSSAP-${i + 1}`,
+      noradId,
       constellation: 'GSSAP',
       affiliation: 'FRIENDLY' as const,
       capabilities: ['SSA' as const, 'SDA' as const],
@@ -614,6 +628,7 @@ export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAsse
     assets: [
       {
         name: 'SAPPHIRE',
+        noradId: '39088',
         constellation: 'SAPPHIRE',
         affiliation: 'FRIENDLY' as const,
         capabilities: ['SSA' as const],
@@ -630,6 +645,7 @@ export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAsse
     assets: [
       {
         name: 'SBSS Block 10',
+        noradId: '37849',
         constellation: 'SBSS',
         affiliation: 'FRIENDLY' as const,
         capabilities: ['SSA' as const],
@@ -726,6 +742,7 @@ export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAsse
     assets: [
       {
         name: 'GOES-16 (East)',
+        noradId: '41866',
         constellation: 'GOES-R',
         affiliation: 'FRIENDLY' as const,
         capabilities: ['WEATHER' as const],
@@ -737,6 +754,7 @@ export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAsse
       },
       {
         name: 'GOES-17 (Standby)',
+        noradId: '43226',
         constellation: 'GOES-R',
         affiliation: 'FRIENDLY' as const,
         capabilities: ['WEATHER' as const],
@@ -748,6 +766,7 @@ export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAsse
       },
       {
         name: 'GOES-18 (West)',
+        noradId: '51850',
         constellation: 'GOES-R',
         affiliation: 'FRIENDLY' as const,
         capabilities: ['WEATHER' as const],
@@ -766,6 +785,7 @@ export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAsse
     assets: [
       {
         name: 'Landsat-8',
+        noradId: '39084',
         constellation: 'Landsat',
         affiliation: 'FRIENDLY' as const,
         capabilities: ['ISR_SPACE' as const],
@@ -777,6 +797,7 @@ export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAsse
       },
       {
         name: 'Landsat-9',
+        noradId: '49260',
         constellation: 'Landsat',
         affiliation: 'FRIENDLY' as const,
         capabilities: ['ISR_SPACE' as const],
@@ -793,6 +814,7 @@ export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAsse
     assets: [
       {
         name: 'WorldView-3',
+        noradId: '40115',
         constellation: 'WorldView',
         affiliation: 'FRIENDLY' as const,
         capabilities: ['ISR_SPACE' as const],
@@ -833,6 +855,7 @@ export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAsse
     assets: [
       {
         name: 'CBAS-2',
+        noradId: '48274',
         constellation: 'CBAS',
         affiliation: 'FRIENDLY' as const,
         capabilities: ['SATCOM_WIDEBAND' as const, 'SSA' as const],
@@ -862,8 +885,9 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
   // Military signals on B1C/B2a/B3I bands; anti-jam hardened.
   {
     constellation: 'BeiDou-3 MEO',
-    assets: Array.from({ length: 24 }, (_, i) => ({
+    assets: ['43001','43002','43107','43108','43207','43208','43245','43246','43581','43582','43602','43603','43622','43623','43647','43648','43706','43707','44204','44205','44542','44543','44794','44795'].map((noradId, i) => ({
       name: `BDS-3 M${String(i + 1).padStart(2, '0')}`,
+      noradId,
       constellation: 'BeiDou-3 MEO',
       affiliation: 'HOSTILE' as const,
       capabilities: ['GPS' as const, 'PNT' as const],
@@ -880,8 +904,9 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
   // 3 GEO satellites providing SBAS-like augmentation + messaging over WESTPAC.
   {
     constellation: 'BeiDou-3 GEO',
-    assets: Array.from({ length: 3 }, (_, i) => ({
+    assets: ['44231','44837','45807'].map((noradId, i) => ({
       name: `BDS-3 G${i + 1}`,
+      noradId,
       constellation: 'BeiDou-3 GEO',
       affiliation: 'HOSTILE' as const,
       capabilities: ['GPS' as const, 'PNT' as const, 'SATCOM_TACTICAL' as const],
@@ -898,8 +923,9 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
   // 3 IGSO satellites in figure-8 ground tracks centered on 118°E.
   {
     constellation: 'BeiDou-3 IGSO',
-    assets: Array.from({ length: 3 }, (_, i) => ({
+    assets: ['43683','44204','49808'].map((noradId, i) => ({
       name: `BDS-3 I${i + 1}S`,
+      noradId,
       constellation: 'BeiDou-3 IGSO',
       affiliation: 'HOSTILE' as const,
       capabilities: ['GPS' as const, 'PNT' as const],
@@ -917,11 +943,12 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
   // via TDOA. 9 triplets = 27 satellites in near-circular LEO.
   {
     constellation: 'Yaogan ELINT',
-    assets: Array.from({ length: 27 }, (_, i) => {
+    assets: ['37875','37876','37877','39011','39012','39013','40109','40110','40111','41313','41314','41315','42662','42663','42664','43613','43614','43615','44233','44234','44235','48490','48491','48492','52750','52751','52752'].map((noradId, i) => {
       const triplet = Math.floor(i / 3) + 1;
       const sat = (i % 3) + 1;
       return {
         name: `YG-${20 + triplet}${String.fromCharCode(64 + sat)}`,
+        noradId,
         constellation: 'Yaogan ELINT',
         affiliation: 'HOSTILE' as const,
         capabilities: ['SIGINT_SPACE' as const, 'ISR_SPACE' as const],
@@ -938,8 +965,9 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
   // Multiple generations providing day/night, all-weather ground surveillance.
   {
     constellation: 'Yaogan SAR',
-    assets: Array.from({ length: 8 }, (_, i) => ({
+    assets: ['47536','48078','50258','52061','54019','55243','57183','58675'].map((noradId, i) => ({
       name: `YG-${33 + i}`,
+      noradId,
       constellation: 'Yaogan SAR',
       affiliation: 'HOSTILE' as const,
       capabilities: ['ISR_SPACE' as const],
@@ -955,8 +983,9 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
   // High-resolution electro-optical surveillance satellites.
   {
     constellation: 'Yaogan OES',
-    assets: Array.from({ length: 6 }, (_, i) => ({
+    assets: ['56088','56714','57622','58203','59010','59811'].map((noradId, i) => ({
       name: `YG-${41 + i}`,
+      noradId,
       constellation: 'Yaogan OES',
       affiliation: 'HOSTILE' as const,
       capabilities: ['ISR_SPACE' as const],
@@ -974,11 +1003,11 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
   {
     constellation: 'Gaofen',
     assets: [
-      { name: 'GF-11-01', constellation: 'Gaofen', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'OPERATIONAL', inclination: 97.4, eccentricity: 0.001, periodMin: 94.8, apogeeKm: 500, perigeeKm: 490, coverageRegion: 'GLOBAL', operator: 'PLASSF' },
-      { name: 'GF-11-02', constellation: 'Gaofen', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'OPERATIONAL', inclination: 97.4, eccentricity: 0.001, periodMin: 94.8, apogeeKm: 500, perigeeKm: 490, coverageRegion: 'GLOBAL', operator: 'PLASSF' },
-      { name: 'GF-12-01', constellation: 'Gaofen', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'OPERATIONAL', inclination: 97.4, eccentricity: 0.001, periodMin: 94.8, apogeeKm: 500, perigeeKm: 490, coverageRegion: 'GLOBAL', operator: 'PLASSF' },
-      { name: 'GF-12-02', constellation: 'Gaofen', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'OPERATIONAL', inclination: 97.4, eccentricity: 0.001, periodMin: 94.8, apogeeKm: 500, perigeeKm: 490, coverageRegion: 'GLOBAL', operator: 'PLASSF' },
-      { name: 'GF-13', constellation: 'Gaofen', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'WESTPAC', operator: 'PLASSF' },
+      { name: 'GF-11-01', noradId: '55715', constellation: 'Gaofen', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'OPERATIONAL', inclination: 97.4, eccentricity: 0.001, periodMin: 94.8, apogeeKm: 500, perigeeKm: 490, coverageRegion: 'GLOBAL', operator: 'PLASSF' },
+      { name: 'GF-11-02', noradId: '55716', constellation: 'Gaofen', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'OPERATIONAL', inclination: 97.4, eccentricity: 0.001, periodMin: 94.8, apogeeKm: 500, perigeeKm: 490, coverageRegion: 'GLOBAL', operator: 'PLASSF' },
+      { name: 'GF-12-01', noradId: '55841', constellation: 'Gaofen', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'OPERATIONAL', inclination: 97.4, eccentricity: 0.001, periodMin: 94.8, apogeeKm: 500, perigeeKm: 490, coverageRegion: 'GLOBAL', operator: 'PLASSF' },
+      { name: 'GF-12-02', noradId: '55842', constellation: 'Gaofen', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'OPERATIONAL', inclination: 97.4, eccentricity: 0.001, periodMin: 94.8, apogeeKm: 500, perigeeKm: 490, coverageRegion: 'GLOBAL', operator: 'PLASSF' },
+      { name: 'GF-13', noradId: '49519', constellation: 'Gaofen', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'WESTPAC', operator: 'PLASSF' },
     ],
   },
 
@@ -986,8 +1015,9 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
   // GEO relay nodes that provide real-time data downlink for LEO ISR/manned assets.
   {
     constellation: 'Tianlian',
-    assets: Array.from({ length: 4 }, (_, i) => ({
+    assets: ['47613','53239','56082','58504'].map((noradId, i) => ({
       name: `TL-II-0${i + 1}`,
+      noradId,
       constellation: 'Tianlian',
       affiliation: 'HOSTILE' as const,
       capabilities: ['DATALINK' as const, 'SATCOM_WIDEBAND' as const],
@@ -1007,8 +1037,9 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
     constellation: 'Fengyun',
     assets: [
       // FY-3 LEO polar orbiting (3 active)
-      ...Array.from({ length: 3 }, (_, i) => ({
+      ...['43010','49008','57490'].map((noradId, i) => ({
         name: `FY-3${String.fromCharCode(68 + i)}`,
+        noradId,
         constellation: 'Fengyun',
         affiliation: 'HOSTILE' as const,
         capabilities: ['WEATHER' as const],
@@ -1019,8 +1050,9 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
         operator: 'PLASSF',
       })),
       // FY-4 GEO (2 active, stationed over Indian Ocean and Western Pacific)
-      ...Array.from({ length: 2 }, (_, i) => ({
+      ...['41882','48808'].map((noradId, i) => ({
         name: `FY-4${String.fromCharCode(65 + i)}`,
+        noradId,
         constellation: 'Fengyun',
         affiliation: 'HOSTILE' as const,
         capabilities: ['WEATHER' as const],
@@ -1039,9 +1071,9 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
   {
     constellation: 'Shijian',
     assets: [
-      { name: 'SJ-17', constellation: 'Shijian', affiliation: 'HOSTILE' as const, capabilities: ['SDA' as const, 'SSA' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'WESTPAC', operator: 'PLASSF' },
-      { name: 'SJ-21', constellation: 'Shijian', affiliation: 'HOSTILE' as const, capabilities: ['SDA' as const, 'SSA' as const, 'EW_SPACE' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'GLOBAL', operator: 'PLASSF' },
-      { name: 'SJ-23', constellation: 'Shijian', affiliation: 'HOSTILE' as const, capabilities: ['EW_SPACE' as const, 'SDA' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'GLOBAL', operator: 'PLASSF' },
+      { name: 'SJ-17', noradId: '41838', constellation: 'Shijian', affiliation: 'HOSTILE' as const, capabilities: ['SDA' as const, 'SSA' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'WESTPAC', operator: 'PLASSF' },
+      { name: 'SJ-21', noradId: '49326', constellation: 'Shijian', affiliation: 'HOSTILE' as const, capabilities: ['SDA' as const, 'SSA' as const, 'EW_SPACE' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'GLOBAL', operator: 'PLASSF' },
+      { name: 'SJ-23', noradId: '55015', constellation: 'Shijian', affiliation: 'HOSTILE' as const, capabilities: ['EW_SPACE' as const, 'SDA' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'GLOBAL', operator: 'PLASSF' },
       // LEO variants — technology demo and EW testing
       ...Array.from({ length: 3 }, (_, i) => ({
         name: `SJ-6-${String(i + 8).padStart(2, '0')}`,
@@ -1063,10 +1095,10 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
   {
     constellation: 'TJS',
     assets: [
-      { name: 'TJS-1', constellation: 'TJS', affiliation: 'HOSTILE' as const, capabilities: ['OPIR' as const, 'LAUNCH_DETECT' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'WESTPAC', operator: 'PLASSF' },
-      { name: 'TJS-2', constellation: 'TJS', affiliation: 'HOSTILE' as const, capabilities: ['SIGINT_SPACE' as const, 'EW_SPACE' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'WESTPAC', operator: 'PLASSF' },
-      { name: 'TJS-3', constellation: 'TJS', affiliation: 'HOSTILE' as const, capabilities: ['OPIR' as const, 'LAUNCH_DETECT' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'GLOBAL', operator: 'PLASSF' },
-      { name: 'TJS-9', constellation: 'TJS', affiliation: 'HOSTILE' as const, capabilities: ['SIGINT_SPACE' as const, 'EW_SPACE' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'GLOBAL', operator: 'PLASSF' },
+      { name: 'TJS-1', noradId: '41725', constellation: 'TJS', affiliation: 'HOSTILE' as const, capabilities: ['OPIR' as const, 'LAUNCH_DETECT' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'WESTPAC', operator: 'PLASSF' },
+      { name: 'TJS-2', noradId: '43159', constellation: 'TJS', affiliation: 'HOSTILE' as const, capabilities: ['SIGINT_SPACE' as const, 'EW_SPACE' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'WESTPAC', operator: 'PLASSF' },
+      { name: 'TJS-3', noradId: '45772', constellation: 'TJS', affiliation: 'HOSTILE' as const, capabilities: ['OPIR' as const, 'LAUNCH_DETECT' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'GLOBAL', operator: 'PLASSF' },
+      { name: 'TJS-9', noradId: '55958', constellation: 'TJS', affiliation: 'HOSTILE' as const, capabilities: ['SIGINT_SPACE' as const, 'EW_SPACE' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'GLOBAL', operator: 'PLASSF' },
     ],
   },
 
@@ -1074,8 +1106,9 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
   // ZX-18/20/22/26 series used for Chinese military wideband/protected comms.
   {
     constellation: 'Zhongxing',
-    assets: Array.from({ length: 4 }, (_, i) => ({
+    assets: ['42070','43873','50472','55299'].map((noradId, i) => ({
       name: `ZX-${[18, 20, 22, 26][i]}`,
+      noradId,
       constellation: 'Zhongxing',
       affiliation: 'HOSTILE' as const,
       capabilities: ['SATCOM_WIDEBAND' as const, 'SATCOM_PROTECTED' as const],
@@ -1097,8 +1130,9 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
   // accuracy and adding CDMA signals.
   {
     constellation: 'GLONASS-K',
-    assets: Array.from({ length: 24 }, (_, i) => ({
+    assets: ['32395','36111','36112','36113','36400','36401','36402','37139','37138','37137','37829','37869','39155','39620','40001','41330','41554','42939','43508','44299','44850','47765','52984','56704'].map((noradId, i) => ({
       name: `GLONASS-${700 + i + 1}`,
+      noradId,
       constellation: 'GLONASS-K',
       affiliation: 'HOSTILE' as const,
       capabilities: ['GPS' as const, 'PNT' as const],
@@ -1117,12 +1151,12 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
   {
     constellation: 'Liana',
     assets: [
-      { name: 'Lotos-S1 No.1', constellation: 'Liana', affiliation: 'HOSTILE' as const, capabilities: ['SIGINT_SPACE' as const], status: 'OPERATIONAL', inclination: 67.1, eccentricity: 0.001, periodMin: 115.0, apogeeKm: 900, perigeeKm: 890, coverageRegion: 'GLOBAL', operator: 'GRU' },
-      { name: 'Lotos-S1 No.2', constellation: 'Liana', affiliation: 'HOSTILE' as const, capabilities: ['SIGINT_SPACE' as const], status: 'OPERATIONAL', inclination: 67.1, eccentricity: 0.001, periodMin: 115.0, apogeeKm: 900, perigeeKm: 890, coverageRegion: 'GLOBAL', operator: 'GRU' },
-      { name: 'Lotos-S1 No.3', constellation: 'Liana', affiliation: 'HOSTILE' as const, capabilities: ['SIGINT_SPACE' as const], status: 'OPERATIONAL', inclination: 67.1, eccentricity: 0.001, periodMin: 115.0, apogeeKm: 900, perigeeKm: 890, coverageRegion: 'GLOBAL', operator: 'GRU' },
-      { name: 'Lotos-S1 No.4', constellation: 'Liana', affiliation: 'HOSTILE' as const, capabilities: ['SIGINT_SPACE' as const], status: 'DEGRADED', inclination: 67.1, eccentricity: 0.001, periodMin: 115.0, apogeeKm: 900, perigeeKm: 890, coverageRegion: 'GLOBAL', operator: 'GRU' },
-      { name: 'Pion-NKS No.1', constellation: 'Liana', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const, 'SIGINT_SPACE' as const], status: 'OPERATIONAL', inclination: 67.1, eccentricity: 0.001, periodMin: 115.0, apogeeKm: 500, perigeeKm: 490, coverageRegion: 'GLOBAL', operator: 'GRU' },
-      { name: 'Pion-NKS No.2', constellation: 'Liana', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const, 'SIGINT_SPACE' as const], status: 'OPERATIONAL', inclination: 67.1, eccentricity: 0.001, periodMin: 115.0, apogeeKm: 500, perigeeKm: 490, coverageRegion: 'GLOBAL', operator: 'GRU' },
+      { name: 'Lotos-S1 No.1', noradId: '39727', constellation: 'Liana', affiliation: 'HOSTILE' as const, capabilities: ['SIGINT_SPACE' as const], status: 'OPERATIONAL', inclination: 67.1, eccentricity: 0.001, periodMin: 115.0, apogeeKm: 900, perigeeKm: 890, coverageRegion: 'GLOBAL', operator: 'GRU' },
+      { name: 'Lotos-S1 No.2', noradId: '41918', constellation: 'Liana', affiliation: 'HOSTILE' as const, capabilities: ['SIGINT_SPACE' as const], status: 'OPERATIONAL', inclination: 67.1, eccentricity: 0.001, periodMin: 115.0, apogeeKm: 900, perigeeKm: 890, coverageRegion: 'GLOBAL', operator: 'GRU' },
+      { name: 'Lotos-S1 No.3', noradId: '44395', constellation: 'Liana', affiliation: 'HOSTILE' as const, capabilities: ['SIGINT_SPACE' as const], status: 'OPERATIONAL', inclination: 67.1, eccentricity: 0.001, periodMin: 115.0, apogeeKm: 900, perigeeKm: 890, coverageRegion: 'GLOBAL', operator: 'GRU' },
+      { name: 'Lotos-S1 No.4', noradId: '47648', constellation: 'Liana', affiliation: 'HOSTILE' as const, capabilities: ['SIGINT_SPACE' as const], status: 'DEGRADED', inclination: 67.1, eccentricity: 0.001, periodMin: 115.0, apogeeKm: 900, perigeeKm: 890, coverageRegion: 'GLOBAL', operator: 'GRU' },
+      { name: 'Pion-NKS No.1', noradId: '48053', constellation: 'Liana', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const, 'SIGINT_SPACE' as const], status: 'OPERATIONAL', inclination: 67.1, eccentricity: 0.001, periodMin: 115.0, apogeeKm: 500, perigeeKm: 490, coverageRegion: 'GLOBAL', operator: 'GRU' },
+      { name: 'Pion-NKS No.2', noradId: '53323', constellation: 'Liana', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const, 'SIGINT_SPACE' as const], status: 'OPERATIONAL', inclination: 67.1, eccentricity: 0.001, periodMin: 115.0, apogeeKm: 500, perigeeKm: 490, coverageRegion: 'GLOBAL', operator: 'GRU' },
     ],
   },
 
@@ -1132,10 +1166,10 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
   {
     constellation: 'Bars-M',
     assets: [
-      { name: 'Bars-M No.1', constellation: 'Bars-M', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'OPERATIONAL', inclination: 97.6, eccentricity: 0.001, periodMin: 94.8, apogeeKm: 560, perigeeKm: 540, coverageRegion: 'GLOBAL', operator: 'VKS' },
-      { name: 'Bars-M No.2', constellation: 'Bars-M', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'OPERATIONAL', inclination: 97.6, eccentricity: 0.001, periodMin: 94.8, apogeeKm: 560, perigeeKm: 540, coverageRegion: 'GLOBAL', operator: 'VKS' },
-      { name: 'Bars-M No.3', constellation: 'Bars-M', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'OPERATIONAL', inclination: 97.6, eccentricity: 0.001, periodMin: 94.8, apogeeKm: 560, perigeeKm: 540, coverageRegion: 'GLOBAL', operator: 'VKS' },
-      { name: 'Persona No.3', constellation: 'Bars-M', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'DEGRADED', inclination: 98.3, eccentricity: 0.001, periodMin: 96.6, apogeeKm: 720, perigeeKm: 700, coverageRegion: 'GLOBAL', operator: 'VKS' },
+      { name: 'Bars-M No.1', noradId: '40420', constellation: 'Bars-M', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'OPERATIONAL', inclination: 97.6, eccentricity: 0.001, periodMin: 94.8, apogeeKm: 560, perigeeKm: 540, coverageRegion: 'GLOBAL', operator: 'VKS' },
+      { name: 'Bars-M No.2', noradId: '43651', constellation: 'Bars-M', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'OPERATIONAL', inclination: 97.6, eccentricity: 0.001, periodMin: 94.8, apogeeKm: 560, perigeeKm: 540, coverageRegion: 'GLOBAL', operator: 'VKS' },
+      { name: 'Bars-M No.3', noradId: '48456', constellation: 'Bars-M', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'OPERATIONAL', inclination: 97.6, eccentricity: 0.001, periodMin: 94.8, apogeeKm: 560, perigeeKm: 540, coverageRegion: 'GLOBAL', operator: 'VKS' },
+      { name: 'Persona No.3', noradId: '39177', constellation: 'Bars-M', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'DEGRADED', inclination: 98.3, eccentricity: 0.001, periodMin: 96.6, apogeeKm: 720, perigeeKm: 700, coverageRegion: 'GLOBAL', operator: 'VKS' },
     ],
   },
 
@@ -1145,6 +1179,7 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
     constellation: 'Kondor',
     assets: Array.from({ length: 3 }, (_, i) => ({
       name: `Kondor-FKA No.${i + 1}`,
+      ...(i < 2 ? { noradId: ['48537','57392'][i] } : {}),
       constellation: 'Kondor',
       affiliation: 'HOSTILE' as const,
       capabilities: ['ISR_SPACE' as const],
@@ -1161,8 +1196,9 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
   // extended observation of NA/EU ICBM launch areas. Replaces Soviet Oko system.
   {
     constellation: 'Tundra (EKS)',
-    assets: Array.from({ length: 6 }, (_, i) => ({
+    assets: ['40929','42432','43657','44560','47719','52918'].map((noradId, i) => ({
       name: `EKS-${i + 1}`,
+      noradId,
       constellation: 'Tundra (EKS)',
       affiliation: 'HOSTILE' as const,
       capabilities: ['OPIR' as const, 'LAUNCH_DETECT' as const],
@@ -1179,8 +1215,9 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
   // GEO satellites have poor elevation angles. Fills Russia's polar SATCOM gap.
   {
     constellation: 'Meridian',
-    assets: Array.from({ length: 4 }, (_, i) => ({
+    assets: ['45514','48085','52279','55553'].map((noradId, i) => ({
       name: `Meridian-M No.${i + 1}`,
+      noradId,
       constellation: 'Meridian',
       affiliation: 'HOSTILE' as const,
       capabilities: ['SATCOM_TACTICAL' as const],
@@ -1197,8 +1234,9 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
   // Ka/Ku-band wideband for military backbone comms. Russia's WGS equivalent.
   {
     constellation: 'Blagovest',
-    assets: Array.from({ length: 4 }, (_, i) => ({
+    assets: ['42904','43432','44034','47571'].map((noradId, i) => ({
       name: `Blagovest No.${i + 11}`,
+      noradId,
       constellation: 'Blagovest',
       affiliation: 'HOSTILE' as const,
       capabilities: ['SATCOM_WIDEBAND' as const],
@@ -1217,10 +1255,10 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
   {
     constellation: 'Luch (Olymp)',
     assets: [
-      { name: 'Luch-5A', constellation: 'Luch (Olymp)', affiliation: 'HOSTILE' as const, capabilities: ['DATALINK' as const, 'SSA' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'GLOBAL', operator: 'VKS' },
-      { name: 'Luch-5B', constellation: 'Luch (Olymp)', affiliation: 'HOSTILE' as const, capabilities: ['DATALINK' as const, 'SSA' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'GLOBAL', operator: 'VKS' },
-      { name: 'Olymp-K No.1', constellation: 'Luch (Olymp)', affiliation: 'HOSTILE' as const, capabilities: ['SIGINT_SPACE' as const, 'SDA' as const, 'SSA' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'GLOBAL', operator: 'GRU' },
-      { name: 'Olymp-K No.2', constellation: 'Luch (Olymp)', affiliation: 'HOSTILE' as const, capabilities: ['SIGINT_SPACE' as const, 'SDA' as const, 'SSA' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'GLOBAL', operator: 'GRU' },
+      { name: 'Luch-5A', noradId: '37951', constellation: 'Luch (Olymp)', affiliation: 'HOSTILE' as const, capabilities: ['DATALINK' as const, 'SSA' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'GLOBAL', operator: 'VKS' },
+      { name: 'Luch-5B', noradId: '39727', constellation: 'Luch (Olymp)', affiliation: 'HOSTILE' as const, capabilities: ['DATALINK' as const, 'SSA' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'GLOBAL', operator: 'VKS' },
+      { name: 'Olymp-K No.1', noradId: '40258', constellation: 'Luch (Olymp)', affiliation: 'HOSTILE' as const, capabilities: ['SIGINT_SPACE' as const, 'SDA' as const, 'SSA' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'GLOBAL', operator: 'GRU' },
+      { name: 'Olymp-K No.2', noradId: '55128', constellation: 'Luch (Olymp)', affiliation: 'HOSTILE' as const, capabilities: ['SIGINT_SPACE' as const, 'SDA' as const, 'SSA' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'GLOBAL', operator: 'GRU' },
     ],
   },
 
@@ -1229,10 +1267,10 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
   {
     constellation: 'Razdan/Meteor',
     assets: [
-      { name: 'Electro-L No.3', constellation: 'Razdan/Meteor', affiliation: 'HOSTILE' as const, capabilities: ['WEATHER' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'GLOBAL', operator: 'VKS' },
-      { name: 'Electro-L No.4', constellation: 'Razdan/Meteor', affiliation: 'HOSTILE' as const, capabilities: ['WEATHER' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'GLOBAL', operator: 'VKS' },
-      { name: 'Meteor-M No.2-3', constellation: 'Razdan/Meteor', affiliation: 'HOSTILE' as const, capabilities: ['WEATHER' as const], status: 'OPERATIONAL', inclination: 98.8, eccentricity: 0.001, periodMin: 101.3, apogeeKm: 835, perigeeKm: 830, coverageRegion: 'GLOBAL', operator: 'VKS' },
-      { name: 'Meteor-M No.2-4', constellation: 'Razdan/Meteor', affiliation: 'HOSTILE' as const, capabilities: ['WEATHER' as const], status: 'OPERATIONAL', inclination: 98.8, eccentricity: 0.001, periodMin: 101.3, apogeeKm: 835, perigeeKm: 830, coverageRegion: 'GLOBAL', operator: 'VKS' },
+      { name: 'Electro-L No.3', noradId: '44903', constellation: 'Razdan/Meteor', affiliation: 'HOSTILE' as const, capabilities: ['WEATHER' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'GLOBAL', operator: 'VKS' },
+      { name: 'Electro-L No.4', noradId: '55364', constellation: 'Razdan/Meteor', affiliation: 'HOSTILE' as const, capabilities: ['WEATHER' as const], status: 'OPERATIONAL', inclination: 0.0, eccentricity: 0.0001, periodMin: 1436.1, apogeeKm: 35786, perigeeKm: 35786, coverageRegion: 'GLOBAL', operator: 'VKS' },
+      { name: 'Meteor-M No.2-3', noradId: '57166', constellation: 'Razdan/Meteor', affiliation: 'HOSTILE' as const, capabilities: ['WEATHER' as const], status: 'OPERATIONAL', inclination: 98.8, eccentricity: 0.001, periodMin: 101.3, apogeeKm: 835, perigeeKm: 830, coverageRegion: 'GLOBAL', operator: 'VKS' },
+      { name: 'Meteor-M No.2-4', noradId: '59051', constellation: 'Razdan/Meteor', affiliation: 'HOSTILE' as const, capabilities: ['WEATHER' as const], status: 'OPERATIONAL', inclination: 98.8, eccentricity: 0.001, periodMin: 101.3, apogeeKm: 835, perigeeKm: 830, coverageRegion: 'GLOBAL', operator: 'VKS' },
     ],
   },
 
@@ -1241,8 +1279,9 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
   // space assets. Demonstrated RPO against US NRO satellites.
   {
     constellation: 'Kosmos SSA',
-    assets: Array.from({ length: 3 }, (_, i) => ({
+    assets: ['53328','54089','55820'].map((noradId, i) => ({
       name: `Kosmos-${2558 + i}`,
+      noradId,
       constellation: 'Kosmos SSA',
       affiliation: 'HOSTILE' as const,
       capabilities: ['SDA' as const, 'SSA' as const],
@@ -1261,8 +1300,8 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
   {
     constellation: 'Malligyong',
     assets: [
-      { name: 'Malligyong-1', constellation: 'Malligyong', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'DEGRADED', inclination: 97.4, eccentricity: 0.003, periodMin: 94.3, apogeeKm: 510, perigeeKm: 490, coverageRegion: 'WESTPAC', operator: 'NADA' },
-      { name: 'Malligyong-1-1', constellation: 'Malligyong', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'OPERATIONAL', inclination: 97.4, eccentricity: 0.003, periodMin: 94.3, apogeeKm: 510, perigeeKm: 490, coverageRegion: 'WESTPAC', operator: 'NADA' },
+      { name: 'Malligyong-1', noradId: '58400', constellation: 'Malligyong', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'DEGRADED', inclination: 97.4, eccentricity: 0.003, periodMin: 94.3, apogeeKm: 510, perigeeKm: 490, coverageRegion: 'WESTPAC', operator: 'NADA' },
+      { name: 'Malligyong-1-1', noradId: '60502', constellation: 'Malligyong', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'OPERATIONAL', inclination: 97.4, eccentricity: 0.003, periodMin: 94.3, apogeeKm: 510, perigeeKm: 490, coverageRegion: 'WESTPAC', operator: 'NADA' },
     ],
   },
 
@@ -1273,9 +1312,9 @@ export const ADVERSARY_SPACE_CONSTELLATIONS: { constellation: string; assets: Sp
   {
     constellation: 'Noor',
     assets: [
-      { name: 'Noor-1', constellation: 'Noor', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'DEGRADED', inclination: 59.8, eccentricity: 0.02, periodMin: 90.8, apogeeKm: 444, perigeeKm: 426, coverageRegion: 'GLOBAL', operator: 'IRGC' },
-      { name: 'Noor-2', constellation: 'Noor', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'OPERATIONAL', inclination: 59.8, eccentricity: 0.02, periodMin: 90.8, apogeeKm: 500, perigeeKm: 480, coverageRegion: 'GLOBAL', operator: 'IRGC' },
-      { name: 'Noor-3', constellation: 'Noor', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'OPERATIONAL', inclination: 59.8, eccentricity: 0.02, periodMin: 90.8, apogeeKm: 470, perigeeKm: 450, coverageRegion: 'GLOBAL', operator: 'IRGC' },
+      { name: 'Noor-1', noradId: '45529', constellation: 'Noor', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'DEGRADED', inclination: 59.8, eccentricity: 0.02, periodMin: 90.8, apogeeKm: 444, perigeeKm: 426, coverageRegion: 'GLOBAL', operator: 'IRGC' },
+      { name: 'Noor-2', noradId: '51846', constellation: 'Noor', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'OPERATIONAL', inclination: 59.8, eccentricity: 0.02, periodMin: 90.8, apogeeKm: 500, perigeeKm: 480, coverageRegion: 'GLOBAL', operator: 'IRGC' },
+      { name: 'Noor-3', noradId: '57798', constellation: 'Noor', affiliation: 'HOSTILE' as const, capabilities: ['ISR_SPACE' as const], status: 'OPERATIONAL', inclination: 59.8, eccentricity: 0.02, periodMin: 90.8, apogeeKm: 470, perigeeKm: 450, coverageRegion: 'GLOBAL', operator: 'IRGC' },
     ],
   },
 ];
@@ -1342,55 +1381,6 @@ export async function seedBasesForScenario(scenarioId: string): Promise<void> {
   console.log(`  [REF-DATA] Created ${INDOPACOM_BASES.length} INDOPACOM bases for scenario`);
 }
 
-// ─── NORAD Catalog Numbers ───────────────────────────────────────────────────
-// Public NORAD IDs for well-known satellites (source: space-track.org / CelesTrak).
-// NRO/classified systems intentionally omitted — they have no public catalog entries.
-// The seeder falls back to this table when the SpaceAssetSpec doesn't include noradId.
-const NORAD_CATALOG: Record<string, string> = {
-  // GPS III
-  'GPS III SV01': '43873', 'GPS III SV02': '44506', 'GPS III SV03': '45854',
-  'GPS III SV04': '46826', 'GPS III SV05': '48859', 'GPS III SV06': '53098',
-  // GPS IIF
-  'GPS IIF-1': '36585', 'GPS IIF-2': '37753', 'GPS IIF-3': '38833',
-  'GPS IIF-4': '39166', 'GPS IIF-5': '39533', 'GPS IIF-6': '39741',
-  'GPS IIF-7': '40105', 'GPS IIF-8': '40294', 'GPS IIF-9': '40534',
-  'GPS IIF-10': '40730', 'GPS IIF-11': '41019', 'GPS IIF-12': '41328',
-  // GPS IIR-M
-  'GPS IIR-M1': '29601', 'GPS IIR-M2': '32260', 'GPS IIR-M3': '32384',
-  'GPS IIR-M4': '32711', 'GPS IIR-M5': '35752', 'GPS IIR-M6': '36400',
-  'GPS IIR-M7': '38857',
-  // WGS
-  'WGS-1': '32258', 'WGS-2': '33118', 'WGS-3': '34713',
-  'WGS-4': '36108', 'WGS-5': '38070', 'WGS-6': '39222',
-  'WGS-7': '40746', 'WGS-8': '42075', 'WGS-9': '44071',
-  // SBIRS GEO
-  'SBIRS GEO-1': '37481', 'SBIRS GEO-2': '38173',
-  'SBIRS GEO-3': '43162', 'SBIRS GEO-4': '44481',
-  // GOES
-  'GOES-16 (East)': '41866', 'GOES-17 (Standby)': '43226', 'GOES-18 (West)': '51850',
-  // TDRS
-  'TDRS-8': '27566', 'TDRS-9': '27389', 'TDRS-10': '27566',
-  'TDRS-11': '39070', 'TDRS-12': '40661', 'TDRS-13': '43158',
-  // MUOS
-  'MUOS-1': '38257', 'MUOS-2': '39486', 'MUOS-3': '40374',
-  'MUOS-4': '41622', 'MUOS-5': '42649',
-  // AEHF
-  'AEHF-4': '43651', 'AEHF-5': '44481', 'AEHF-6': '45465',
-  // Milstar
-  'Milstar-2 F4': '26715', 'Milstar-2 F5': '28470',
-  // DMSP
-  'DMSP-5D3 F19': '40384', 'DMSP-5D3 F20': '99999',
-  // STSS
-  'STSS-Demo-1': '35937', 'STSS-Demo-2': '35938',
-  // SSA
-  'SAPPHIRE': '39088', 'SBSS Block 10': '37849',
-  // Landsat
-  'Landsat-8': '39084', 'Landsat-9': '49260',
-  // WorldView
-  'WorldView-3': '40115',
-  // CBAS
-  'CBAS-2': '48274',
-};
 
 export async function seedSpaceAssetsForScenario(scenarioId: string): Promise<void> {
   let total = 0;
@@ -1410,7 +1400,7 @@ export async function seedSpaceAssetsForScenario(scenarioId: string): Promise<vo
           affiliation: asset.affiliation,
           capabilities: asset.capabilities,
           status: asset.status,
-          noradId: asset.noradId ?? NORAD_CATALOG[asset.name] ?? null,
+          noradId: asset.noradId ?? null,
           operator: asset.operator,
           coverageRegion: asset.coverageRegion,
           bandwidthProvided: asset.bandwidthProvided ?? [],

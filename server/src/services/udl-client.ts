@@ -118,13 +118,15 @@ export async function fetchElsetAtEpoch(satNo: number, targetDate: Date): Promis
   const startStr = windowStart.toISOString();
   const endStr = windowEnd.toISOString();
 
-  // Try history endpoint with the epoch window
+  // Try history endpoint with the epoch window (sort client-side; UDL doesn't support orderBy)
   const results = await udlGet<UDLElset[]>(
-    `/elset/history?satNo=${satNo}&epoch=${encodeURIComponent(startStr)}/${encodeURIComponent(endStr)}&orderBy=epoch%20desc`,
+    `/elset/history?satNo=${satNo}&epoch=${encodeURIComponent(startStr)}/${encodeURIComponent(endStr)}`,
   );
 
   if (results && results.length > 0) {
-    const elset = results[0];
+    // Pick the ELSET with the most recent epoch (closest to target date)
+    const sorted = results.sort((a, b) => new Date(b.epoch).getTime() - new Date(a.epoch).getTime());
+    const elset = sorted[0];
     TLE_CACHE.set(cacheKey, { data: elset, fetchedAt: Date.now() });
     return elset;
   }
@@ -161,45 +163,58 @@ export async function refreshTLEsForScenario(scenarioId: string): Promise<number
   const targetDate = new Date(scenario.startDate);
   console.log(`[UDL] Refreshing TLEs for ${spaceAssets.length} space assets (epoch target: ${targetDate.toISOString()})`);
 
-  let updated = 0;
+  // Separate assets with valid NORAD IDs from those without
+  const fetchable: { id: string; name: string; satNo: number }[] = [];
   let skippedNoNorad = 0;
 
   for (const asset of spaceAssets) {
-    if (!asset.noradId) {
-      skippedNoNorad++;
-      continue;
-    }
-
+    if (!asset.noradId) { skippedNoNorad++; continue; }
     const satNo = parseInt(asset.noradId, 10);
     if (isNaN(satNo)) {
       console.warn(`[UDL]   ⚠  ${asset.name} — invalid NORAD ID "${asset.noradId}"`);
       continue;
     }
+    fetchable.push({ id: asset.id, name: asset.name, satNo });
+  }
 
-    try {
-      const elset = await fetchElsetAtEpoch(satNo, targetDate);
-      if (!elset) {
-        console.warn(`[UDL]   ⚠  ${asset.name} (${satNo}) — no ELSET found`);
-        continue;
+  // Fetch TLEs in parallel batches of 10 to avoid overwhelming UDL
+  const BATCH_SIZE = 10;
+  let updated = 0;
+
+  for (let i = 0; i < fetchable.length; i += BATCH_SIZE) {
+    const batch = fetchable.slice(i, i + BATCH_SIZE);
+    const results = await Promise.allSettled(
+      batch.map(async (asset) => {
+        const elset = await fetchElsetAtEpoch(asset.satNo, targetDate);
+        if (!elset) {
+          console.warn(`[UDL]   ⚠  ${asset.name} (${asset.satNo}) — no ELSET found`);
+          return null;
+        }
+
+        await prisma.spaceAsset.update({
+          where: { id: asset.id },
+          data: {
+            tleLine1: elset.line1,
+            tleLine2: elset.line2,
+            inclination: elset.inclination,
+            eccentricity: elset.eccentricity,
+            periodMin: elset.period,
+            apogeeKm: elset.apogee,
+            perigeeKm: elset.perigee,
+          },
+        });
+
+        console.log(`[UDL]   ✅ ${asset.name} (${asset.satNo}) — epoch ${elset.epoch} from ${elset.source}`);
+        return elset;
+      }),
+    );
+
+    for (let j = 0; j < results.length; j++) {
+      const r = results[j];
+      if (r.status === 'fulfilled' && r.value) updated++;
+      else if (r.status === 'rejected') {
+        console.error(`[UDL]   ❌ ${batch[j].name} (${batch[j].satNo}) — error:`, r.reason);
       }
-
-      await prisma.spaceAsset.update({
-        where: { id: asset.id },
-        data: {
-          tleLine1: elset.line1,
-          tleLine2: elset.line2,
-          inclination: elset.inclination,
-          eccentricity: elset.eccentricity,
-          periodMin: elset.period,
-          apogeeKm: elset.apogee,
-          perigeeKm: elset.perigee,
-        },
-      });
-
-      console.log(`[UDL]   ✅ ${asset.name} (${satNo}) — epoch ${elset.epoch} from ${elset.source}`);
-      updated++;
-    } catch (err) {
-      console.error(`[UDL]   ❌ ${asset.name} (${satNo}) — error:`, err);
     }
   }
 

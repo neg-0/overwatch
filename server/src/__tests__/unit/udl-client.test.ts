@@ -192,7 +192,8 @@ describe('UDL Client', () => {
       const [url] = mockFetch.mock.calls[0];
       expect(url).toContain('/elset/history');
       expect(url).toContain('satNo=48859');
-      expect(url).toContain('orderBy');
+      // orderBy was removed — UDL rejects it; we sort client-side instead
+      expect(url).not.toContain('orderBy');
     });
 
     it('falls back to current if history returns empty', async () => {
@@ -311,6 +312,62 @@ describe('UDL Client', () => {
       // Only the second asset succeeds
       expect(updated).toBe(1);
       expect(prisma.spaceAsset.update).toHaveBeenCalledOnce();
+    });
+  });
+
+  // ── History endpoint sorts client-side ────────────────────────────────────
+
+  describe('fetchElsetAtEpoch client-side sorting', () => {
+    it('picks the most recent epoch from unsorted history results', async () => {
+      const olderElset = { ...MOCK_ELSET, idElset: 'older', epoch: '2025-06-14T00:00:00Z' };
+      const newerElset = { ...MOCK_ELSET, idElset: 'newer', epoch: '2025-06-15T23:00:00Z' };
+
+      // UDL returns unsorted (older first)
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve([olderElset, newerElset]),
+      });
+
+      const { fetchElsetAtEpoch } = await import('../../services/udl-client.js');
+      const result = await fetchElsetAtEpoch(48859, new Date('2025-06-15T00:00:00Z'));
+
+      expect(result?.idElset).toBe('newer');
+    });
+  });
+
+  // ── Parallel batch fetching ─────────────────────────────────────────────
+
+  describe('refreshTLEsForScenario parallel batching', () => {
+    it('fetches TLEs in parallel batches (not sequentially)', async () => {
+      const prisma = (await import('../../db/prisma-client.js')).default;
+
+      (prisma.scenario.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        startDate: new Date(), // Recent → uses current endpoint
+      });
+
+      // Create 15 assets to span 2 batches (batch size = 10)
+      const assets = Array.from({ length: 15 }, (_, i) => ({
+        id: `sa-${i}`, name: `SAT-${i}`, noradId: String(40000 + i),
+      }));
+      (prisma.spaceAsset.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(assets);
+      (prisma.spaceAsset.update as ReturnType<typeof vi.fn>).mockResolvedValue({});
+
+      // Track fetch timing to verify parallelism within each batch
+      const fetchTimes: number[] = [];
+      mockFetch.mockImplementation(async () => {
+        fetchTimes.push(Date.now());
+        await new Promise(r => setTimeout(r, 10)); // Simulate 10ms network
+        return { ok: true, json: () => Promise.resolve([MOCK_ELSET]) };
+      });
+
+      const { refreshTLEsForScenario } = await import('../../services/udl-client.js');
+      const updated = await refreshTLEsForScenario('test-scenario-id');
+
+      expect(updated).toBe(15);
+      // With batches of 10, the first 10 should start near-simultaneously
+      // Check that first 10 requests started within 5ms of each other (parallel)
+      const firstBatchSpread = fetchTimes[9] - fetchTimes[0];
+      expect(firstBatchSpread, `First batch should be parallel (spread: ${firstBatchSpread}ms)`).toBeLessThan(50);
     });
   });
 

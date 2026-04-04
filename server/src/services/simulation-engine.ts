@@ -30,6 +30,9 @@ interface SimState {
 
 const activeSims = new Map<string, SimState>();
 
+/** Cache last-known-good position per space asset so SGP4 gaps don't cause disappearing markers */
+const lastGoodPosition = new Map<string, SpacePosition>();
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 export function getSimState(scenarioId?: string): SimState | null {
@@ -134,16 +137,14 @@ export async function startSimulation(
 
   console.log(`[SIM] ${isPausedResume ? 'Resuming' : 'Starting'} simulation for scenario ${scenarioId} at ${resumeRatio}× compression`);
 
-  // Refresh TLEs from UDL before starting position updates
-  try {
-    await refreshTLEsForScenario(scenarioId);
-  } catch (err) {
-    console.error('[SIM] UDL TLE refresh failed (continuing with existing TLEs):', err);
-  }
-
-  // Start the tick loop
+  // Start the tick and position loops immediately — don't block on UDL
   startTickLoop(scenarioId, io);
   startPositionLoop(scenarioId, io);
+
+  // Refresh TLEs from UDL in the background (positions will use existing TLEs until done)
+  refreshTLEsForScenario(scenarioId).catch(err => {
+    console.error('[SIM] UDL TLE refresh failed (continuing with existing TLEs):', err);
+  });
 
   // Generate Day 1 orders only if none exist yet — ATOs are codified once created
   if (!isPausedResume && lastAtoDayGenerated === 0) {
@@ -220,6 +221,10 @@ export function stopSimulation(scenarioId?: string): SimState | null {
   }).catch(console.error);
 
   console.log(`[SIM] Stopped (${sim.scenarioId})`);
+  // Clear cached positions for this scenario's assets
+  for (const key of lastGoodPosition.keys()) {
+    if (key.startsWith('space-')) lastGoodPosition.delete(key);
+  }
   const result = { ...sim };
   activeSims.delete(sim.scenarioId);
   return result;
@@ -544,28 +549,28 @@ function startPositionLoop(scenarioId: string, io: Server) {
       for (const asset of spaceAssets) {
         if (!activeSims.has(scenarioId) || !currentSim.simTime) break;
 
+        // Only propagate assets with real TLE data — approximate fallback
+        // positions are too inaccurate for map display and flood the view
+        if (!asset.tleLine1 || !asset.tleLine2) continue;
+
+        const cacheKey = `space-${asset.id}`;
         let position: SpacePosition | null = null;
 
         // TLE-based SGP4 propagation
-        if (asset.tleLine1 && asset.tleLine2) {
-          position = propagateFromTLE(asset.tleLine1, asset.tleLine2, currentSim.simTime);
-        }
+        position = propagateFromTLE(asset.tleLine1, asset.tleLine2, currentSim.simTime);
 
-        // Fallback: approximate GEO/MEO positioning
-        if (!position && asset.inclination != null && asset.periodMin != null) {
-          position = approximateGeoPosition(
-            asset.inclination,
-            asset.periodMin,
-            asset.eccentricity ?? 0,
-            currentSim.simTime,
-          );
+        // Cache good positions; re-use last-known-good to bridge brief SGP4 gaps
+        if (position) {
+          lastGoodPosition.set(cacheKey, position);
+        } else {
+          position = lastGoodPosition.get(cacheKey) ?? null;
         }
 
         if (position) {
           io.to(`scenario:${scenarioId}`).emit('position:update', {
             event: 'position:update',
             update: {
-              missionId: `space-${asset.id}`,
+              missionId: cacheKey,
               callsign: asset.name,
               domain: 'SPACE',
               timestamp: currentSim.simTime.toISOString(),
