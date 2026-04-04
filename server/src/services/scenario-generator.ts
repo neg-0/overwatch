@@ -548,10 +548,18 @@ PREVIOUS DAY ({prevDayLabel}):
 ---
 
 Generate an MTO with 2-4 mission packages covering:
-- ASW patrols, surface warfare, mine countermeasures
-- Carrier strike group operations
-- Escort duties, sea lane security
-- Maritime ISR
+- ASW patrols with defined patrol areas (corner-point coordinates for patrol boxes)
+- Surface warfare / carrier strike group operations with moving havens (center point, radius)
+- Mine countermeasures with designated MCM operating areas
+- Escort duties and sea lane security (defined transit corridors with waypoints)
+- Maritime ISR with designated surveillance areas
+- EMCON states per mission phase (EMCON ALPHA through DELTA — specify which comms/sensors restricted)
+- Water space management: submarine operating areas (SUBOPAREA) with corner coordinates, moving havens, and waterspace deconfliction with ASW missions
+
+Each mission should specify:
+- EMCON state and conditions for state change
+- Which ATO air missions provide supporting coverage (by callsign if known)
+- Space capability needs (SATCOM for OTH targeting, GPS for weapon guidance, ISR for maritime domain awareness)
 
 Adapt based on campaign phase and previous day results.
 
@@ -559,21 +567,25 @@ Return as JSON with same structure as ATO but with domain: "MARITIME".
 Use realistic maritime waypoints (patrol boxes, choke points) with coordinates in "{theater}".
 Return ONLY valid JSON.`;
 
-const STO_PROMPT = `You are a space operations officer generating a Space Tasking Order (STO) for Day "{atoDay}".
+const STO_PROMPT = `You are a USSPACECOM/JFCC-Space operations officer generating a Space Tasking Order (STO) for Day "{atoDay}".
 
 CONTEXT:
 - Theater: "{theater}"
+- Issuing Authority: USSPACECOM / JFCC-Space (14th Air Force)
 - Known space asset needs from ATO/MTO:
 "{spaceNeeds}"
 - Available space assets: "{spaceAssets}"
 
 Generate an STO covering:
-1. GPS constellation task allocation
-2. SATCOM bandwidth prioritization (AEHF protected, WGS wideband, MUOS tactical)
-3. OPIR/missile warning coverage schedules
-4. Space ISR tasking (if assets available)
-5. Maintenance windows for non-critical passes
+1. GPS constellation task allocation — specify which satellites support which ATO mission callsigns, coverage windows with start/end times
+2. SATCOM bandwidth prioritization — AEHF protected channels for bomber/SOF, WGS wideband for ISR downlink, MUOS tactical for dispersed ground/maritime; include specific mission callsigns served
+3. OPIR/missile warning coverage schedules — SBIRS/DSP coverage windows, reporting chains, gap periods
+4. Space ISR tasking — overhead imagery windows, revisit rates, priority targets from JIPTL
+5. Space situational awareness — conjunction warnings, debris avoidance maneuvers
+6. Maintenance windows for non-critical passes
+7. Degradation contingencies — what missions are affected if specific satellites go offline, fallback procedures
 
+For each space allocation, reference the specific ATO/MTO mission callsign it supports.
 The STO should address coverage gaps identified from ATO/MTO requirements.
 Return as JSON with domain: "SPACE".
 Return ONLY valid JSON.`;
@@ -783,22 +795,28 @@ Format with section headers:
           - Target Names with coordinates(lat / lon in DMS format)
           - Justification linking to strategic priorities
             - COORDINATION section`,
-    SPINS: `Generate SPECIAL INSTRUCTIONS(SPINS).
+    SPINS: `Generate SPECIAL INSTRUCTIONS (SPINS).
 Format with numbered sections covering:
-  1. GENERAL(ROE, PID requirements, civilian casualty avoidance)
-  2. AIRSPACE CONTROL(altitude deconfliction, ROZ areas with coordinates)
-  3. TANKER OPERATIONS(AR tracks with coordinates, fuel states)
-  4. CSAR(alert posture, frequencies)
-  5. SPACE SUPPORT(GPS degradation warnings, SATCOM priorities, OPIR data feeds)
-  6. COMMUNICATIONS(primary / backup frequencies and channels)`,
-    ACO: `Generate an AIRSPACE CONTROL ORDER(ACO).
+  1. GENERAL (ROE summary, PID requirements, civilian casualty avoidance measures, weapons release authority)
+  2. AUTHENTICATION (IFF modes and codes — Mode 4/5 procedures, challenge/reply procedures, verbal authentication tables)
+  3. AIRSPACE CONTROL (altitude deconfliction, ROZ areas with coordinates, MEZ boundaries, safe passage procedures)
+  4. TANKER OPERATIONS (AR track names, anchor coordinates, altitudes, contact/refueling frequencies, bingo fuel states)
+  5. CSAR (alert posture, CSAR orbit points with coordinates, guard frequencies, authentication procedures, ISOPREP reference)
+  6. SPACE SUPPORT (GPS degradation warning procedures, SATCOM priority allocation by mission type, OPIR data feed distribution, degraded-space battle drills)
+  7. COMMUNICATIONS (primary/backup/emergency frequencies by mission type, HAVE QUICK time-of-day, Link-16 net assignments, SATCOM channel plan)
+  8. ELECTRONIC WARFARE (EMCON states and conditions, EA coordination procedures, EW deconfliction)`,
+    ACO: `Generate an AIRSPACE CONTROL ORDER (ACO) per JP 3-52.
 Format with sections covering:
-  1. GENERAL(ACO effective period, authority)
-  2. RESTRICTED OPERATING ZONES(ROZ names, coordinates, effective times)
-  3. AIR REFUELING TRACKS(track names, altitudes, coordinates)
-  4. CAP STATIONS(station names, coordinates, altitudes)
-  5. TRANSIT CORRIDORS(corridor names, coordinates, altitudes)
-  6. KILL BOXES(killbox designations, coordinates, engagement rules)`,
+  1. GENERAL (ACO effective period, issuing authority, references)
+  2. RESTRICTED OPERATING ZONES (ROZ names, corner-point coordinates in DMS, floor/ceiling altitudes, effective times)
+  3. MISSILE ENGAGEMENT ZONES (MEZ designations, defended asset, engagement authority, coordinates, altitude bands)
+  4. JOINT ENGAGEMENT ZONES (JEZ designations, participating components, ROE, coordinates)
+  5. AIR DEFENSE IDENTIFICATION ZONES (ADIZ boundaries, identification procedures)
+  6. AIR REFUELING TRACKS (track names, anchor point coordinates, altitudes, block times)
+  7. CAP STATIONS (station names, orbit coordinates, altitudes, sectors of responsibility)
+  8. TRANSIT CORRIDORS (corridor names, entry/exit coordinates, altitudes, safe passage procedures)
+  9. KILL BOXES (killbox designations, corner coordinates, engagement rules, open/close times)
+  10. COORDINATION MEASURES (FSCL location, fire support coordination line, battlefield coordination line)`,
   };
 
   const planningDocTypes = [
@@ -1103,9 +1121,14 @@ Column definitions:
 - NOTES: Controller guidance, timing flexibility, evaluation criteria
 
 3. Generate {injectCount} injects distributed across the timeline with higher density in Phase 2-3.
-4. Include at least 4 space-related injects (GPS, SATCOM, OPIR, debris, cyber).
+4. Include at least 4 space-related injects (GPS degradation, SATCOM outage, OPIR gap, debris/conjunction warning, cyber attack on space ground segment).
 5. Include multiple MSEL levels (STR-T, OPR, TAC).
 6. Use realistic military terminology, unit designations, and coordinates.
+7. CRITICAL: Each inject message MUST name the specific affected entities — callsigns, unit designations, asset names, or installation names that are impacted. Examples:
+   - "GPS degradation affecting VIPER 11 and HAWKEYE 03 mission packages in sector BRAVO"
+   - "SATCOM outage on WGS-9 impacting CSG-5 and 613 AOC C2 link"
+   - "Adversary jamming detected near KADENA AB affecting 388 FW sortie generation"
+   The inject should be specific enough that downstream systems can link it to affected missions and assets.
 
 Return ONLY the MSEL document text. No JSON. No markdown fences.`;
 

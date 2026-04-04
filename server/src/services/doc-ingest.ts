@@ -56,6 +56,8 @@ export interface NormalizedStrategy {
   authorityLevel: string;
   content: string;
   effectiveDate: string;
+  tier: number;
+  parentDocReference: string | null;
   priorities: Array<{
     rank: number;
     effect: string;
@@ -75,6 +77,8 @@ export interface NormalizedPlanning {
     description: string;
     justification: string;
     targetId?: string;
+    latitude?: number | null;
+    longitude?: number | null;
   }>;
 }
 
@@ -125,6 +129,8 @@ export interface NormalizedOrder {
       }>;
       supportRequirements: Array<{
         supportType: string;
+        supportingCallsign?: string | null;
+        supportingMissionId?: string | null;
         details?: string;
       }>;
       spaceNeeds: Array<{
@@ -145,16 +151,19 @@ export interface NormalizedMSEL {
   issuingAuthority: string;
   injects: Array<{
     serialNumber: string;
-    dtg: string;           // e.g., "011000Z MAR 26"
-    mselLevel: string;     // STR-N, STR-T, OPR, TAC
-    eventType: string;     // INFORMATION, ACTION, DECISION_POINT, CONTINGENCY
-    injectMode: string;    // MSG_TRAFFIC, RADIO, EMAIL, VERBAL, HANDOUT, CHAT
+    dtg: string;              // e.g., "011000Z MAR 26"
+    mselLevel: string;        // STR-N, STR-T, OPR, TAC
+    eventType: string;        // INFORMATION, ACTION, DECISION_POINT, CONTINGENCY
+    injectMode: string;       // MSG_TRAFFIC, RADIO, EMAIL, VERBAL, HANDOUT, CHAT
     fromEntity: string;
     toEntity: string;
     message: string;
     expectedResponse: string;
     objectiveTested: string;
     notes: string;
+    affectedEntities: string[];  // Callsigns, unit designations, asset names affected
+    latitude?: number | null;    // Inject location if geographic
+    longitude?: number | null;   // Inject location if geographic
   }>;
 }
 
@@ -266,13 +275,13 @@ Extract the following into JSON:
   "content": "Full text content preserved",
   "effectiveDate": "ISO 8601 date",
   "tier": 0,
+  "parentDocReference": "Title or identifier of the parent authority document this derives from, or null if this is the root document",
   "priorities": [
     {
       "rank": 1,
-      "objective": "Short objective label (e.g., 'Maintain air superiority')",
-      "effect": "The desired strategic effect",
+      "effect": "The desired strategic effect (DENY, PROTECT, DEGRADE, SUSTAIN, DESTROY, etc.)",
       "description": "Full objective description",
-      "justification": "Why this priority matters"
+      "justification": "Why this priority matters — include doctrinal references (JP 3-0, JP 5-0, etc.)"
     }
   ]
 }
@@ -281,11 +290,12 @@ IMPORTANT: Set "tier" based on document type:
 - NDS = 1, NMS = 2, JSCP = 3, CONPLAN = 4, OPLAN = 5
 - Other types = 0
 
+Set "parentDocReference" by looking for phrases like "derived from", "in support of", "per", "references", "parent authority" — extract the title of the document being referenced. If the document explicitly names its parent authority (e.g., "This JSCP implements the National Military Strategy Theater Annex..."), capture that title. Set to null if no parent is referenced.
+
 Extract ALL priorities, objectives, goals, and key tasks. Each numbered item or strategic objective should be a separate priority entry with:
-- A concise "objective" label (what is being pursued)
-- The "effect" (what outcome is desired)
+- The "effect" (what doctrinal effect is desired — use JP 3-0 terminology)
 - A detailed "description" (full text of the priority)
-- A "justification" (why this matters strategically)
+- A "justification" (why this matters strategically, including any JP/CJCSI references)
 
 If no clear date is mentioned, use today's date.
 Return ONLY valid JSON.
@@ -298,21 +308,33 @@ const PLANNING_NORMALIZE_PROMPT = `You are a military staff officer extracting s
 Extract the following into JSON:
 {
   "title": "Document title",
-  "docType": "JIPTL|JPEL|COMPONENT_PRIORITY|SPINS|ACO",
+  "docType": "JIPTL|JPEL|COMPONENT_PRIORITY|SPINS|ACO|MAAP",
   "content": "Full text content preserved",
   "effectiveDate": "ISO 8601 date",
   "priorities": [
     {
       "rank": 1,
-      "effect": "The desired effect (DESTROY, DEGRADE, DENY, etc.)",
-      "description": "Priority headline",
-      "justification": "Doctrinal/operational reason for this priority",
-      "targetId": "BE number or target reference if mentioned"
+      "effect": "The desired effect (DESTROY, DEGRADE, DENY, PROTECT, SUSTAIN, DISRUPT, NEUTRALIZE)",
+      "description": "Priority headline — include the target name and target set description",
+      "justification": "Doctrinal/operational reason for this priority, including strategic traceability",
+      "targetId": "BE number or target reference if mentioned (e.g., '0001-0001', 'BE-0042')",
+      "latitude": null,
+      "longitude": null
     }
   ]
 }
 
-Extract ALL priority entries, target lists, or prioritized effects. Each numbered item or target should be a separate priority entry.
+CRITICAL EXTRACTION RULES:
+- Extract ALL priority entries, target lists, or prioritized effects. Each numbered item or target should be a separate priority entry.
+- For JIPTL documents: each target with a BE number gets its own priority entry.
+- For each target, extract coordinates and convert to decimal degrees:
+  - DMS format (12°34'00" N / 136°12'00" E) → latitude: 12.5667, longitude: 136.2000
+  - Decimal format → use directly
+  - MGRS format → convert to decimal degrees
+  - If coordinates say "Fictional" or similar, still convert the numeric values
+  - If no coordinates present, set latitude/longitude to null
+- Preserve the "targetId" (BE number) exactly as written — this links to ATO mission targets downstream
+
 Return ONLY valid JSON.
 
 DOCUMENT:
@@ -377,7 +399,12 @@ Extract ALL available information into this JSON structure:
             }
           ],
           "supportRequirements": [
-            { "supportType": "TANKER|SEAD|ISR|EW|ESCORT|CAP", "details": "Optional details" }
+            {
+              "supportType": "TANKER|SEAD|ISR|EW|ESCORT|CAP",
+              "supportingCallsign": "Callsign of the supporting mission if mentioned (e.g., 'SHELL 61', 'WEASEL 21') or null",
+              "supportingMissionId": "Mission ID of the supporting mission if identifiable or null",
+              "details": "Optional details"
+            }
           ],
           "spaceNeeds": [
             {
@@ -432,7 +459,10 @@ Extract ALL injects/events into this JSON structure:
       "message": "Full inject message text",
       "expectedResponse": "What the training audience should do",
       "objectiveTested": "Exercise objective or UJTL task",
-      "notes": "Controller guidance or evaluation criteria"
+      "notes": "Controller guidance or evaluation criteria",
+      "affectedEntities": ["VIPER 11", "GPS-IIF-12"],
+      "latitude": null,
+      "longitude": null
     }
   ],
   "reviewFlags": [
@@ -450,6 +480,22 @@ CRITICAL INSTRUCTIONS:
     Political/ROE/civilian → CONTINGENCY
 - If a field is missing, provide a reasonable default and add to reviewFlags
 - Preserve the original message text as faithfully as possible
+
+ENTITY EXTRACTION (affectedEntities):
+- Scan each inject message for specific named entities that are affected:
+  - Aircraft callsigns (e.g., "VIPER 11", "HAWKEYE 03", "SHELL 61")
+  - Unit designations (e.g., "388 FW", "CSG-5", "VFA-102")
+  - Space asset names (e.g., "GPS-IIF-12", "WGS-9", "SBIRS-GEO-4")
+  - Installation names (e.g., "KADENA AB", "YOKOSUKA", "ANDERSEN AFB")
+  - System references (e.g., "Link-16", "AEHF", "MUOS")
+- Include ALL named entities found in the message, not just the primary one
+- If no specific entities are named, return an empty array
+
+GEOLOCATION:
+- If the inject references a specific location with coordinates, convert to decimal degrees
+- If the inject references a named location without coordinates, set latitude/longitude to null
+- Grid references, DMS, and MGRS should all be converted to decimal degrees
+
 Return ONLY valid JSON.
 
 DOCUMENT:
@@ -554,10 +600,10 @@ async function persistStrategy(
 ): Promise<{ createdId: string; parentLinkId?: string }> {
   const effectiveDate = parseSafeDate(data.effectiveDate || classification.effectiveDateStr);
 
-  // Determine tier from AI output or docType mapping
+  // Determine tier from AI output (now a proper schema field) or docType fallback
   const tierMap: Record<string, number> = { NDS: 1, NMS: 2, JSCP: 3, CONPLAN: 4, OPLAN: 5 };
   const docType = data.docType || classification.documentType;
-  const tier = (data as any).tier || tierMap[docType] || 0;
+  const tier = data.tier || tierMap[docType] || 0;
 
   // Find parent strategy doc via cascade — link to highest-tier doc below this one's tier
   const parentDoc = await prisma.strategyDocument.findFirst({
@@ -636,19 +682,45 @@ async function persistPlanning(
   }
 
   for (const p of data.priorities || []) {
-    // Best-effort traceability: match planning priority to strategy priority
-    // Uses keyword overlap between planning effect/description and strategy objective/description
+    // Traceability: match planning priority to strategy priority using multi-signal scoring
     let bestMatchId: string | null = null;
     if (strategyPriorities.length > 0) {
       const planText = `${p.effect} ${p.description} ${p.justification}`.toLowerCase();
       let bestScore = 0;
+
       for (const sp of strategyPriorities) {
+        let score = 0;
         const spText = `${sp.objective} ${sp.description}`.toLowerCase();
-        // Simple keyword overlap score
-        const spWords = spText.split(/\s+/).filter(w => w.length > 3);
-        const matches = spWords.filter(w => planText.includes(w)).length;
-        const score = spWords.length > 0 ? matches / spWords.length : 0;
-        if (score > bestScore && score > 0.15) {
+
+        // Signal 1: Doctrinal effect match (DENY↔DENY, DESTROY↔DESTROY, etc.)
+        // These are the strongest signal — JP 3-0 effects vocabulary is small and precise
+        const doctrinalEffects = ['deny', 'destroy', 'degrade', 'disrupt', 'protect', 'sustain', 'neutralize'];
+        const planEffects = doctrinalEffects.filter(e => planText.includes(e));
+        const spEffects = sp.effect ? [sp.effect.toLowerCase()] : doctrinalEffects.filter(e => spText.includes(e));
+        const effectOverlap = planEffects.filter(e => spEffects.includes(e)).length;
+        if (effectOverlap > 0) score += 0.4 * (effectOverlap / Math.max(spEffects.length, 1));
+
+        // Signal 2: Domain-specific keyword overlap (higher weight for military terms)
+        const militaryKeywords = spText
+          .split(/\s+/)
+          .filter(w => w.length > 4)
+          // Filter for substantive terms, not common English
+          .filter(w => !['which', 'their', 'these', 'those', 'under', 'through', 'within', 'being', 'would', 'could', 'should'].includes(w));
+        const keywordMatches = militaryKeywords.filter(w => planText.includes(w)).length;
+        const keywordScore = militaryKeywords.length > 0 ? keywordMatches / militaryKeywords.length : 0;
+        score += 0.4 * keywordScore;
+
+        // Signal 3: Explicit reference detection — "per NDS Priority 2", "traces to", "derived from"
+        const rankPatterns = [
+          new RegExp(`priority\\s*${sp.rank}\\b`, 'i'),
+          new RegExp(`p${sp.rank}\\b`, 'i'),
+          new RegExp(`\\(${sp.rank}\\)`, 'i'),
+        ];
+        if (rankPatterns.some(re => re.test(p.justification || '') || re.test(p.description || ''))) {
+          score += 0.2;
+        }
+
+        if (score > bestScore && score > 0.12) {
           bestScore = score;
           bestMatchId = sp.id;
         }
@@ -663,6 +735,8 @@ async function persistPlanning(
         effect: p.effect,
         description: p.description,
         justification: p.justification,
+        latitude: p.latitude ?? null,
+        longitude: p.longitude ?? null,
         strategyPriorityId: bestMatchId,
       },
     });
@@ -826,18 +900,25 @@ async function persistOrder(
           targetCount++;
         }
 
-        // Support requirements
+        // Support requirements — with mission dependency linkage
         for (const sr of msn.supportRequirements || []) {
           const validSupportTypes = ['TANKER', 'SEAD', 'ISR', 'EW', 'ESCORT', 'CAP'] as const;
           const supportType = validSupportTypes.includes(sr.supportType as any)
             ? (sr.supportType as typeof validSupportTypes[number])
             : 'ISR';
 
+          // Build details string that includes supporting callsign for traceability
+          const detailParts: string[] = [];
+          if (sr.supportingCallsign) detailParts.push(`Supporting: ${sr.supportingCallsign}`);
+          if (sr.details) detailParts.push(sr.details);
+          const enrichedDetails = detailParts.length > 0 ? detailParts.join(' — ') : null;
+
           await tx.supportRequirement.create({
             data: {
               missionId: mission.id,
               supportType,
-              details: sr.details || null,
+              supportingMissionId: sr.supportingMissionId || null,
+              details: enrichedDetails,
             },
           });
         }
@@ -955,6 +1036,11 @@ async function persistMSEL(
         toEntity: inject.toEntity,
         expectedResponse: inject.expectedResponse,
         objectiveTested: inject.objectiveTested,
+        // Entity linkage — callsigns, units, assets affected by this inject
+        affectedEntities: inject.affectedEntities || [],
+        // Geolocation — AI-extracted from inject message
+        latitude: inject.latitude ?? null,
+        longitude: inject.longitude ?? null,
       },
     });
     injectCount++;

@@ -74,21 +74,69 @@ export function TimelineBar() {
     );
   }
 
-  const eventColor = (type: string) => {
-    switch (type) {
-      case 'SATELLITE_DESTROYED': case 'UNIT_DESTROYED': return 'var(--accent-danger)';
-      case 'SATELLITE_JAMMED': return 'var(--accent-warning)';
-      case 'COMMS_DEGRADED': return 'var(--accent-info)';
-      default: return 'var(--text-muted)';
-    }
+  const EVENT_STYLES: Record<string, { color: string; label: string }> = {
+    SATELLITE_DESTROYED: { color: '#ef4444', label: 'Satellite Destroyed' },
+    UNIT_DESTROYED:      { color: '#ef4444', label: 'Unit Destroyed' },
+    SATELLITE_JAMMED:    { color: '#f59e0b', label: 'Satellite Jammed' },
+    COMMS_DEGRADED:      { color: '#3b82f6', label: 'Comms Degraded' },
+  };
+  const DEFAULT_EVENT_STYLE = { color: '#6b7280', label: 'Event' };
+
+  /** Strip UUIDs and ISO timestamps from description for display */
+  const cleanDescription = (desc: string) =>
+    desc
+      .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '')
+      .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z?/g, '')
+      .replace(/[()]/g, '')
+      .replace(/\s*—\s*/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+
+  /** Format sim time as "D2 05:00Z" relative to scenario start */
+  const formatEventTime = (isoTime: string) => {
+    const ms = new Date(isoTime).getTime();
+    const elapsed = ms - startMs;
+    const day = Math.floor(elapsed / (24 * 3600000)) + 1;
+    const remainder = elapsed % (24 * 3600000);
+    const hours = String(Math.floor(remainder / 3600000)).padStart(2, '0');
+    const mins = String(Math.floor((remainder % 3600000) / 60000)).padStart(2, '0');
+    return `D${day} ${hours}:${mins}Z`;
   };
 
-  const eventIcon = (type: string) => {
+  /** 18×18 SVG icon per event type — bold colors, filled shapes */
+  const eventIconSvg = (type: string, color: string) => {
+    const common = { xmlns: 'http://www.w3.org/2000/svg', width: 18, height: 18, viewBox: '0 0 18 18', fill: 'none' };
     switch (type) {
-      case 'SATELLITE_DESTROYED': case 'UNIT_DESTROYED': return '✕';
-      case 'SATELLITE_JAMMED': return '⚡';
-      case 'COMMS_DEGRADED': return '◆';
-      default: return '●';
+      case 'SATELLITE_DESTROYED':
+      case 'UNIT_DESTROYED':
+        return (
+          <svg {...common}>
+            <circle cx="9" cy="9" r="7" fill="rgba(239,68,68,0.25)" stroke={color} strokeWidth="1.5" />
+            <line x1="6" y1="6" x2="12" y2="12" stroke={color} strokeWidth="2" strokeLinecap="round" />
+            <line x1="12" y1="6" x2="6" y2="12" stroke={color} strokeWidth="2" strokeLinecap="round" />
+          </svg>
+        );
+      case 'SATELLITE_JAMMED':
+        return (
+          <svg {...common}>
+            <path d="M10 2 L7 8 L9.5 8 L8 16 L12 7.5 L9.5 7.5 Z" fill={color} stroke={color} strokeWidth="0.3" strokeLinejoin="round" />
+          </svg>
+        );
+      case 'COMMS_DEGRADED':
+        return (
+          <svg {...common}>
+            <path d="M3 12 Q9 2 15 12" stroke={color} strokeWidth="1.5" fill="none" strokeLinecap="round" />
+            <path d="M5 13.5 Q9 6 13 13.5" stroke={color} strokeWidth="1.5" fill="none" strokeLinecap="round" />
+            <circle cx="9" cy="15" r="1.5" fill={color} />
+          </svg>
+        );
+      default:
+        return (
+          <svg {...common}>
+            <circle cx="9" cy="9" r="5" fill="rgba(107,114,128,0.3)" stroke={color} strokeWidth="1.5" />
+            <circle cx="9" cy="9" r="2" fill={color} />
+          </svg>
+        );
     }
   };
 
@@ -129,16 +177,24 @@ export function TimelineBar() {
         ))}
 
         {/* Event milestone markers */}
-        {eventMarkers.map(evt => (
-          <div
-            key={evt.id}
-            className="timeline-bar__event"
-            style={{ left: `${evt.pct}%`, color: eventColor(evt.eventType) }}
-            title={`${evt.eventType}: ${evt.description}`}
-          >
-            {eventIcon(evt.eventType)}
-          </div>
-        ))}
+        {eventMarkers.map(evt => {
+          const style = EVENT_STYLES[evt.eventType] || DEFAULT_EVENT_STYLE;
+          const desc = cleanDescription(evt.description);
+          return (
+            <div
+              key={evt.id}
+              className="timeline-bar__event"
+              style={{ left: `${evt.pct}%` }}
+            >
+              {eventIconSvg(evt.eventType, style.color)}
+              <span className="timeline-bar__event-tooltip">
+                <strong style={{ color: style.color }}>{style.label}</strong>
+                <span className="timeline-bar__event-time">{formatEventTime(evt.simTime)}</span>
+                {desc && <span className="timeline-bar__event-desc">{desc}</span>}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

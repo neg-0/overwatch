@@ -71,6 +71,65 @@ const COVERAGE_COLORS: Record<string, string> = {
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
+// ─── SVG Icon Helpers ───────────────────────────────────────────────────────
+
+/** Create an SVG element using DOM APIs (no innerHTML) */
+function svgEl(tag: string, attrs: Record<string, string>, children?: SVGElement[]): SVGElement {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  if (children) children.forEach(c => el.appendChild(c));
+  return el;
+}
+
+/** Build domain-specific SVG icon using safe DOM construction */
+function makeDomainIcon(domain: string, color: string, size: number): HTMLDivElement {
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = `width:${size}px;height:${size}px;cursor:pointer;`;
+
+  const svg = svgEl('svg', { width: String(size), height: String(size), viewBox: '0 0 24 24', fill: 'none' });
+
+  if (domain === 'AIR') {
+    // Delta-wing fighter silhouette
+    svg.appendChild(svgEl('path', { d: 'M12 3 L14 10 L22 13 L14 14 L16 21 L12 18 L8 21 L10 14 L2 13 L10 10 Z', fill: color, stroke: 'none' }));
+  } else if (domain === 'MARITIME') {
+    // Ship hull with superstructure
+    svg.appendChild(svgEl('path', { d: 'M3 17 L5 12 L8 12 L8 8 L10 8 L10 10 L14 10 L14 8 L16 8 L16 12 L19 12 L21 17 Z', fill: color, stroke: 'none' }));
+    svg.appendChild(svgEl('path', { d: 'M2 19 Q12 22 22 19', stroke: color, fill: 'none', 'stroke-width': '1.5', 'stroke-linecap': 'round' }));
+  } else if (domain === 'SPACE') {
+    // Satellite with solar panels
+    svg.appendChild(svgEl('rect', { x: '10', y: '6', width: '4', height: '12', rx: '1', fill: color, stroke: 'none' }));
+    svg.appendChild(svgEl('rect', { x: '2', y: '9', width: '7', height: '6', rx: '1', fill: color, stroke: 'none', opacity: '0.7' }));
+    svg.appendChild(svgEl('rect', { x: '15', y: '9', width: '7', height: '6', rx: '1', fill: color, stroke: 'none', opacity: '0.7' }));
+    svg.appendChild(svgEl('circle', { cx: '12', cy: '12', r: '1.5', fill: 'white' }));
+  } else {
+    // Fallback: filled circle
+    svg.appendChild(svgEl('circle', { cx: '12', cy: '12', r: '8', fill: color }));
+  }
+
+  wrapper.appendChild(svg);
+  return wrapper;
+}
+
+/** Attach hover popup to a marker element — shows instantly on mouseenter */
+function attachHoverPopup(el: HTMLElement, marker: mapboxgl.Marker, popup: mapboxgl.Popup, map: mapboxgl.Map) {
+  let pinned = false;
+  el.addEventListener('mouseenter', () => {
+    if (!pinned) {
+      popup.setLngLat(marker.getLngLat()).addTo(map);
+    }
+  });
+  el.addEventListener('mouseleave', () => {
+    if (!pinned) popup.remove();
+  });
+  // Click pins the popup open; close button will dismiss via Mapbox internals
+  el.addEventListener('click', (e) => {
+    e.stopPropagation();
+    pinned = true;
+    popup.setLngLat(marker.getLngLat()).addTo(map);
+  });
+  popup.on('close', () => { pinned = false; });
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || '';
@@ -287,14 +346,17 @@ function MapViewInner() {
       if (affiliation === 'FRIENDLY' && isOpfor) return;
       if (affiliation === 'HOSTILE' && !isOpfor) return;
 
+      const displayColor = isOpfor ? '#ef4444' : color;
       const el = document.createElement('div');
       el.style.cssText = `
-        width: 24px; height: 24px;
+        width: 28px; height: 28px;
         display: flex; align-items: center; justify-content: center;
-        font-size: 16px;
+        font-size: 18px; font-weight: bold;
+        color: ${displayColor};
+        background: rgba(0,0,0,0.6);
+        border: 2px solid ${displayColor};
+        border-radius: 4px;
         cursor: pointer;
-        filter: drop-shadow(0 0 4px ${isOpfor ? '#ef4444' : color}80);
-        ${isOpfor ? 'color: #ef4444;' : `color: ${color};`}
       `;
       el.textContent = symbol;
 
@@ -302,13 +364,13 @@ function MapViewInner() {
         `<div style="margin-left:8px;font-size:10px;">• ${esc(u.unitDesignation)} (${u.assetCount} assets)</div>`
       ).join('');
       const radarList = base.radarSensors.length > 0
-        ? `<div style="margin-top:4px;font-size:10px;color:#f59e0b;">🔵 ${base.radarSensors.map(esc).join(', ')}</div>`
+        ? `<div style="margin-top:4px;font-size:10px;color:#f59e0b;">📡 ${base.radarSensors.map(esc).join(', ')}</div>`
         : '';
 
-      const popup = new mapboxgl.Popup({ offset: 15, className: 'overwatch-popup' })
+      const popup = new mapboxgl.Popup({ offset: 15, className: 'overwatch-popup', closeButton: false })
         .setHTML(`
           <div style="padding: 8px; font-family: var(--font-mono); font-size: 12px; max-width: 240px;">
-            <div style="font-weight: 700; margin-bottom: 4px; color: ${isOpfor ? '#ef4444' : color};">
+            <div style="font-weight: 700; margin-bottom: 4px; color: ${displayColor};">
               ${symbol} ${esc(base.name)}
             </div>
             <div>Type: ${esc(base.baseType.replace('_', ' '))}</div>
@@ -322,8 +384,8 @@ function MapViewInner() {
 
       const marker = new mapboxgl.Marker({ element: el })
         .setLngLat([base.longitude, base.latitude])
-        .setPopup(popup)
         .addTo(map);
+      attachHoverPopup(el, marker, popup, map);
 
       currentBaseMarkers.set(base.id, marker);
     });
@@ -344,22 +406,23 @@ function MapViewInner() {
     if (!showTargets || targets.length === 0) return;
 
     targets.forEach(target => {
+      // Crosshair icon via SVG
       const el = document.createElement('div');
-      el.style.cssText = `
-        width: 16px; height: 16px;
-        display: flex; align-items: center; justify-content: center;
-        font-size: 14px; font-weight: bold;
-        color: #ef4444;
-        cursor: pointer;
-        filter: drop-shadow(0 0 6px #ef444480);
-      `;
-      el.textContent = '✕';
+      el.style.cssText = `width:20px;height:20px;cursor:pointer;`;
+      const svg = svgEl('svg', { width: '20', height: '20', viewBox: '0 0 24 24', fill: 'none' });
+      // Crosshair: circle + cross lines
+      svg.appendChild(svgEl('circle', { cx: '12', cy: '12', r: '6', stroke: '#ef4444', 'stroke-width': '2', fill: 'rgba(239,68,68,0.15)' }));
+      svg.appendChild(svgEl('line', { x1: '12', y1: '2', x2: '12', y2: '8', stroke: '#ef4444', 'stroke-width': '2' }));
+      svg.appendChild(svgEl('line', { x1: '12', y1: '16', x2: '12', y2: '22', stroke: '#ef4444', 'stroke-width': '2' }));
+      svg.appendChild(svgEl('line', { x1: '2', y1: '12', x2: '8', y2: '12', stroke: '#ef4444', 'stroke-width': '2' }));
+      svg.appendChild(svgEl('line', { x1: '16', y1: '12', x2: '22', y2: '12', stroke: '#ef4444', 'stroke-width': '2' }));
+      el.appendChild(svg);
 
-      const popup = new mapboxgl.Popup({ offset: 15, className: 'overwatch-popup' })
+      const popup = new mapboxgl.Popup({ offset: 15, className: 'overwatch-popup', closeButton: false })
         .setHTML(`
           <div style="padding: 8px; font-family: var(--font-mono); font-size: 12px;">
             <div style="font-weight: 700; margin-bottom: 4px; color: #ef4444;">
-              ✕ ${esc(target.targetName)}
+              ⊕ ${esc(target.targetName)}
             </div>
             ${target.beNumber ? `<div>BE#: ${esc(target.beNumber)}</div>` : ''}
             ${target.targetCategory ? `<div>Category: ${esc(target.targetCategory)}</div>` : ''}
@@ -370,8 +433,8 @@ function MapViewInner() {
 
       const marker = new mapboxgl.Marker({ element: el })
         .setLngLat([target.longitude, target.latitude])
-        .setPopup(popup)
         .addTo(map);
+      attachHoverPopup(el, marker, popup, map);
 
       currentTargetMarkers.set(target.targetId, marker);
     });
@@ -408,17 +471,17 @@ function MapViewInner() {
       const isOpfor = first.affiliation === 'HOSTILE';
       const totalAssets = units.reduce((s, u) => s + u.assetCount, 0);
 
+      const borderColor = isOpfor ? '#ef4444' : '#3b82f6';
       const el = document.createElement('div');
       el.style.cssText = `
         width: 28px; height: 28px;
         display: flex; align-items: center; justify-content: center;
-        font-size: 10px; font-weight: 700;
-        color: ${isOpfor ? '#fff' : '#fff'};
-        background: ${isOpfor ? 'rgba(239, 68, 68, 0.7)' : 'rgba(59, 130, 246, 0.7)'};
-        border: 2px solid ${isOpfor ? '#ef4444' : '#3b82f6'};
-        border-radius: 50%;
+        font-size: 11px; font-weight: 700;
+        color: #fff;
+        background: ${isOpfor ? 'rgba(239, 68, 68, 0.8)' : 'rgba(59, 130, 246, 0.8)'};
+        border: 2px solid ${borderColor};
+        border-radius: 4px;
         cursor: pointer;
-        box-shadow: 0 0 8px ${isOpfor ? '#ef444480' : '#3b82f680'};
       `;
       el.textContent = String(totalAssets);
 
@@ -429,7 +492,7 @@ function MapViewInner() {
         </div>`
       ).join('');
 
-      const popup = new mapboxgl.Popup({ offset: 15, className: 'overwatch-popup' })
+      const popup = new mapboxgl.Popup({ offset: 15, className: 'overwatch-popup', closeButton: false })
         .setHTML(`
           <div style="padding: 8px; font-family: var(--font-mono); font-size: 12px; max-width: 260px;">
             <div style="font-weight: 700; margin-bottom: 4px; color: ${isOpfor ? '#ef4444' : '#60a5fa'};">
@@ -444,8 +507,8 @@ function MapViewInner() {
 
       const marker = new mapboxgl.Marker({ element: el })
         .setLngLat([first.baseLon, first.baseLat])
-        .setPopup(popup)
         .addTo(map);
+      attachHoverPopup(el, marker, popup, map);
 
       currentUnitMarkers.set(key, marker);
     });
@@ -618,20 +681,9 @@ function MapViewInner() {
       if (currentMarkers.has(missionId)) {
         currentMarkers.get(missionId)!.setLngLat([pos.longitude, pos.latitude]);
       } else {
-        const el = document.createElement('div');
-        const isSpace = pos.domain === 'SPACE';
-        el.style.cssText = `
-          width: ${isSpace ? '10px' : '12px'};
-          height: ${isSpace ? '10px' : '12px'};
-          border-radius: ${isSpace ? '2px' : '50%'};
-          background: ${color};
-          border: 2px solid rgba(255,255,255,0.8);
-          box-shadow: 0 0 8px ${color}80;
-          cursor: pointer;
-          ${isSpace ? 'transform: rotate(45deg);' : ''}
-        `;
+        const el = makeDomainIcon(pos.domain, color, 22);
 
-        const popup = new mapboxgl.Popup({ offset: 15, className: 'overwatch-popup' })
+        const popup = new mapboxgl.Popup({ offset: 15, className: 'overwatch-popup', closeButton: false })
           .setHTML(`
             <div style="padding: 8px; font-family: var(--font-mono); font-size: 12px;">
               <div style="font-weight: 700; margin-bottom: 4px; color: ${color};">
@@ -647,8 +699,8 @@ function MapViewInner() {
 
         const marker = new mapboxgl.Marker({ element: el })
           .setLngLat([pos.longitude, pos.latitude])
-          .setPopup(popup)
           .addTo(map);
+        attachHoverPopup(el, marker, popup, map);
 
         currentMarkers.set(missionId, marker);
       }

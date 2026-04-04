@@ -256,6 +256,10 @@ model PriorityEntry {
   justification     String            @db.Text
   createdAt         DateTime          @default(now())
 
+  // Target geolocation — extracted from JIPTL coordinates (DMS/decimal)
+  latitude          Float?
+  longitude         Float?
+
   // AI-traced origin — which strategy priority does this derive from?
   strategyPriorityId String?
   strategyPriority   StrategyPriority? @relation(fields: [strategyPriorityId], references: [id])
@@ -688,6 +692,9 @@ model ScenarioInject {
   expectedResponse String?  @db.Text // What the training audience should do
   objectiveTested  String?  // Linked exercise objective or UJTL task
 
+  // Affected entities — callsigns, unit designations, asset names impacted by this inject
+  affectedEntities String[]          // e.g. ["VIPER 11", "GPS-IIF-12", "CSG-5"]
+
   // Ingestion traceability — links to source MSEL document
   planningDocId    String?
   planningDoc      PlanningDocument? @relation(fields: [planningDocId], references: [id])
@@ -695,9 +702,9 @@ model ScenarioInject {
   fired       Boolean   @default(false)
   firedAt     DateTime?
 
-  // Geospatial — derived by inject-locator parser from referenced entities
-  latitude    Float?    // Optional, resolved post-generation
-  longitude   Float?    // Optional, resolved post-generation
+  // Geospatial — derived by inject-locator parser or AI extraction
+  latitude    Float?
+  longitude   Float?
 
   createdAt   DateTime  @default(now())
 
