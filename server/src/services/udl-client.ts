@@ -124,8 +124,9 @@ export async function fetchElsetAtEpoch(satNo: number, targetDate: Date): Promis
   );
 
   if (results && results.length > 0) {
-    // Pick the ELSET with the most recent epoch (closest to target date)
-    const sorted = results.sort((a, b) => new Date(b.epoch).getTime() - new Date(a.epoch).getTime());
+    // Prefer ELSETs at or before the target date (causal); fall back to all if none qualify
+    const valid = results.filter(r => new Date(r.epoch) <= targetDate);
+    const sorted = (valid.length > 0 ? valid : results).sort((a, b) => new Date(b.epoch).getTime() - new Date(a.epoch).getTime());
     const elset = sorted[0];
     TLE_CACHE.set(cacheKey, { data: elset, fetchedAt: Date.now() });
     return elset;

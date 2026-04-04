@@ -318,20 +318,38 @@ describe('UDL Client', () => {
   // ── History endpoint sorts client-side ────────────────────────────────────
 
   describe('fetchElsetAtEpoch client-side sorting', () => {
-    it('picks the most recent epoch from unsorted history results', async () => {
+    it('prefers the most recent causal epoch (at or before target date)', async () => {
       const olderElset = { ...MOCK_ELSET, idElset: 'older', epoch: '2025-06-14T00:00:00Z' };
-      const newerElset = { ...MOCK_ELSET, idElset: 'newer', epoch: '2025-06-15T23:00:00Z' };
+      const newerCausalElset = { ...MOCK_ELSET, idElset: 'newer-causal', epoch: '2025-06-14T18:00:00Z' };
+      const futureElset = { ...MOCK_ELSET, idElset: 'future', epoch: '2025-06-15T23:00:00Z' };
 
-      // UDL returns unsorted (older first)
+      // UDL returns unsorted — future epoch exists but should be excluded
       mockFetch.mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve([olderElset, newerElset]),
+        json: () => Promise.resolve([olderElset, futureElset, newerCausalElset]),
       });
 
       const { fetchElsetAtEpoch } = await import('../../services/udl-client.js');
       const result = await fetchElsetAtEpoch(48859, new Date('2025-06-15T00:00:00Z'));
 
-      expect(result?.idElset).toBe('newer');
+      // Should pick newer-causal (before target), not future (after target)
+      expect(result?.idElset).toBe('newer-causal');
+    });
+
+    it('falls back to newest epoch when none are before target date', async () => {
+      const futureElset1 = { ...MOCK_ELSET, idElset: 'future1', epoch: '2025-06-15T12:00:00Z' };
+      const futureElset2 = { ...MOCK_ELSET, idElset: 'future2', epoch: '2025-06-16T00:00:00Z' };
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve([futureElset2, futureElset1]),
+      });
+
+      const { fetchElsetAtEpoch } = await import('../../services/udl-client.js');
+      const result = await fetchElsetAtEpoch(48859, new Date('2025-06-15T00:00:00Z'));
+
+      // No causal results → falls back to newest overall
+      expect(result?.idElset).toBe('future2');
     });
   });
 

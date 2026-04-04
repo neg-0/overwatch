@@ -1024,8 +1024,8 @@ function LayerMenuItem({ label, active, color, onToggle }: { label: string; acti
         color: active ? (color || 'var(--text-primary)') : 'var(--text-muted)',
         textAlign: 'left',
       }}
-      onMouseEnter={e => { (e.target as HTMLElement).style.background = 'rgba(255,255,255,0.05)'; }}
-      onMouseLeave={e => { (e.target as HTMLElement).style.background = 'none'; }}
+      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)'; }}
+      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'none'; }}
     >
       <span style={{
         width: '14px',

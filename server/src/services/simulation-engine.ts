@@ -221,9 +221,9 @@ export function stopSimulation(scenarioId?: string): SimState | null {
   }).catch(console.error);
 
   console.log(`[SIM] Stopped (${sim.scenarioId})`);
-  // Clear cached positions for this scenario's assets
+  // Clear cached positions for this scenario's assets only
   for (const key of lastGoodPosition.keys()) {
-    if (key.startsWith('space-')) lastGoodPosition.delete(key);
+    if (key.startsWith(`space:${sim.scenarioId}:`)) lastGoodPosition.delete(key);
   }
   const result = { ...sim };
   activeSims.delete(sim.scenarioId);
@@ -553,7 +553,7 @@ function startPositionLoop(scenarioId: string, io: Server) {
         // positions are too inaccurate for map display and flood the view
         if (!asset.tleLine1 || !asset.tleLine2) continue;
 
-        const cacheKey = `space-${asset.id}`;
+        const cacheKey = `space:${scenarioId}:${asset.id}`;
         let position: SpacePosition | null = null;
 
         // TLE-based SGP4 propagation
@@ -570,7 +570,7 @@ function startPositionLoop(scenarioId: string, io: Server) {
           io.to(`scenario:${scenarioId}`).emit('position:update', {
             event: 'position:update',
             update: {
-              missionId: cacheKey,
+              missionId: `space-${asset.id}`,
               callsign: asset.name,
               domain: 'SPACE',
               timestamp: currentSim.simTime.toISOString(),
