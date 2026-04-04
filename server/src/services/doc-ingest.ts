@@ -696,7 +696,7 @@ async function persistPlanning(
         // These are the strongest signal — JP 3-0 effects vocabulary is small and precise
         const doctrinalEffects = ['deny', 'destroy', 'degrade', 'disrupt', 'protect', 'sustain', 'neutralize'];
         const planEffects = doctrinalEffects.filter(e => planText.includes(e));
-        const spEffects = doctrinalEffects.filter(e => spText.includes(e));
+        const spEffects = sp.effect ? [sp.effect.toLowerCase()] : doctrinalEffects.filter(e => spText.includes(e));
         const effectOverlap = planEffects.filter(e => spEffects.includes(e)).length;
         if (effectOverlap > 0) score += 0.4 * (effectOverlap / Math.max(spEffects.length, 1));
 
@@ -712,7 +712,7 @@ async function persistPlanning(
 
         // Signal 3: Explicit reference detection — "per NDS Priority 2", "traces to", "derived from"
         const rankPatterns = [
-          new RegExp(`priority\\s*${sp.rank}`, 'i'),
+          new RegExp(`priority\\s*${sp.rank}\\b`, 'i'),
           new RegExp(`p${sp.rank}\\b`, 'i'),
           new RegExp(`\\(${sp.rank}\\)`, 'i'),
         ];
