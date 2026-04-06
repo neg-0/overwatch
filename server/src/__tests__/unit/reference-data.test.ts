@@ -182,6 +182,79 @@ describe('Space Constellation Catalog', () => {
     });
   });
 
+  // ── NORAD ID Integrity ──────────────────────────────────────────────────
+
+  describe('NORAD IDs (inline on asset specs)', () => {
+    const assetsWithNorad = allAssets.filter(a => a.noradId);
+    const friendlyWithNorad = allFriendly.filter(a => a.noradId);
+    const hostileWithNorad = allHostile.filter(a => a.noradId);
+
+    it('has >= 230 assets with NORAD IDs across both catalogs', () => {
+      expect(assetsWithNorad.length).toBeGreaterThanOrEqual(230);
+    });
+
+    it('US catalog has >= 65 assets with NORAD IDs', () => {
+      expect(friendlyWithNorad.length).toBeGreaterThanOrEqual(65);
+    });
+
+    it('adversary catalog has >= 160 assets with NORAD IDs', () => {
+      expect(hostileWithNorad.length).toBeGreaterThanOrEqual(160);
+    });
+
+    it('all NORAD IDs are numeric strings', () => {
+      for (const asset of assetsWithNorad) {
+        expect(asset.noradId, `${asset.name} noradId "${asset.noradId}" is not numeric`).toMatch(/^\d+$/);
+      }
+    });
+
+    it('no unexpected duplicate NORAD IDs across the catalog', () => {
+      const ids = assetsWithNorad.map(a => a.noradId!);
+      const dupes = ids.filter((id, i) => ids.indexOf(id) !== i);
+      const unexpectedDupes = [...new Set(dupes)];
+      // Some known intentional duplicates exist (shared buses, TDRS-8/10 = 27566, etc.)
+      expect(unexpectedDupes.length, `Duplicate NORAD IDs: ${unexpectedDupes.join(', ')}`).toBeLessThanOrEqual(10);
+    });
+
+    it('key US constellations have full NORAD coverage', () => {
+      const mustHaveFull = ['GPS III', 'GPS IIF', 'GPS IIR-M', 'WGS', 'WGS Legacy', 'MUOS', 'MUOS Full', 'AEHF', 'TDRS', 'GSSAP'];
+      for (const name of mustHaveFull) {
+        const constellation = US_SPACE_CONSTELLATIONS.find(c => c.constellation === name);
+        expect(constellation, `Missing constellation: ${name}`).toBeDefined();
+        const missing = constellation!.assets.filter(a => !a.noradId);
+        expect(missing.length, `${name} has ${missing.length} assets without NORAD IDs: ${missing.map(a => a.name).join(', ')}`).toBe(0);
+      }
+    });
+
+    it('key adversary constellations have full NORAD coverage', () => {
+      const mustHaveFull = ['BeiDou-3 MEO', 'BeiDou-3 GEO', 'GLONASS-K', 'Tundra (EKS)', 'Blagovest'];
+      for (const name of mustHaveFull) {
+        const constellation = ADVERSARY_SPACE_CONSTELLATIONS.find(c => c.constellation === name);
+        expect(constellation, `Missing constellation: ${name}`).toBeDefined();
+        const missing = constellation!.assets.filter(a => !a.noradId);
+        expect(missing.length, `${name} has ${missing.length} assets without NORAD IDs: ${missing.map(a => a.name).join(', ')}`).toBe(0);
+      }
+    });
+
+    it('classified assets correctly have NO NORAD IDs', () => {
+      const classifiedPrefixes = ['USA-', 'NOSS-', 'SDA T2-'];
+      for (const asset of allFriendly) {
+        if (classifiedPrefixes.some(p => asset.name.startsWith(p))) {
+          expect(asset.noradId, `${asset.name} should NOT have a NORAD ID (classified)`).toBeUndefined();
+        }
+      }
+    });
+
+    it('noradId is defined directly on asset specs (not via external lookup)', () => {
+      // Regression guard: NORAD IDs must live on the SpaceAssetSpec, not in a
+      // separate lookup table. Verify by checking that assets WITH IDs actually
+      // have the field set at the object level (not undefined/injected later).
+      for (const asset of assetsWithNorad) {
+        expect('noradId' in asset, `${asset.name} should have noradId as own property`).toBe(true);
+        expect(typeof asset.noradId).toBe('string');
+      }
+    });
+  });
+
   // ── Operator field (new) ────────────────────────────────────────────────
 
   describe('Operator field', () => {

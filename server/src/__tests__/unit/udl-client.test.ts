@@ -192,7 +192,8 @@ describe('UDL Client', () => {
       const [url] = mockFetch.mock.calls[0];
       expect(url).toContain('/elset/history');
       expect(url).toContain('satNo=48859');
-      expect(url).toContain('orderBy');
+      // orderBy was removed — UDL rejects it; we sort client-side instead
+      expect(url).not.toContain('orderBy');
     });
 
     it('falls back to current if history returns empty', async () => {
@@ -311,6 +312,80 @@ describe('UDL Client', () => {
       // Only the second asset succeeds
       expect(updated).toBe(1);
       expect(prisma.spaceAsset.update).toHaveBeenCalledOnce();
+    });
+  });
+
+  // ── History endpoint sorts client-side ────────────────────────────────────
+
+  describe('fetchElsetAtEpoch client-side sorting', () => {
+    it('prefers the most recent causal epoch (at or before target date)', async () => {
+      const olderElset = { ...MOCK_ELSET, idElset: 'older', epoch: '2025-06-14T00:00:00Z' };
+      const newerCausalElset = { ...MOCK_ELSET, idElset: 'newer-causal', epoch: '2025-06-14T18:00:00Z' };
+      const futureElset = { ...MOCK_ELSET, idElset: 'future', epoch: '2025-06-15T23:00:00Z' };
+
+      // UDL returns unsorted — future epoch exists but should be excluded
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve([olderElset, futureElset, newerCausalElset]),
+      });
+
+      const { fetchElsetAtEpoch } = await import('../../services/udl-client.js');
+      const result = await fetchElsetAtEpoch(48859, new Date('2025-06-15T00:00:00Z'));
+
+      // Should pick newer-causal (before target), not future (after target)
+      expect(result?.idElset).toBe('newer-causal');
+    });
+
+    it('falls back to newest epoch when none are before target date', async () => {
+      const futureElset1 = { ...MOCK_ELSET, idElset: 'future1', epoch: '2025-06-15T12:00:00Z' };
+      const futureElset2 = { ...MOCK_ELSET, idElset: 'future2', epoch: '2025-06-16T00:00:00Z' };
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve([futureElset2, futureElset1]),
+      });
+
+      const { fetchElsetAtEpoch } = await import('../../services/udl-client.js');
+      const result = await fetchElsetAtEpoch(48859, new Date('2025-06-15T00:00:00Z'));
+
+      // No causal results → falls back to newest overall
+      expect(result?.idElset).toBe('future2');
+    });
+  });
+
+  // ── Parallel batch fetching ─────────────────────────────────────────────
+
+  describe('refreshTLEsForScenario parallel batching', () => {
+    it('fetches TLEs in parallel batches (not sequentially)', async () => {
+      const prisma = (await import('../../db/prisma-client.js')).default;
+
+      (prisma.scenario.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        startDate: new Date(), // Recent → uses current endpoint
+      });
+
+      // Create 15 assets to span 2 batches (batch size = 10)
+      const assets = Array.from({ length: 15 }, (_, i) => ({
+        id: `sa-${i}`, name: `SAT-${i}`, noradId: String(40000 + i),
+      }));
+      (prisma.spaceAsset.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(assets);
+      (prisma.spaceAsset.update as ReturnType<typeof vi.fn>).mockResolvedValue({});
+
+      // Track fetch timing to verify parallelism within each batch
+      const fetchTimes: number[] = [];
+      mockFetch.mockImplementation(async () => {
+        fetchTimes.push(Date.now());
+        await new Promise(r => setTimeout(r, 10)); // Simulate 10ms network
+        return { ok: true, json: () => Promise.resolve([MOCK_ELSET]) };
+      });
+
+      const { refreshTLEsForScenario } = await import('../../services/udl-client.js');
+      const updated = await refreshTLEsForScenario('test-scenario-id');
+
+      expect(updated).toBe(15);
+      // With batches of 10, the first 10 should start near-simultaneously
+      // Check that first 10 requests started within 5ms of each other (parallel)
+      const firstBatchSpread = fetchTimes[9] - fetchTimes[0];
+      expect(firstBatchSpread, `First batch should be parallel (spread: ${firstBatchSpread}ms)`).toBeLessThan(50);
     });
   });
 

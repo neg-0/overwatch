@@ -58,6 +58,12 @@ const BASE_SYMBOLS: Record<string, string> = {
   JOINT_BASE: '◆',
 };
 
+/** Sim-time window for breadcrumb trails (ms). Keeps ~1 hour of orbital history. */
+const TRAIL_WINDOW_MS = 60 * 60 * 1000; // 1 sim-hour
+
+/** Duration (ms) to interpolate between position updates (matches server emit interval) */
+const INTERP_DURATION_MS = 2000;
+
 const COVERAGE_COLORS: Record<string, string> = {
   SATCOM_WIDEBAND: '#3b82f6',
   SATCOM_PROTECTED: '#8b5cf6',
@@ -159,8 +165,12 @@ function MapViewInner() {
   const markersRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
   const baseMarkersRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
   const targetMarkersRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
-  const trailsRef = useRef<Map<string, [number, number][]>>(new Map());
+  const trailsRef = useRef<Map<string, { lon: number; lat: number; simMs: number }[]>>(new Map());
   const mapLoadedRef = useRef(false);
+
+  // Interpolation state for smooth marker movement
+  const interpRef = useRef<Map<string, { from: [number, number]; to: [number, number]; startMs: number }>>(new Map());
+  const animFrameRef = useRef<number>(0);
 
   const { positions, activeScenarioId, simulation, bases, coverageWindows, unitPositions } = useOverwatchStore();
   const [activeDomains, setActiveDomains] = useState<Set<string>>(new Set(['AIR', 'MARITIME', 'SPACE']));
@@ -173,6 +183,8 @@ function MapViewInner() {
   const [showTargets, setShowTargets] = useState(true);
   const [showCoverage, setShowCoverage] = useState(false);
   const [showUnits, setShowUnits] = useState(true);
+  const [showTracks, setShowTracks] = useState(true);
+  const [layerMenuOpen, setLayerMenuOpen] = useState(false);
   const unitMarkersRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
 
   // ─── Initialize Map ─────────────────────────────────────────────────────────
@@ -205,6 +217,45 @@ function MapViewInner() {
       map.remove();
       mapRef.current = null;
     };
+  }, []);
+
+  // ─── Smooth Marker Interpolation Loop ──────────────────────────────────────
+
+  useEffect(() => {
+    const animate = () => {
+      const now = performance.now();
+      interpRef.current.forEach((interp, missionId) => {
+        // Skip completed interpolations — no work needed
+        const elapsed = now - interp.startMs;
+        if (elapsed >= INTERP_DURATION_MS) return;
+
+        const marker = markersRef.current.get(missionId);
+        if (!marker) return;
+
+        const t = elapsed / INTERP_DURATION_MS;
+        // Ease-out for natural deceleration
+        const eased = 1 - (1 - t) * (1 - t);
+
+        // Handle longitude wrapping (e.g., 179° → -179° should go via 181°)
+        let fromLon = interp.from[0];
+        let toLon = interp.to[0];
+        if (Math.abs(toLon - fromLon) > 180) {
+          if (toLon > fromLon) fromLon += 360;
+          else toLon += 360;
+        }
+
+        const lon = fromLon + (toLon - fromLon) * eased;
+        const lat = interp.from[1] + (interp.to[1] - interp.from[1]) * eased;
+
+        // Normalize longitude back to [-180, 180]
+        const normLon = ((lon + 180) % 360 + 360) % 360 - 180;
+        marker.setLngLat([normLon, lat]);
+      });
+      animFrameRef.current = requestAnimationFrame(animate);
+    };
+
+    animFrameRef.current = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animFrameRef.current);
   }, []);
 
   // ─── Fetch Waypoints & Targets for Route Lines ──────────────────────────────
@@ -596,6 +647,18 @@ function MapViewInner() {
     const map = mapRef.current;
     if (!map || !mapLoadedRef.current) return;
 
+    // If tracks are hidden, clear all trail layers
+    if (!showTracks) {
+      trailsRef.current.forEach((_trail, missionId) => {
+        const sourceId = `trail-${missionId}`;
+        const source = map.getSource(sourceId) as mapboxgl.GeoJSONSource;
+        if (source) {
+          source.setData({ type: 'FeatureCollection', features: [] });
+        }
+      });
+      return;
+    }
+
     positions.forEach((pos, missionId) => {
       if (!activeDomains.has(pos.domain)) return;
 
@@ -605,24 +668,35 @@ function MapViewInner() {
 
       if (!isValidCoord) return;
 
-      // Accumulate trail points
+      // Accumulate trail points with sim-time timestamps
+      const posSimMs = (pos as any).timestamp ? new Date((pos as any).timestamp).getTime() : Date.now();
       const trail = trailsRef.current.get(missionId) || [];
       const lastPoint = trail[trail.length - 1];
-      if (!lastPoint || lastPoint[0] !== pos.longitude || lastPoint[1] !== pos.latitude) {
-        trail.push([pos.longitude, pos.latitude]);
-        trailsRef.current.set(missionId, trail);
+      if (!lastPoint || lastPoint.lon !== pos.longitude || lastPoint.lat !== pos.latitude) {
+        trail.push({ lon: pos.longitude, lat: pos.latitude, simMs: posSimMs });
       }
+
+      // Trim to sim-time window: use the newest point as reference so we're
+      // always comparing within the same clock domain (sim time)
+      if (trail.length > 1) {
+        const newestMs = trail[trail.length - 1].simMs;
+        const cutoff = newestMs - TRAIL_WINDOW_MS;
+        const trimIdx = trail.findIndex(p => p.simMs >= cutoff);
+        if (trimIdx > 0) trail.splice(0, trimIdx);
+      }
+      trailsRef.current.set(missionId, trail);
 
       if (trail.length < 2) return;
 
       const sourceId = `trail-${missionId}`;
       const color = TRAIL_COLORS[pos.domain] || '#888';
+      const coordinates = trail.map(p => [p.lon, p.lat]);
 
       const geojson: GeoJSON.FeatureCollection = {
         type: 'FeatureCollection',
         features: [{
           type: 'Feature',
-          geometry: { type: 'LineString', coordinates: trail },
+          geometry: { type: 'LineString', coordinates },
           properties: {},
         }],
       };
@@ -645,7 +719,7 @@ function MapViewInner() {
         });
       }
     });
-  }, [positions, activeDomains]);
+  }, [positions, activeDomains, showTracks]);
 
   // ─── Update Markers + Trails from Positions ─────────────────────────────────
 
@@ -679,7 +753,17 @@ function MapViewInner() {
       const color = DOMAIN_COLORS[pos.domain] || '#888';
 
       if (currentMarkers.has(missionId)) {
-        currentMarkers.get(missionId)!.setLngLat([pos.longitude, pos.latitude]);
+        // Only set up new interpolation if the TARGET position changed
+        const existing = interpRef.current.get(missionId);
+        if (!existing || existing.to[0] !== pos.longitude || existing.to[1] !== pos.latitude) {
+          const marker = currentMarkers.get(missionId)!;
+          const cur = marker.getLngLat();
+          interpRef.current.set(missionId, {
+            from: [cur.lng, cur.lat],
+            to: [pos.longitude, pos.latitude],
+            startMs: performance.now(),
+          });
+        }
       } else {
         const el = makeDomainIcon(pos.domain, color, 22);
 
@@ -711,6 +795,7 @@ function MapViewInner() {
       if (!activeIds.has(id)) {
         marker.remove();
         currentMarkers.delete(id);
+        interpRef.current.delete(id);
       }
     });
 
@@ -741,57 +826,79 @@ function MapViewInner() {
         zIndex: 10,
         display: 'flex',
         gap: '8px',
-        flexWrap: 'wrap',
+        alignItems: 'flex-start',
       }}>
-        {['AIR', 'MARITIME', 'SPACE'].map(domain => (
+        {/* Eyeball layer menu */}
+        <div style={{ position: 'relative' }}>
           <button
-            key={domain}
-            onClick={() => toggleDomain(domain)}
-            className={`btn btn-sm ${activeDomains.has(domain) ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setLayerMenuOpen(!layerMenuOpen)}
+            className="btn btn-sm btn-secondary"
             style={{
-              padding: '6px 12px',
-              fontSize: '11px',
-              fontWeight: 600,
-              letterSpacing: '0.05em',
+              padding: '6px 10px',
+              fontSize: '14px',
+              lineHeight: 1,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
             }}
+            title="Layer visibility"
           >
-            {domain}
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+            <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.05em' }}>LAYERS</span>
           </button>
-        ))}
 
-        <span style={{ width: '1px', background: 'var(--border-subtle)', margin: '0 4px' }} />
+          {layerMenuOpen && (
+            <>
+              {/* Backdrop to close menu */}
+              <div
+                style={{ position: 'fixed', inset: 0, zIndex: 20 }}
+                onClick={() => setLayerMenuOpen(false)}
+              />
+              <div style={{
+                position: 'absolute',
+                top: '100%',
+                left: 0,
+                marginTop: '4px',
+                background: 'rgba(10, 15, 30, 0.95)',
+                backdropFilter: 'blur(12px)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '8px',
+                padding: '8px 0',
+                minWidth: '180px',
+                zIndex: 21,
+              }}>
+                {/* Domain toggles */}
+                <div style={{ padding: '4px 12px 6px', fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.1em' }}>
+                  DOMAINS
+                </div>
+                {(['AIR', 'MARITIME', 'SPACE'] as const).map(domain => (
+                  <LayerMenuItem
+                    key={domain}
+                    label={domain}
+                    active={activeDomains.has(domain)}
+                    color={DOMAIN_COLORS[domain]}
+                    onToggle={() => toggleDomain(domain)}
+                  />
+                ))}
 
-        {/* Layer toggles */}
-        <button
-          onClick={() => setShowBases(!showBases)}
-          className={`btn btn-sm ${showBases ? 'btn-primary' : 'btn-secondary'}`}
-          style={{ padding: '6px 12px', fontSize: '11px', fontWeight: 600 }}
-        >
-          BASES
-        </button>
-        <button
-          onClick={() => setShowTargets(!showTargets)}
-          className={`btn btn-sm ${showTargets ? 'btn-primary' : 'btn-secondary'}`}
-          style={{ padding: '6px 12px', fontSize: '11px', fontWeight: 600 }}
-        >
-          TARGETS
-        </button>
-        <button
-          onClick={() => setShowUnits(!showUnits)}
-          className={`btn btn-sm ${showUnits ? 'btn-primary' : 'btn-secondary'}`}
-          style={{ padding: '6px 12px', fontSize: '11px', fontWeight: 600 }}
-        >
-          UNITS
-        </button>
-        <button
-          onClick={() => setShowCoverage(!showCoverage)}
-          className={`btn btn-sm ${showCoverage ? 'btn-primary' : 'btn-secondary'}`}
-          style={{ padding: '6px 12px', fontSize: '11px', fontWeight: 600 }}
-        >
-          COVERAGE
-        </button>
+                <div style={{ margin: '4px 12px', borderTop: '1px solid var(--border-subtle)' }} />
 
-        <span style={{ width: '1px', background: 'var(--border-subtle)', margin: '0 4px' }} />
+                {/* Data layer toggles */}
+                <div style={{ padding: '4px 12px 6px', fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.1em' }}>
+                  OVERLAYS
+                </div>
+                <LayerMenuItem label="BASES" active={showBases} onToggle={() => setShowBases(!showBases)} />
+                <LayerMenuItem label="TARGETS" active={showTargets} onToggle={() => setShowTargets(!showTargets)} />
+                <LayerMenuItem label="UNITS" active={showUnits} onToggle={() => setShowUnits(!showUnits)} />
+                <LayerMenuItem label="COVERAGE" active={showCoverage} onToggle={() => setShowCoverage(!showCoverage)} />
+                <LayerMenuItem label="SPACE TRACKS" active={showTracks} onToggle={() => setShowTracks(!showTracks)} />
+              </div>
+            </>
+          )}
+        </div>
 
         <select
           value={affiliation}
@@ -895,6 +1002,49 @@ function initializeMapSources(map: mapboxgl.Map) {
   // Pre-create empty sources for trails (added dynamically)
   // This ensures layers are ready when positions start arriving
   console.log('[MAP] Sources initialized');
+}
+
+function LayerMenuItem({ label, active, color, onToggle }: { label: string; active: boolean; color?: string; onToggle: () => void }) {
+  return (
+    <button
+      onClick={onToggle}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        width: '100%',
+        padding: '6px 12px',
+        background: 'none',
+        border: 'none',
+        cursor: 'pointer',
+        fontSize: '11px',
+        fontWeight: 600,
+        fontFamily: 'var(--font-mono)',
+        letterSpacing: '0.05em',
+        color: active ? (color || 'var(--text-primary)') : 'var(--text-muted)',
+        textAlign: 'left',
+      }}
+      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)'; }}
+      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'none'; }}
+    >
+      <span style={{
+        width: '14px',
+        height: '14px',
+        borderRadius: '3px',
+        border: `2px solid ${active ? (color || 'var(--accent-primary)') : 'var(--border-subtle)'}`,
+        background: active ? (color || 'var(--accent-primary)') : 'transparent',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: '10px',
+        color: '#fff',
+        flexShrink: 0,
+      }}>
+        {active && '✓'}
+      </span>
+      {label}
+    </button>
+  );
 }
 
 function LegendItem({ color, label, symbol }: { color: string; label: string; symbol: string }) {
