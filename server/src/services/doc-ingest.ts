@@ -672,11 +672,11 @@ async function persistPlanning(
 
   // Create priority entries with AI-traced links to strategy priorities
   // Fetch strategy priorities from the linked strategy doc to perform traceability matching
-  let strategyPriorities: { id: string; rank: number; objective: string; description: string }[] = [];
+  let strategyPriorities: { id: string; rank: number; objective: string; description: string; effect: string | null }[] = [];
   if (strategyDocId) {
     strategyPriorities = await prisma.strategyPriority.findMany({
       where: { strategyDocId },
-      select: { id: true, rank: true, objective: true, description: true },
+      select: { id: true, rank: true, objective: true, description: true, effect: true },
       orderBy: { rank: 'asc' },
     });
   }
