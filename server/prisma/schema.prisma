@@ -199,6 +199,15 @@ model StrategyDocument {
   planningDocs   PlanningDocument[]
   priorities     StrategyPriority[]
 
+  // OPLAN/CONPLAN-specific fields
+  commanderIntent String?  @db.Text
+  mission         String?  @db.Text
+
+  // OPLAN/CONPLAN-specific extraction relations
+  oplanPhases            OPLANPhase[]
+  commandTasks           CommandTask[]
+  paceComms              PACEComm[]
+
   @@map("strategy_documents")
 }
 
@@ -218,6 +227,53 @@ model StrategyPriority {
   derivedPriorities PriorityEntry[]
 
   @@map("strategy_priorities")
+}
+
+// ─── OPLAN/CONPLAN Extraction Models ─────────────────────────────────────────
+// Structured data extracted from OPLAN/CONPLAN documents — phases, command tasks, PACE plans
+
+model OPLANPhase {
+  id              String           @id @default(uuid())
+  strategyDocId   String
+  strategyDoc     StrategyDocument @relation(fields: [strategyDocId], references: [id], onDelete: Cascade)
+  phaseNumber     Int              // 0-4 typically
+  phaseName       String           // e.g., "SHAPE / PREPARE", "DEPLOY / DISPERSE"
+  startDate       String?          // e.g., "01 MAR 2026" or ISO 8601
+  endDate         String?
+  description     String           @db.Text  // Full phase description
+  keyTasks        String[]         // Array of key tasks for this phase
+  createdAt       DateTime         @default(now())
+
+  @@index([strategyDocId])
+  @@map("oplan_phases")
+}
+
+model CommandTask {
+  id              String           @id @default(uuid())
+  strategyDocId   String
+  strategyDoc     StrategyDocument @relation(fields: [strategyDocId], references: [id], onDelete: Cascade)
+  commandName     String           // e.g., "PACFLT (JFMCC)", "PACAF (JFACC)"
+  commandRole     String?          // e.g., "JFMCC", "JFACC", "JFSCC"
+  tasks           String[]         // Array of assigned tasks
+  createdAt       DateTime         @default(now())
+
+  @@index([strategyDocId])
+  @@map("command_tasks")
+}
+
+model PACEComm {
+  id              String           @id @default(uuid())
+  strategyDocId   String
+  strategyDoc     StrategyDocument @relation(fields: [strategyDocId], references: [id], onDelete: Cascade)
+  context         String           // e.g., "Exercise-level", "JTF HQ", "Maritime"
+  primary         String           // P — primary comm method
+  alternate       String           // A — alternate
+  contingency     String           // C — contingency
+  emergency       String           // E — emergency
+  createdAt       DateTime         @default(now())
+
+  @@index([strategyDocId])
+  @@map("pace_comms")
 }
 
 model PlanningDocument {
@@ -243,6 +299,14 @@ model PlanningDocument {
   taskingOrders   TaskingOrder[]
   scenarioInjects ScenarioInject[]
 
+  // Type-specific extraction relations
+  spinsEntries         SPINSEntry[]
+  commPlans            CommPlan[]
+  forceApportionments  ForceApportionment[]
+  weaponTargetPairs    WeaponTargetPair[]
+  coordinationMeasures CoordinationMeasure[]
+  fireSupportMeasures  FireSupportMeasure[]
+
   @@map("planning_documents")
 }
 
@@ -260,6 +324,15 @@ model PriorityEntry {
   // Target geolocation — extracted from JIPTL coordinates (DMS/decimal)
   latitude          Float?
   longitude         Float?
+
+  // JIPTL-enhanced fields for space support optimization
+  targetSystemCategory String?    // C2, IADS, LOC, WMD, NAVAL, etc.
+  cdeLevel             String?    // CDE_1 through CDE_5
+  noStrike             Boolean    @default(false)
+  timeSensitive        Boolean    @default(false)
+  engagementAuthority  String?    // JFACC, CCDR, SECDEF, etc.
+  weaponeering         String?    // e.g., "2x GBU-31 JDAM", "SDB-II"
+  targetStatus         String?    // NOMINATED, VALIDATED, APPROVED, STRUCK, RESTRIKE, BDA_PENDING
 
   // AI-traced origin — which strategy priority does this derive from?
   strategyPriorityId String?
@@ -800,21 +873,127 @@ model AirspaceStructure {
   id              String   @id @default(uuid())
   scenarioId      String
   scenario        Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
-  structureType   String   // ROZ, ART, CAP, CORRIDOR, KILLBOX, HIDACZ, MRR
-  name            String   // e.g. "TAROKA SHOAL", "AR-205 BLUE"
-  coordinatesJson Json     // Array of {lat, lon} for polygon corners or waypoints
-  centerLat       Float?   // For circular areas (CAP stations, HIDACZ)
-  centerLon       Float?
-  radiusNm        Float?   // For circular areas
-  altitudeLow     Int?     // Floor in feet or flight level
-  altitudeHigh    Int?     // Ceiling in feet or flight level
-  effectiveStart  DateTime?
-  effectiveEnd    DateTime?
-  sourceDocId     String?  // Links to PlanningDocument (ACO) for traceability
-  createdAt       DateTime @default(now())
+  structureType         String   // ROZ, ART, CAP, CORRIDOR, KILLBOX, HIDACZ, MRR, ADIZ, WFZ, SAAFR, FSCL
+  name                  String   // e.g. "TAROKA SHOAL", "AR-205 BLUE"
+  coordinatesJson       Json     // Array of {lat, lon} for polygon corners or waypoints
+  centerLat             Float?   // For circular areas (CAP stations, HIDACZ)
+  centerLon             Float?
+  radiusNm              Float?   // For circular areas
+  altitudeLow           Int?     // Floor in feet or flight level
+  altitudeHigh          Int?     // Ceiling in feet or flight level
+  altitudeUnit          String?  // FT or FL (flight level)
+  effectiveStart        DateTime?
+  effectiveEnd          DateTime?
+  sourceDocId           String?  // Links to PlanningDocument (ACO) for traceability
+  controllingAuthority  String?  // e.g. "JFACC", "AWACS DARKSTAR"
+  activationConditions  String?  @db.Text // Conditions for activation
+  usageRestrictions     String?  @db.Text // Who/what may enter
+  createdAt             DateTime @default(now())
 
   @@index([scenarioId])
   @@map("airspace_structures")
+}
+
+// ─── SPINS Extraction Models ─────────────────────────────────────────────────
+// Structured data extracted from Special Instructions (SPINS) documents
+
+model SPINSEntry {
+  id              String           @id @default(uuid())
+  planningDocId   String
+  planningDoc     PlanningDocument @relation(fields: [planningDocId], references: [id], onDelete: Cascade)
+  category        String           // ROE, EMCON, WEAPONS_RELEASE, TANKER, CSAR, IFF, DURESS, GENERAL
+  title           String
+  description     String           @db.Text
+  conditions      String?          @db.Text  // When this procedure applies
+  authority       String?          // Who issued/controls this procedure
+  applicableTo    String[]         // Mission types this applies to: ["OCA", "DCA", "CAS", etc.]
+  createdAt       DateTime         @default(now())
+
+  @@index([planningDocId])
+  @@map("spins_entries")
+}
+
+model CommPlan {
+  id              String           @id @default(uuid())
+  planningDocId   String
+  planningDoc     PlanningDocument @relation(fields: [planningDocId], references: [id], onDelete: Cascade)
+  netName         String           // e.g. "BLUE-7", "RED CROWN"
+  frequency       String?          // e.g. "243.0 MHz", "305.6 MHz"
+  band            String?          // UHF, VHF, HF, SATCOM, SATCOM_PROTECTED, SATCOM_WIDEBAND, SATCOM_TACTICAL
+  callsign        String?          // Controlling agency callsign
+  purpose         String           // e.g. "CAS Check-in", "AWACS Control", "Guard"
+  paceOrder       String?          // PRIMARY, ALTERNATE, CONTINGENCY, EMERGENCY
+  applicableTo    String[]         // Mission types: ["CAS", "SEAD", "ALL", etc.]
+  createdAt       DateTime         @default(now())
+
+  @@index([planningDocId])
+  @@map("comm_plans")
+}
+
+// ─── MAAP Extraction Models ──────────────────────────────────────────────────
+// Structured data extracted from Master Air Attack Plan (MAAP) documents
+
+model ForceApportionment {
+  id                String           @id @default(uuid())
+  planningDocId     String
+  planningDoc       PlanningDocument @relation(fields: [planningDocId], references: [id], onDelete: Cascade)
+  missionType       String           // OCA, DCA, CAS, SEAD, ISR, TANKER, C2, etc.
+  percentAllocation Float            // 0-100
+  sorties           Int
+  rationale         String?          @db.Text
+  createdAt         DateTime         @default(now())
+
+  @@index([planningDocId])
+  @@map("force_apportionments")
+}
+
+model WeaponTargetPair {
+  id              String           @id @default(uuid())
+  planningDocId   String
+  planningDoc     PlanningDocument @relation(fields: [planningDocId], references: [id], onDelete: Cascade)
+  targetName      String
+  targetId        String?          // BE number if known
+  weaponSystem    String           // e.g. "GBU-31 JDAM", "AGM-158 JASSM"
+  platform        String?          // e.g. "F-35A", "B-2A"
+  quantity        Int?
+  desiredEffect   String           // DESTROY, DEGRADE, DENY, etc.
+  guidanceType    String?          // GPS, LASER, INS, COMBO — determines space dependency
+  createdAt       DateTime         @default(now())
+
+  @@index([planningDocId])
+  @@map("weapon_target_pairs")
+}
+
+model CoordinationMeasure {
+  id              String           @id @default(uuid())
+  planningDocId   String
+  planningDoc     PlanningDocument @relation(fields: [planningDocId], references: [id], onDelete: Cascade)
+  measureType     String           // FSCL, KILLBOX, ROZ, ADIZ, CAS_BP, TANKER_TRACK, AWACS_ORBIT
+  name            String
+  description     String?          @db.Text
+  coordinatesJson Json?            // Polygon or point coordinates
+  effectiveStart  DateTime?
+  effectiveEnd    DateTime?
+  createdAt       DateTime         @default(now())
+
+  @@index([planningDocId])
+  @@map("coordination_measures")
+}
+
+model FireSupportMeasure {
+  id              String           @id @default(uuid())
+  planningDocId   String
+  planningDoc     PlanningDocument @relation(fields: [planningDocId], references: [id], onDelete: Cascade)
+  measureType     String           // FSCL, CFL, NFL, RFL
+  name            String
+  description     String?          @db.Text
+  coordinatesJson Json?            // Line or polygon coordinates
+  effectiveStart  DateTime?
+  effectiveEnd    DateTime?
+  createdAt       DateTime         @default(now())
+
+  @@index([planningDocId])
+  @@map("fire_support_measures")
 }
 
 // ─── LLM Response Cache ──────────────────────────────────────────────────────

@@ -42,7 +42,7 @@ vi.mock('../../config.js', () => ({
 }));
 
 vi.mock('../../db/prisma-client.js', () => {
-  const mockPrisma = {
+  const mockPrisma: Record<string, any> = {
     strategyDocument: {
       create: vi.fn().mockResolvedValue({ id: 'strat-001', title: 'Test Strategy' }),
       findMany: vi.fn().mockResolvedValue([]),
@@ -52,12 +52,45 @@ vi.mock('../../db/prisma-client.js', () => {
       create: vi.fn().mockResolvedValue({ id: 'sp-001' }),
       findMany: vi.fn().mockResolvedValue([]),
     },
+    oPLANPhase: {
+      create: vi.fn().mockResolvedValue({ id: 'phase-001' }),
+    },
+    commandTask: {
+      create: vi.fn().mockResolvedValue({ id: 'ct-001' }),
+    },
+    pACEComm: {
+      create: vi.fn().mockResolvedValue({ id: 'pace-001' }),
+    },
     planningDocument: {
       create: vi.fn().mockResolvedValue({ id: 'plan-001', title: 'Test Planning Doc' }),
       findMany: vi.fn().mockResolvedValue([]),
     },
     priorityEntry: {
       create: vi.fn().mockResolvedValue({ id: 'prio-001' }),
+    },
+    sPINSEntry: {
+      create: vi.fn().mockResolvedValue({ id: 'spins-001' }),
+    },
+    commPlan: {
+      create: vi.fn().mockResolvedValue({ id: 'comm-001' }),
+    },
+    airspaceStructure: {
+      create: vi.fn().mockResolvedValue({ id: 'as-001' }),
+    },
+    fireSupportMeasure: {
+      create: vi.fn().mockResolvedValue({ id: 'fsm-001' }),
+    },
+    forceApportionment: {
+      create: vi.fn().mockResolvedValue({ id: 'fa-001' }),
+    },
+    weaponTargetPair: {
+      create: vi.fn().mockResolvedValue({ id: 'wtp-001' }),
+    },
+    coordinationMeasure: {
+      create: vi.fn().mockResolvedValue({ id: 'cm-001' }),
+    },
+    scenarioInject: {
+      create: vi.fn().mockResolvedValue({ id: 'inj-001' }),
     },
     taskingOrder: {
       create: vi.fn().mockResolvedValue({ id: 'order-001', orderId: 'ATO-TEST-001' }),
@@ -826,5 +859,386 @@ describe('Document Ingestion — WebSocket Emissions', () => {
 
     expect(result.success).toBe(true);
     expect(result.hierarchyLevel).toBe('STRATEGY');
+  });
+});
+
+// ─── Classifier Guard Tests ────────────────────────────────────────────────
+
+describe('Document Ingestion — Classifier Guards', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('corrects ACO misclassified as ORDER → PLANNING', async () => {
+    mockClassifyResponse({
+      hierarchyLevel: 'ORDER',
+      documentType: 'ACO',
+      sourceFormat: 'STAFF_DOC',
+      confidence: 0.75,
+      title: 'Airspace Control Order',
+      issuingAuthority: 'JFACC',
+    });
+
+    const result = await classifyDocument('ACO document text');
+
+    // Guard should have corrected ORDER → PLANNING
+    expect(result.hierarchyLevel).toBe('PLANNING');
+    expect(result.documentType).toBe('ACO');
+  });
+
+  it('corrects SPINS misclassified as ORDER → PLANNING', async () => {
+    mockClassifyResponse({
+      hierarchyLevel: 'ORDER',
+      documentType: 'SPINS',
+      sourceFormat: 'STAFF_DOC',
+      confidence: 0.70,
+      title: 'Special Instructions',
+      issuingAuthority: '613 AOC',
+    });
+
+    const result = await classifyDocument('SPINS document text');
+
+    expect(result.hierarchyLevel).toBe('PLANNING');
+    expect(result.documentType).toBe('SPINS');
+  });
+
+  it('corrects OPLAN misclassified as PLANNING → STRATEGY', async () => {
+    mockClassifyResponse({
+      hierarchyLevel: 'PLANNING',
+      documentType: 'OPLAN',
+      sourceFormat: 'MEMORANDUM',
+      confidence: 0.80,
+      title: 'Operations Plan',
+      issuingAuthority: 'USINDOPACOM',
+    });
+
+    const result = await classifyDocument('OPLAN document text');
+
+    expect(result.hierarchyLevel).toBe('STRATEGY');
+    expect(result.documentType).toBe('OPLAN');
+  });
+
+  it('corrects CONPLAN misclassified as ORDER → STRATEGY', async () => {
+    mockClassifyResponse({
+      hierarchyLevel: 'ORDER',
+      documentType: 'CONPLAN',
+      sourceFormat: 'MEMORANDUM',
+      confidence: 0.65,
+      title: 'Contingency Plan',
+      issuingAuthority: 'USINDOPACOM',
+    });
+
+    const result = await classifyDocument('CONPLAN document text');
+
+    expect(result.hierarchyLevel).toBe('STRATEGY');
+    expect(result.documentType).toBe('CONPLAN');
+  });
+
+  it('corrects MSEL misclassified as PLANNING → EVENT_LIST', async () => {
+    mockClassifyResponse({
+      hierarchyLevel: 'PLANNING',
+      documentType: 'MSEL',
+      sourceFormat: 'STAFF_DOC',
+      confidence: 0.72,
+      title: 'Master Scenario Events List',
+      issuingAuthority: 'EXCON',
+    });
+
+    const result = await classifyDocument('MSEL document text');
+
+    expect(result.hierarchyLevel).toBe('EVENT_LIST');
+    expect(result.documentType).toBe('MSEL');
+  });
+
+  it('does not alter correctly classified ACO as PLANNING', async () => {
+    mockClassifyResponse({
+      hierarchyLevel: 'PLANNING',
+      documentType: 'ACO',
+      sourceFormat: 'STAFF_DOC',
+      confidence: 0.85,
+      title: 'ACO',
+      issuingAuthority: 'JFACC',
+    });
+
+    const result = await classifyDocument('ACO document text');
+
+    expect(result.hierarchyLevel).toBe('PLANNING');
+    expect(result.documentType).toBe('ACO');
+  });
+});
+
+// ─── OPLAN/CONPLAN Pipeline Tests ──────────────────────────────────────────
+
+describe('Document Ingestion — OPLAN Pipeline', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('ingests an OPLAN with phases, command tasks, and PACE comms', async () => {
+    // Mock classify as OPLAN
+    mockClassifyResponse({
+      hierarchyLevel: 'STRATEGY',
+      documentType: 'OPLAN',
+      sourceFormat: 'MEMORANDUM',
+      confidence: 0.85,
+      title: 'OPLAN — Pacific Shield',
+      issuingAuthority: 'USINDOPACOM',
+      effectiveDateStr: '2026-03-01T00:00:00Z',
+    });
+
+    // Mock normalize with OPLAN-specific data
+    mockNormalizeResponse({
+      title: 'OPLAN — Pacific Shield',
+      docType: 'OPLAN',
+      authorityLevel: 'COCOM',
+      content: 'Full OPLAN content...',
+      effectiveDate: '2026-03-01T00:00:00Z',
+      commanderIntent: 'Establish multi-domain superiority in the Western Pacific.',
+      mission: 'USINDOPACOM conducts multi-domain operations to deter aggression.',
+      priorities: [
+        { rank: 1, effect: 'Air superiority', description: 'P1', justification: 'Critical' },
+        { rank: 2, effect: 'Maritime control', description: 'P2', justification: 'Essential' },
+      ],
+      phases: [
+        { phaseNumber: 0, phaseName: 'SHAPE', description: 'Shape the environment', keyTasks: ['Posture forces', 'Establish ISR'] },
+        { phaseNumber: 1, phaseName: 'DETER', description: 'Deter adversary', keyTasks: ['Show of force', 'Exercise with allies'] },
+        { phaseNumber: 2, phaseName: 'SEIZE INITIATIVE', description: 'Seize initiative', keyTasks: ['OCA strikes', 'SEAD'] },
+      ],
+      commandTasks: [
+        { commandName: 'PACAF (JFACC)', commandRole: 'JFACC', tasks: ['Establish air superiority', 'Execute OCA'] },
+        { commandName: 'PACFLT (JFMCC)', commandRole: 'JFMCC', tasks: ['Maintain sea control', 'Escort logistics'] },
+      ],
+      paceComms: [
+        { context: 'JTF HQ', primary: 'SIPRNET VTC', alternate: 'SATCOM', contingency: 'HF Radio', emergency: 'Runner' },
+      ],
+    });
+
+    const prisma = (await import('../../db/prisma-client.js')).default;
+    const result = await ingestDocument('scenario-123', 'OPLAN raw text');
+
+    expect(result.success).toBe(true);
+    expect(result.hierarchyLevel).toBe('STRATEGY');
+    expect(result.documentType).toBe('OPLAN');
+    expect(result.extracted.priorityCount).toBe(2);
+    expect(result.extracted.phaseCount).toBe(3);
+    expect(result.extracted.commandTaskCount).toBe(2);
+    expect(result.extracted.paceCommCount).toBe(1);
+
+    // Verify $transaction was used (atomic persistence)
+    expect(prisma.$transaction).toHaveBeenCalled();
+
+    // Verify child records created within transaction
+    expect(prisma.strategyDocument.create).toHaveBeenCalled();
+    expect(prisma.strategyPriority.create).toHaveBeenCalledTimes(2);
+    expect(prisma.oPLANPhase.create).toHaveBeenCalledTimes(3);
+    expect(prisma.commandTask.create).toHaveBeenCalledTimes(2);
+    expect(prisma.pACEComm.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('ingests a CONPLAN through the same OPLAN pipeline', async () => {
+    mockClassifyResponse({
+      hierarchyLevel: 'STRATEGY',
+      documentType: 'CONPLAN',
+      sourceFormat: 'MEMORANDUM',
+      confidence: 0.78,
+      title: 'CONPLAN — Pacific Contingency',
+      issuingAuthority: 'USINDOPACOM',
+      effectiveDateStr: '2026-03-01T00:00:00Z',
+    });
+
+    mockNormalizeResponse({
+      title: 'CONPLAN — Pacific Contingency',
+      docType: 'CONPLAN',
+      authorityLevel: 'COCOM',
+      content: 'CONPLAN content...',
+      effectiveDate: '2026-03-01T00:00:00Z',
+      priorities: [
+        { rank: 1, effect: 'Deterrence', description: 'P1', justification: 'Primary' },
+      ],
+      phases: [
+        { phaseNumber: 0, phaseName: 'PREPARE', description: 'Prepare for contingency', keyTasks: ['Alert forces'] },
+      ],
+      commandTasks: [],
+      paceComms: [],
+    });
+
+    const result = await ingestDocument('scenario-123', 'CONPLAN raw text');
+
+    expect(result.success).toBe(true);
+    expect(result.hierarchyLevel).toBe('STRATEGY');
+    expect(result.documentType).toBe('CONPLAN');
+    expect(result.extracted.phaseCount).toBe(1);
+    expect(result.extracted.commandTaskCount).toBe(0);
+    expect(result.extracted.paceCommCount).toBe(0);
+  });
+});
+
+// ─── Planning Document Sub-Type Pipeline Tests ─────────────────────────────
+
+describe('Document Ingestion — Planning Sub-Types', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('ingests SPINS with procedures and comm plans', async () => {
+    mockClassifyResponse({
+      hierarchyLevel: 'PLANNING',
+      documentType: 'SPINS',
+      sourceFormat: 'STAFF_DOC',
+      confidence: 0.90,
+      title: 'SPINS Version 01',
+      issuingAuthority: '613 AOC',
+      effectiveDateStr: '2026-03-01T00:00:00Z',
+    });
+
+    mockNormalizeResponse({
+      title: 'SPINS Version 01',
+      docType: 'SPINS',
+      content: 'SPINS content...',
+      effectiveDate: '2026-03-01T00:00:00Z',
+      codeWords: [
+        { codeWord: 'BRIGHT STAR', meaning: 'Initiate air defense', category: 'TACTICAL' },
+      ],
+      procedures: [
+        { category: 'ROE', title: 'Weapons Release Authority', description: 'Weapons release authority procedures', applicableTo: ['ALL'] },
+        { category: 'EMCON', title: 'EMCON Procedures', description: 'Emission control procedures', applicableTo: ['AIR'] },
+      ],
+      commNets: [
+        { netName: 'BLUE-7', frequency: '305.6 MHz', band: 'UHF', callsign: 'MAGIC', purpose: 'AWACS Control', applicableTo: ['DCA', 'OCA'] },
+        { netName: 'RED CROWN', frequency: '243.0 MHz', band: 'UHF', callsign: 'RED CROWN', purpose: 'Guard', applicableTo: ['ALL'] },
+      ],
+    });
+
+    const prisma = (await import('../../db/prisma-client.js')).default;
+    const result = await ingestDocument('scenario-123', 'SPINS raw text');
+
+    expect(result.success).toBe(true);
+    expect(result.hierarchyLevel).toBe('PLANNING');
+    expect(result.documentType).toBe('SPINS');
+    expect(result.extracted.procedureCount).toBeGreaterThanOrEqual(2);
+    expect(result.extracted.commPlanCount).toBeGreaterThanOrEqual(2);
+
+    expect(prisma.planningDocument.create).toHaveBeenCalled();
+    expect(prisma.sPINSEntry.create).toHaveBeenCalled();
+    expect(prisma.commPlan.create).toHaveBeenCalled();
+  });
+
+  it('ingests MAAP with force apportionments, WTPs, and coordination measures', async () => {
+    mockClassifyResponse({
+      hierarchyLevel: 'PLANNING',
+      documentType: 'MAAP',
+      sourceFormat: 'STAFF_DOC',
+      confidence: 0.82,
+      title: 'MAAP Cycle 01',
+      issuingAuthority: 'JFACC',
+      effectiveDateStr: '2026-03-01T00:00:00Z',
+    });
+
+    mockNormalizeResponse({
+      title: 'MAAP Cycle 01',
+      docType: 'MAAP',
+      content: 'MAAP content...',
+      effectiveDate: '2026-03-01T00:00:00Z',
+      classification: 'SECRET',
+      targetPriorityList: [
+        { rank: 1, targetName: 'SAM ALPHA', targetCategory: 'AIR_DEFENSE', desiredEffect: 'DESTROY', priority: 'HIGH', justification: 'Critical' },
+      ],
+      forceApportionment: [
+        { missionType: 'OCA', percentAllocation: 30, sorties: 24, rationale: 'IADS suppression' },
+        { missionType: 'DCA', percentAllocation: 20, sorties: 16, rationale: 'Force protection' },
+      ],
+      weaponTargetPairings: [
+        { targetName: 'SAM Site ALPHA', weaponSystem: 'AGM-88 HARM', platform: 'F-16CM', desiredEffect: 'DESTROY', guidanceType: 'RADAR' },
+      ],
+      coordinationMeasures: [
+        { measureType: 'KILLBOX', name: 'KB-01', description: 'Kill box northwest' },
+      ],
+      sortieFlow: [],
+    });
+
+    const prisma = (await import('../../db/prisma-client.js')).default;
+    const result = await ingestDocument('scenario-123', 'MAAP raw text');
+
+    expect(result.success).toBe(true);
+    expect(result.documentType).toBe('MAAP');
+    expect(result.extracted.forceApportionmentCount).toBe(2);
+    expect(result.extracted.weaponTargetPairCount).toBe(1);
+    expect(result.extracted.coordinationMeasureCount).toBe(1);
+
+    expect(prisma.forceApportionment.create).toHaveBeenCalled();
+    expect(prisma.weaponTargetPair.create).toHaveBeenCalled();
+    expect(prisma.coordinationMeasure.create).toHaveBeenCalled();
+  });
+
+  it('ingests ACO with airspace structures and fire support measures', async () => {
+    mockClassifyResponse({
+      hierarchyLevel: 'PLANNING',
+      documentType: 'ACO',
+      sourceFormat: 'STAFF_DOC',
+      confidence: 0.80,
+      title: 'ACO 01-15 MAR 2026',
+      issuingAuthority: 'JFACC',
+      effectiveDateStr: '2026-03-01T00:00:00Z',
+    });
+
+    mockNormalizeResponse({
+      title: 'ACO 01-15 MAR 2026',
+      docType: 'ACO',
+      content: 'ACO content...',
+      effectiveDate: '2026-03-01T00:00:00Z',
+      issuingAuthority: 'JFACC',
+      airspaceControlMeasures: [
+        { measureType: 'ROZ', name: 'ROZ ALPHA', controllingAuthority: 'JFACC', boundaryDescription: 'NW sector', altitudeFloor: 0, altitudeCeiling: 35000, altitudeUnit: 'FT' },
+        { measureType: 'ADIZ', name: 'ADIZ WEST', controllingAuthority: 'JFACC', boundaryDescription: 'Western boundary', altitudeFloor: 0, altitudeCeiling: 99999, altitudeUnit: 'FT' },
+      ],
+      fireSupportMeasures: [
+        { measureType: 'FSCL', name: 'FSCL LINE BRAVO', boundaryDescription: 'NE-SW line', description: 'Fire support coordination line' },
+      ],
+    });
+
+    const prisma = (await import('../../db/prisma-client.js')).default;
+    const result = await ingestDocument('scenario-123', 'ACO raw text');
+
+    expect(result.success).toBe(true);
+    expect(result.documentType).toBe('ACO');
+    expect(result.extracted.airspaceMeasureCount).toBe(2);
+    expect(result.extracted.fireSupportMeasureCount).toBe(1);
+
+    expect(prisma.airspaceStructure.create).toHaveBeenCalled();
+    expect(prisma.fireSupportMeasure.create).toHaveBeenCalled();
+  });
+
+  it('ingests MSEL as EVENT_LIST with injects', async () => {
+    mockClassifyResponse({
+      hierarchyLevel: 'EVENT_LIST',
+      documentType: 'MSEL',
+      sourceFormat: 'STAFF_DOC',
+      confidence: 0.88,
+      title: 'MSEL — Exercise PACIFIC SHIELD',
+      issuingAuthority: 'EXCON',
+      effectiveDateStr: '2026-03-01T00:00:00Z',
+    });
+
+    mockNormalizeResponse({
+      title: 'MSEL — Exercise PACIFIC SHIELD',
+      effectiveDate: '2026-03-01T00:00:00Z',
+      injects: [
+        { title: 'GPS Degradation', injectType: 'SPACE', triggerDay: 1, triggerHour: 6, description: 'GPS accuracy degrades over SCS', severity: 'HIGH' },
+        { title: 'Cyber Attack', injectType: 'CYBER', triggerDay: 2, triggerHour: 14, description: 'Adversary cyber attack on C2 networks', severity: 'CRITICAL' },
+        { title: 'Diplomatic Incident', injectType: 'POLITICAL', triggerDay: 3, triggerHour: 9, description: 'Third party territorial dispute', severity: 'MEDIUM' },
+      ],
+    });
+
+    const prisma = (await import('../../db/prisma-client.js')).default;
+    // MSEL's persistMSEL needs prisma.scenario.findUnique for date parsing
+    prisma.scenario = { findUnique: vi.fn().mockResolvedValue({ startDate: new Date('2026-03-01T00:00:00Z') }) };
+    const result = await ingestDocument('scenario-123', 'MSEL raw text');
+
+    expect(result.success).toBe(true);
+    expect(result.hierarchyLevel).toBe('EVENT_LIST');
+    expect(result.documentType).toBe('MSEL');
+    expect(result.extracted.injectCount).toBe(3);
+
+    expect(prisma.scenarioInject.create).toHaveBeenCalled();
   });
 });
