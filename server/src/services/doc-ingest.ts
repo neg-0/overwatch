@@ -7,9 +7,13 @@ import { broadcastGraphUpdate } from '../websocket/ws-server.js';
 import { buildIngestDelta } from '../api/knowledge-graph.js';
 import {
   CLASSIFY_SCHEMA,
+  NORMALIZE_ACO_SCHEMA,
+  NORMALIZE_JIPTL_SCHEMA,
+  NORMALIZE_MAAP_SCHEMA,
   NORMALIZE_MSEL_SCHEMA,
   NORMALIZE_ORDER_SCHEMA,
   NORMALIZE_PLANNING_SCHEMA,
+  NORMALIZE_SPINS_SCHEMA,
   NORMALIZE_STRATEGY_SCHEMA,
 } from './llm-schemas.js';
 
@@ -80,6 +84,134 @@ export interface NormalizedPlanning {
     latitude?: number | null;
     longitude?: number | null;
   }>;
+}
+
+export interface NormalizedJIPTL extends NormalizedPlanning {
+  priorities: Array<{
+    rank: number;
+    effect: string;
+    description: string;
+    justification: string;
+    targetId?: string;
+    latitude?: number | null;
+    longitude?: number | null;
+    targetSystemCategory?: string | null;
+    cdeLevel?: string | null;
+    noStrike: boolean;
+    timeSensitive: boolean;
+    engagementAuthority?: string | null;
+    weaponeering?: string | null;
+    targetStatus?: string | null;
+  }>;
+}
+
+export interface NormalizedSPINS {
+  title: string;
+  docType: string;
+  content: string;
+  effectiveDate: string;
+  procedures: Array<{
+    category: string;
+    title: string;
+    description: string;
+    conditions?: string | null;
+    authority?: string | null;
+    applicableTo: string[];
+  }>;
+  commPlans: Array<{
+    netName: string;
+    frequency?: string | null;
+    band?: string | null;
+    callsign?: string | null;
+    purpose: string;
+    paceOrder?: string | null;
+    applicableTo: string[];
+  }>;
+  codeWords: Array<{
+    word: string;
+    meaning: string;
+    conditions?: string | null;
+  }>;
+}
+
+export interface NormalizedACO {
+  title: string;
+  docType: string;
+  content: string;
+  effectiveDate: string;
+  issuingAuthority: string;
+  airspaceControlMeasures: Array<{
+    measureType: string;
+    name: string;
+    controllingAuthority?: string | null;
+    boundaryDescription: string;
+    altitudeFloor?: number | null;
+    altitudeCeiling?: number | null;
+    altitudeUnit?: string | null;
+    effectiveStart?: string | null;
+    effectiveEnd?: string | null;
+    activationConditions?: string | null;
+    usageRestrictions?: string | null;
+  }>;
+  fireSupportMeasures: Array<{
+    measureType: string;
+    name: string;
+    description?: string | null;
+    boundaryDescription: string;
+    effectiveStart?: string | null;
+    effectiveEnd?: string | null;
+  }>;
+}
+
+export interface NormalizedMAAP {
+  title: string;
+  docType: string;
+  content: string;
+  effectiveDate: string;
+  classification: string;
+  phase?: string | null;
+  targetPriorityList: Array<{
+    rank: number;
+    targetName: string;
+    targetId?: string | null;
+    targetCategory: string;
+    desiredEffect: string;
+    weaponSystem?: string | null;
+    guidanceType?: string | null;
+    priority: string;
+    justification: string;
+  }>;
+  forceApportionment: Array<{
+    missionType: string;
+    percentAllocation: number;
+    sorties: number;
+    rationale?: string | null;
+  }>;
+  coordinationMeasures: Array<{
+    measureType: string;
+    name: string;
+    description?: string | null;
+    coordinates?: string | null;
+    effectiveStart?: string | null;
+    effectiveEnd?: string | null;
+  }>;
+  weaponTargetPairings: Array<{
+    targetName: string;
+    targetId?: string | null;
+    weaponSystem: string;
+    platform?: string | null;
+    quantity?: number | null;
+    desiredEffect: string;
+    guidanceType?: string | null;
+  }>;
+  sortieFlow: Array<{
+    phase?: string | null;
+    missionType: string;
+    dailySorties: number;
+    platforms?: string | null;
+    notes?: string | null;
+  }>;
+  guidance?: string | null;
 }
 
 export interface NormalizedOrder {
@@ -186,6 +318,14 @@ export interface IngestResult {
     targetCount?: number;
     spaceNeedCount?: number;
     injectCount?: number;
+    procedureCount?: number;
+    commPlanCount?: number;
+    codeWordCount?: number;
+    airspaceMeasureCount?: number;
+    fireSupportMeasureCount?: number;
+    forceApportionmentCount?: number;
+    weaponTargetPairCount?: number;
+    coordinationMeasureCount?: number;
   };
   reviewFlags: ReviewFlag[];
   parseTimeMs: number;
@@ -334,6 +474,109 @@ CRITICAL EXTRACTION RULES:
   - If coordinates say "Fictional" or similar, still convert the numeric values
   - If no coordinates present, set latitude/longitude to null
 - Preserve the "targetId" (BE number) exactly as written — this links to ATO mission targets downstream
+
+Return ONLY valid JSON.
+
+DOCUMENT:
+`;
+
+const JIPTL_NORMALIZE_PROMPT = `You are a military targeting officer extracting structured data from a Joint Integrated Prioritized Target List (JIPTL).
+
+Extract EVERY target entry into the priorities array. Each numbered target, BE number, or target set should be a separate entry.
+
+For each target, extract:
+- rank: Priority number within the JIPTL
+- effect: Desired effect (DESTROY, DEGRADE, DENY, PROTECT, SUSTAIN, DISRUPT, NEUTRALIZE)
+- description: Target name and target set description
+- justification: Why this target is prioritized, including strategic traceability
+- targetId: BE number exactly as written (e.g., "BE-0042", "0001-0001")
+- Coordinates: Convert to decimal degrees from DMS, MGRS, or decimal format
+- targetSystemCategory: C2, IADS, LOC, WMD, NAVAL, AIRFIELD, POL, ELEC, BRIDGE, etc.
+- cdeLevel: CDE_1 through CDE_5 if mentioned, null if not
+- noStrike: true if marked as no-strike or restricted target
+- timeSensitive: true if marked as TST (Time-Sensitive Target) or requiring immediate prosecution
+- engagementAuthority: Who can authorize (JFACC, CCDR, SECDEF, etc.)
+- weaponeering: Recommended weapon/quantity (e.g., "2x GBU-31 JDAM")
+- targetStatus: NOMINATED, VALIDATED, APPROVED, STRUCK, RESTRIKE, BDA_PENDING
+
+If a field is not mentioned in the document, set it to null (or false for boolean fields).
+
+Return ONLY valid JSON.
+
+DOCUMENT:
+`;
+
+const SPINS_NORMALIZE_PROMPT = `You are a military staff officer extracting structured data from a Special Instructions (SPINS) document.
+
+SPINS contain operational procedures, rules of engagement, communications plans, and coordination instructions. Extract ALL of the following:
+
+PROCEDURES — Extract every distinct procedure, rule, or instruction into the procedures array:
+- ROE: Rules of engagement, weapons release authorities, engagement criteria
+- EMCON: Emission control conditions (ALPHA=full silence, BRAVO=radar only, etc.)
+- WEAPONS_RELEASE: Specific weapons release authorities by target type or CDE level
+- TANKER: Refueling procedures, tracks, altitudes, contact frequencies, offload
+- CSAR: Combat Search and Rescue procedures, authentication, recovery methods
+- IFF: Identification Friend or Foe procedures, modes, codes, challenge/response
+- DURESS: Duress words, abort procedures, emergency codes
+- GENERAL: Any other operational procedure not in the above categories
+
+COMM PLANS — Extract every communication net, frequency, or channel:
+- netName: Net or channel name
+- frequency: Frequency with unit (e.g., "243.0 MHz")
+- band: UHF, VHF, HF, SATCOM, SATCOM_PROTECTED, SATCOM_WIDEBAND, SATCOM_TACTICAL
+- callsign: Controlling agency callsign
+- purpose: What this net is used for
+- paceOrder: PRIMARY, ALTERNATE, CONTINGENCY, or EMERGENCY (if PACE plan is given)
+- applicableTo: Which mission types use this net
+
+CODE WORDS — Extract code words, brevity codes, and their meanings.
+
+Return ONLY valid JSON.
+
+DOCUMENT:
+`;
+
+const ACO_NORMALIZE_PROMPT = `You are a military airspace control officer extracting structured data from an Airspace Control Order (ACO).
+
+Extract EVERY airspace control measure and fire support coordination measure.
+
+AIRSPACE CONTROL MEASURES — For each measure:
+- measureType: ROZ (Restricted Operations Zone), ART (Air Refueling Track), CAP (Combat Air Patrol), CORRIDOR, KILLBOX, HIDACZ (High Density Airspace Control Zone), MRR (Minimum Risk Route), ADIZ, WFZ (Weapons Free Zone), SAAFR (Standard Army Aircraft Flight Route), FSCL (Fire Support Coordination Line)
+- name: Designator (e.g., "ROZ ALPHA", "AR-205 BLUE", "KILLBOX 1A")
+- controllingAuthority: Who controls this airspace
+- boundaryDescription: Full text description of boundaries, coordinates, center/radius — preserve exactly as written for downstream coordinate parsing
+- altitudeFloor/altitudeCeiling: In feet (convert flight levels: FL250 = 25000 ft)
+- altitudeUnit: FT or FL
+- effectiveStart/effectiveEnd: ISO 8601 times if specified
+- activationConditions: Under what conditions this airspace is active
+- usageRestrictions: Who/what may enter, prohibited activities
+
+FIRE SUPPORT COORDINATION MEASURES — For each:
+- measureType: FSCL, CFL (Coordinated Fire Line), NFL (No-Fire Line), RFL (Restrictive Fire Line)
+- name, description, boundaryDescription (preserve coordinate text), effective times
+
+Return ONLY valid JSON.
+
+DOCUMENT:
+`;
+
+const MAAP_NORMALIZE_PROMPT = `You are a military air operations planner extracting structured data from a Master Air Attack Plan (MAAP).
+
+Extract ALL of the following categories:
+
+TARGET PRIORITY LIST — Each target with rank, name, category, desired effect, recommended weapon system, guidance type (GPS/LASER/INS/COMBO), urgency (IMMEDIATE/PRIORITY/ROUTINE), and justification.
+
+FORCE APPORTIONMENT — How sorties are allocated by mission type: mission type, percent allocation, sortie count, rationale.
+
+COORDINATION MEASURES — FSCL, killboxes, ROZ, ADIZ, CAS battle positions, tanker tracks, AWACS orbits — with coordinates if present and effective times.
+
+WEAPON-TARGET PAIRINGS — Specific weapon-to-target assignments: target name/ID, weapon system, platform, quantity, desired effect, guidance type (GPS/LASER/INS/COMBO — this determines space dependency).
+
+SORTIE FLOW — Daily or phase-based sortie plan: phase, mission type, daily sorties, platforms, notes.
+
+GUIDANCE — Commander's intent or JFACC guidance text.
+
+For guidance type: GPS means the weapon requires GPS satellite signal (space dependency). LASER means no space dependency. INS is inertial only (no space dependency). COMBO means GPS+another guidance mode.
 
 Return ONLY valid JSON.
 
@@ -501,26 +744,42 @@ Return ONLY valid JSON.
 DOCUMENT:
 `;
 
+type NormalizedData = NormalizedStrategy | NormalizedPlanning | NormalizedJIPTL | NormalizedSPINS | NormalizedACO | NormalizedMAAP | NormalizedOrder | NormalizedMSEL;
+
+function getPromptAndSchema(classification: ClassifyResult): { prompt: string; schema: any } {
+  switch (classification.hierarchyLevel) {
+    case 'STRATEGY':
+      return { prompt: STRATEGY_NORMALIZE_PROMPT, schema: NORMALIZE_STRATEGY_SCHEMA };
+    case 'PLANNING':
+      // Dispatch by document type for type-specific extraction
+      switch (classification.documentType) {
+        case 'JIPTL':
+        case 'JPEL':
+          return { prompt: JIPTL_NORMALIZE_PROMPT, schema: NORMALIZE_JIPTL_SCHEMA };
+        case 'SPINS':
+          return { prompt: SPINS_NORMALIZE_PROMPT, schema: NORMALIZE_SPINS_SCHEMA };
+        case 'ACO':
+          return { prompt: ACO_NORMALIZE_PROMPT, schema: NORMALIZE_ACO_SCHEMA };
+        case 'MAAP':
+          return { prompt: MAAP_NORMALIZE_PROMPT, schema: NORMALIZE_MAAP_SCHEMA };
+        default:
+          // COMPONENT_PRIORITY and other planning docs use the generic schema
+          return { prompt: PLANNING_NORMALIZE_PROMPT, schema: NORMALIZE_PLANNING_SCHEMA };
+      }
+    case 'ORDER':
+      return { prompt: ORDER_NORMALIZE_PROMPT, schema: NORMALIZE_ORDER_SCHEMA };
+    case 'EVENT_LIST':
+      return { prompt: MSEL_NORMALIZE_PROMPT, schema: NORMALIZE_MSEL_SCHEMA };
+    default:
+      return { prompt: PLANNING_NORMALIZE_PROMPT, schema: NORMALIZE_PLANNING_SCHEMA };
+  }
+}
+
 export async function normalizeDocument(
   rawText: string,
   classification: ClassifyResult,
-): Promise<{ data: NormalizedStrategy | NormalizedPlanning | NormalizedOrder | NormalizedMSEL; reviewFlags: ReviewFlag[] }> {
-  let prompt: string;
-
-  switch (classification.hierarchyLevel) {
-    case 'STRATEGY':
-      prompt = STRATEGY_NORMALIZE_PROMPT;
-      break;
-    case 'PLANNING':
-      prompt = PLANNING_NORMALIZE_PROMPT;
-      break;
-    case 'ORDER':
-      prompt = ORDER_NORMALIZE_PROMPT;
-      break;
-    case 'EVENT_LIST':
-      prompt = MSEL_NORMALIZE_PROMPT;
-      break;
-  }
+): Promise<{ data: NormalizedData; reviewFlags: ReviewFlag[] }> {
+  const { prompt, schema } = getPromptAndSchema(classification);
 
   const response = await openai.chat.completions.create({
     model: getModel('midRange'),
@@ -529,13 +788,7 @@ export async function normalizeDocument(
     max_completion_tokens: 16000,
     response_format: {
       type: 'json_schema' as const,
-      json_schema: classification.hierarchyLevel === 'STRATEGY'
-        ? NORMALIZE_STRATEGY_SCHEMA
-        : classification.hierarchyLevel === 'PLANNING'
-          ? NORMALIZE_PLANNING_SCHEMA
-          : classification.hierarchyLevel === 'ORDER'
-            ? NORMALIZE_ORDER_SCHEMA
-            : NORMALIZE_MSEL_SCHEMA,
+      json_schema: schema,
     },
   });
 
@@ -747,6 +1000,345 @@ async function persistPlanning(
     createdId: created.id,
     parentLinkId: strategyDocId || undefined,
     matchedPriorities: (data.priorities || []).map(p => p.rank),
+  };
+}
+
+// ─── JIPTL Persist (enhanced planning with space-critical fields) ───────────
+
+async function persistJIPTL(
+  scenarioId: string,
+  data: NormalizedJIPTL,
+  rawText: string,
+  classification: ClassifyResult,
+): Promise<{ createdId: string; parentLinkId?: string; matchedPriorities: number[]; extracted: IngestResult['extracted'] }> {
+  const effectiveDate = parseSafeDate(data.effectiveDate || classification.effectiveDateStr);
+  const strategyDocId = await findParentStrategyDoc(scenarioId, classification);
+
+  const created = await prisma.planningDocument.create({
+    data: {
+      scenarioId,
+      strategyDocId,
+      title: data.title || classification.title,
+      docType: data.docType || 'JIPTL',
+      content: data.content || rawText,
+      docTier: 3, // JIPTL tier
+      effectiveDate,
+      sourceFormat: classification.sourceFormat,
+      confidence: classification.confidence,
+      ingestedAt: new Date(),
+    },
+  });
+
+  // Fetch strategy priorities for traceability matching
+  let strategyPriorities: { id: string; rank: number; objective: string; description: string; effect: string | null }[] = [];
+  if (strategyDocId) {
+    strategyPriorities = await prisma.strategyPriority.findMany({
+      where: { strategyDocId },
+      select: { id: true, rank: true, objective: true, description: true, effect: true },
+      orderBy: { rank: 'asc' },
+    });
+  }
+
+  for (const p of data.priorities || []) {
+    // Reuse the same multi-signal traceability matching from persistPlanning
+    let bestMatchId: string | null = null;
+    if (strategyPriorities.length > 0) {
+      const planText = `${p.effect} ${p.description} ${p.justification}`.toLowerCase();
+      let bestScore = 0;
+      for (const sp of strategyPriorities) {
+        let score = 0;
+        const spText = `${sp.objective} ${sp.description}`.toLowerCase();
+        const doctrinalEffects = ['deny', 'destroy', 'degrade', 'disrupt', 'protect', 'sustain', 'neutralize'];
+        const planEffects = doctrinalEffects.filter(e => planText.includes(e));
+        const spEffects = sp.effect ? [sp.effect.toLowerCase()] : doctrinalEffects.filter(e => spText.includes(e));
+        const effectOverlap = planEffects.filter(e => spEffects.includes(e)).length;
+        if (effectOverlap > 0) score += 0.4 * (effectOverlap / Math.max(spEffects.length, 1));
+        const militaryKeywords = spText.split(/\s+/).filter(w => w.length > 4)
+          .filter(w => !['which', 'their', 'these', 'those', 'under', 'through', 'within', 'being', 'would', 'could', 'should'].includes(w));
+        const keywordMatches = militaryKeywords.filter(w => planText.includes(w)).length;
+        const keywordScore = militaryKeywords.length > 0 ? keywordMatches / militaryKeywords.length : 0;
+        score += 0.4 * keywordScore;
+        const rankPatterns = [
+          new RegExp(`priority\\s*${sp.rank}\\b`, 'i'),
+          new RegExp(`p${sp.rank}\\b`, 'i'),
+          new RegExp(`\\(${sp.rank}\\)`, 'i'),
+        ];
+        if (rankPatterns.some(re => re.test(p.justification || '') || re.test(p.description || ''))) {
+          score += 0.2;
+        }
+        if (score > bestScore && score > 0.12) {
+          bestScore = score;
+          bestMatchId = sp.id;
+        }
+      }
+    }
+
+    await prisma.priorityEntry.create({
+      data: {
+        planningDocId: created.id,
+        rank: p.rank,
+        targetId: p.targetId || null,
+        effect: p.effect,
+        description: p.description,
+        justification: p.justification,
+        latitude: p.latitude ?? null,
+        longitude: p.longitude ?? null,
+        targetSystemCategory: p.targetSystemCategory || null,
+        cdeLevel: p.cdeLevel || null,
+        noStrike: p.noStrike ?? false,
+        timeSensitive: p.timeSensitive ?? false,
+        engagementAuthority: p.engagementAuthority || null,
+        weaponeering: p.weaponeering || null,
+        targetStatus: p.targetStatus || null,
+        strategyPriorityId: bestMatchId,
+      },
+    });
+  }
+
+  console.log(`  [INGEST] JIPTL created: ${created.title} with ${data.priorities?.length || 0} enhanced targets`);
+  return {
+    createdId: created.id,
+    parentLinkId: strategyDocId || undefined,
+    matchedPriorities: (data.priorities || []).map(p => p.rank),
+    extracted: { priorityCount: data.priorities?.length || 0 },
+  };
+}
+
+// ─── SPINS Persist ──────────────────────────────────────────────────────────
+
+async function persistSPINS(
+  scenarioId: string,
+  data: NormalizedSPINS,
+  rawText: string,
+  classification: ClassifyResult,
+): Promise<{ createdId: string; parentLinkId?: string; extracted: IngestResult['extracted'] }> {
+  const effectiveDate = parseSafeDate(data.effectiveDate || classification.effectiveDateStr);
+  const strategyDocId = await findParentStrategyDoc(scenarioId, classification);
+
+  const created = await prisma.planningDocument.create({
+    data: {
+      scenarioId,
+      strategyDocId,
+      title: data.title || classification.title,
+      docType: 'SPINS',
+      content: data.content || rawText,
+      docTier: 5, // SPINS tier
+      effectiveDate,
+      sourceFormat: classification.sourceFormat,
+      confidence: classification.confidence,
+      ingestedAt: new Date(),
+    },
+  });
+
+  // Persist procedures (ROE, EMCON, etc.)
+  for (const proc of data.procedures || []) {
+    await prisma.sPINSEntry.create({
+      data: {
+        planningDocId: created.id,
+        category: proc.category,
+        title: proc.title,
+        description: proc.description,
+        conditions: proc.conditions || null,
+        authority: proc.authority || null,
+        applicableTo: proc.applicableTo || [],
+      },
+    });
+  }
+
+  // Persist comm plans
+  for (const comm of data.commPlans || []) {
+    await prisma.commPlan.create({
+      data: {
+        planningDocId: created.id,
+        netName: comm.netName,
+        frequency: comm.frequency || null,
+        band: comm.band || null,
+        callsign: comm.callsign || null,
+        purpose: comm.purpose,
+        paceOrder: comm.paceOrder || null,
+        applicableTo: comm.applicableTo || [],
+      },
+    });
+  }
+
+  console.log(`  [INGEST] SPINS created: ${created.title} — ${data.procedures?.length || 0} procedures, ${data.commPlans?.length || 0} comm plans, ${data.codeWords?.length || 0} code words`);
+  return {
+    createdId: created.id,
+    parentLinkId: strategyDocId || undefined,
+    extracted: {
+      procedureCount: data.procedures?.length || 0,
+      commPlanCount: data.commPlans?.length || 0,
+      codeWordCount: data.codeWords?.length || 0,
+    },
+  };
+}
+
+// ─── ACO Persist ────────────────────────────────────────────────────────────
+
+async function persistACO(
+  scenarioId: string,
+  data: NormalizedACO,
+  rawText: string,
+  classification: ClassifyResult,
+): Promise<{ createdId: string; parentLinkId?: string; extracted: IngestResult['extracted'] }> {
+  const effectiveDate = parseSafeDate(data.effectiveDate || classification.effectiveDateStr);
+  const strategyDocId = await findParentStrategyDoc(scenarioId, classification);
+
+  const created = await prisma.planningDocument.create({
+    data: {
+      scenarioId,
+      strategyDocId,
+      title: data.title || classification.title,
+      docType: 'ACO',
+      content: data.content || rawText,
+      docTier: 5, // ACO tier
+      effectiveDate,
+      sourceFormat: classification.sourceFormat,
+      confidence: classification.confidence,
+      ingestedAt: new Date(),
+    },
+  });
+
+  // Persist airspace control measures into AirspaceStructure model
+  for (const acm of data.airspaceControlMeasures || []) {
+    await prisma.airspaceStructure.create({
+      data: {
+        scenarioId,
+        structureType: acm.measureType,
+        name: acm.name,
+        coordinatesJson: [], // Will be populated by aco-parser.ts from boundaryDescription
+        altitudeLow: acm.altitudeFloor ?? null,
+        altitudeHigh: acm.altitudeCeiling ?? null,
+        altitudeUnit: acm.altitudeUnit || null,
+        effectiveStart: acm.effectiveStart ? parseSafeDate(acm.effectiveStart) : null,
+        effectiveEnd: acm.effectiveEnd ? parseSafeDate(acm.effectiveEnd) : null,
+        sourceDocId: created.id,
+        controllingAuthority: acm.controllingAuthority || null,
+        activationConditions: acm.activationConditions || null,
+        usageRestrictions: acm.usageRestrictions || null,
+      },
+    });
+  }
+
+  // Persist fire support coordination measures
+  for (const fsm of data.fireSupportMeasures || []) {
+    await prisma.fireSupportMeasure.create({
+      data: {
+        planningDocId: created.id,
+        measureType: fsm.measureType,
+        name: fsm.name,
+        description: fsm.description || null,
+        effectiveStart: fsm.effectiveStart ? parseSafeDate(fsm.effectiveStart) : null,
+        effectiveEnd: fsm.effectiveEnd ? parseSafeDate(fsm.effectiveEnd) : null,
+      },
+    });
+  }
+
+  console.log(`  [INGEST] ACO created: ${created.title} — ${data.airspaceControlMeasures?.length || 0} airspace measures, ${data.fireSupportMeasures?.length || 0} fire support measures`);
+  return {
+    createdId: created.id,
+    parentLinkId: strategyDocId || undefined,
+    extracted: {
+      airspaceMeasureCount: data.airspaceControlMeasures?.length || 0,
+      fireSupportMeasureCount: data.fireSupportMeasures?.length || 0,
+    },
+  };
+}
+
+// ─── MAAP Persist ───────────────────────────────────���───────────────────────
+
+async function persistMAAP(
+  scenarioId: string,
+  data: NormalizedMAAP,
+  rawText: string,
+  classification: ClassifyResult,
+): Promise<{ createdId: string; parentLinkId?: string; matchedPriorities: number[]; extracted: IngestResult['extracted'] }> {
+  const effectiveDate = parseSafeDate(data.effectiveDate || classification.effectiveDateStr);
+  const strategyDocId = await findParentStrategyDoc(scenarioId, classification);
+
+  const created = await prisma.planningDocument.create({
+    data: {
+      scenarioId,
+      strategyDocId,
+      title: data.title || classification.title,
+      docType: 'MAAP',
+      content: data.content || rawText,
+      docTier: 4, // MAAP tier
+      effectiveDate,
+      sourceFormat: classification.sourceFormat,
+      confidence: classification.confidence,
+      ingestedAt: new Date(),
+    },
+  });
+
+  // Persist target priority list as PriorityEntry records (maintains traceability chain)
+  for (const t of data.targetPriorityList || []) {
+    await prisma.priorityEntry.create({
+      data: {
+        planningDocId: created.id,
+        rank: t.rank,
+        targetId: t.targetId || null,
+        effect: t.desiredEffect,
+        description: `${t.targetName} (${t.targetCategory})`,
+        justification: t.justification,
+      },
+    });
+  }
+
+  // Persist force apportionment
+  for (const fa of data.forceApportionment || []) {
+    await prisma.forceApportionment.create({
+      data: {
+        planningDocId: created.id,
+        missionType: fa.missionType,
+        percentAllocation: fa.percentAllocation,
+        sorties: fa.sorties,
+        rationale: fa.rationale || null,
+      },
+    });
+  }
+
+  // Persist weapon-target pairings
+  for (const wtp of data.weaponTargetPairings || []) {
+    await prisma.weaponTargetPair.create({
+      data: {
+        planningDocId: created.id,
+        targetName: wtp.targetName,
+        targetId: wtp.targetId || null,
+        weaponSystem: wtp.weaponSystem,
+        platform: wtp.platform || null,
+        quantity: wtp.quantity ?? null,
+        desiredEffect: wtp.desiredEffect,
+        guidanceType: wtp.guidanceType || null,
+      },
+    });
+  }
+
+  // Persist coordination measures
+  for (const cm of data.coordinationMeasures || []) {
+    await prisma.coordinationMeasure.create({
+      data: {
+        planningDocId: created.id,
+        measureType: cm.measureType,
+        name: cm.name,
+        description: cm.description || null,
+        effectiveStart: cm.effectiveStart ? parseSafeDate(cm.effectiveStart) : null,
+        effectiveEnd: cm.effectiveEnd ? parseSafeDate(cm.effectiveEnd) : null,
+      },
+    });
+  }
+
+  console.log(`  [INGEST] MAAP created: ${created.title} — ${data.targetPriorityList?.length || 0} targets, ${data.forceApportionment?.length || 0} apportionments, ${data.weaponTargetPairings?.length || 0} W-T pairs, ${data.coordinationMeasures?.length || 0} coord measures`);
+  return {
+    createdId: created.id,
+    parentLinkId: strategyDocId || undefined,
+    matchedPriorities: (data.targetPriorityList || []).map(t => t.rank),
+    extracted: {
+      priorityCount: data.targetPriorityList?.length || 0,
+      forceApportionmentCount: data.forceApportionment?.length || 0,
+      weaponTargetPairCount: data.weaponTargetPairings?.length || 0,
+      coordinationMeasureCount: data.coordinationMeasures?.length || 0,
+    },
   };
 }
 
@@ -1156,6 +1748,21 @@ export async function ingestDocument(
     } else if (classification.hierarchyLevel === 'EVENT_LIST') {
       const mselData = normalized as NormalizedMSEL;
       previewCounts.injects = mselData.injects?.length || 0;
+    } else if (classification.documentType === 'SPINS') {
+      const spinsData = normalized as NormalizedSPINS;
+      previewCounts.procedures = spinsData.procedures?.length || 0;
+      previewCounts.commPlans = spinsData.commPlans?.length || 0;
+      previewCounts.codeWords = spinsData.codeWords?.length || 0;
+    } else if (classification.documentType === 'ACO') {
+      const acoData = normalized as NormalizedACO;
+      previewCounts.airspaceMeasures = acoData.airspaceControlMeasures?.length || 0;
+      previewCounts.fireSupportMeasures = acoData.fireSupportMeasures?.length || 0;
+    } else if (classification.documentType === 'MAAP') {
+      const maapData = normalized as NormalizedMAAP;
+      previewCounts.targets = maapData.targetPriorityList?.length || 0;
+      previewCounts.forceApportionment = maapData.forceApportionment?.length || 0;
+      previewCounts.weaponTargetPairings = maapData.weaponTargetPairings?.length || 0;
+      previewCounts.coordinationMeasures = maapData.coordinationMeasures?.length || 0;
     } else {
       const planData = normalized as NormalizedPlanning;
       previewCounts.priorities = planData.priorities?.length || 0;
@@ -1188,13 +1795,50 @@ export async function ingestDocument(
         break;
       }
       case 'PLANNING': {
-        const result = await persistPlanning(scenarioId, normalized as NormalizedPlanning, rawText, classification);
-        createdId = result.createdId;
-        parentLinkId = result.parentLinkId;
-        matchedPriorities = result.matchedPriorities;
-
-        const planData = normalized as NormalizedPlanning;
-        extracted.priorityCount = planData.priorities?.length || 0;
+        // Dispatch to type-specific persisters
+        switch (classification.documentType) {
+          case 'JIPTL':
+          case 'JPEL': {
+            const result = await persistJIPTL(scenarioId, normalized as NormalizedJIPTL, rawText, classification);
+            createdId = result.createdId;
+            parentLinkId = result.parentLinkId;
+            matchedPriorities = result.matchedPriorities;
+            extracted = result.extracted;
+            break;
+          }
+          case 'SPINS': {
+            const result = await persistSPINS(scenarioId, normalized as NormalizedSPINS, rawText, classification);
+            createdId = result.createdId;
+            parentLinkId = result.parentLinkId;
+            extracted = result.extracted;
+            break;
+          }
+          case 'ACO': {
+            const result = await persistACO(scenarioId, normalized as NormalizedACO, rawText, classification);
+            createdId = result.createdId;
+            parentLinkId = result.parentLinkId;
+            extracted = result.extracted;
+            break;
+          }
+          case 'MAAP': {
+            const result = await persistMAAP(scenarioId, normalized as NormalizedMAAP, rawText, classification);
+            createdId = result.createdId;
+            parentLinkId = result.parentLinkId;
+            matchedPriorities = result.matchedPriorities;
+            extracted = result.extracted;
+            break;
+          }
+          default: {
+            // Generic planning persist (COMPONENT_PRIORITY, etc.)
+            const result = await persistPlanning(scenarioId, normalized as NormalizedPlanning, rawText, classification);
+            createdId = result.createdId;
+            parentLinkId = result.parentLinkId;
+            matchedPriorities = result.matchedPriorities;
+            const planData = normalized as NormalizedPlanning;
+            extracted.priorityCount = planData.priorities?.length || 0;
+            break;
+          }
+        }
         break;
       }
       case 'ORDER': {

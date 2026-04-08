@@ -14,7 +14,12 @@ export type GraphNodeType =
   | 'MISSION'
   | 'ASSET'
   | 'PACKAGE'
-  | 'ALLOCATION';
+  | 'ALLOCATION'
+  | 'AIRSPACE_MEASURE'
+  | 'PROCEDURE'
+  | 'COMM_NET'
+  | 'COORDINATION_MEASURE'
+  | 'RESTRICTION';
 
 export interface GraphNode {
   id: string;
@@ -161,6 +166,134 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
       // Trace to strategy priority
       if (p.strategyPriorityId) {
         addEdge({ source: p.strategyPriorityId, target: p.id, relationship: 'DERIVES_FROM' });
+      }
+    }
+  }
+
+  // ─── SPINS Entries (Procedures, ROE, EMCON) ──────────────────────────────────
+
+  const spinsEntries = await prisma.sPINSEntry.findMany({
+    where: { planningDoc: { scenarioId } },
+    include: { planningDoc: { select: { id: true } } },
+    take: 200,
+  });
+
+  for (const entry of spinsEntries) {
+    const isRestriction = ['ROE', 'WEAPONS_RELEASE', 'EMCON'].includes(entry.category);
+    addNode({
+      id: entry.id,
+      type: isRestriction ? 'RESTRICTION' : 'PROCEDURE',
+      label: entry.title,
+      sublabel: entry.category,
+      meta: { category: entry.category, authority: entry.authority, applicableTo: entry.applicableTo },
+    });
+    addEdge({ source: entry.planningDoc.id, target: entry.id, relationship: 'DEFINES' });
+  }
+
+  // ─── Comm Plans (PACE networks) ────────────────────────────────────────────
+
+  const commPlans = await prisma.commPlan.findMany({
+    where: { planningDoc: { scenarioId } },
+    include: { planningDoc: { select: { id: true } } },
+    take: 200,
+  });
+
+  for (const comm of commPlans) {
+    addNode({
+      id: comm.id,
+      type: 'COMM_NET',
+      label: comm.netName,
+      sublabel: comm.paceOrder ? `${comm.paceOrder} — ${comm.band || comm.frequency || ''}` : (comm.band || comm.frequency || comm.purpose),
+      meta: { band: comm.band, frequency: comm.frequency, paceOrder: comm.paceOrder, purpose: comm.purpose, applicableTo: comm.applicableTo },
+    });
+    addEdge({ source: comm.planningDoc.id, target: comm.id, relationship: 'DEFINES' });
+  }
+
+  // ─── Airspace Structures (ACO measures) ────────────────────────────────────
+
+  const airspaceStructures = await prisma.airspaceStructure.findMany({
+    where: { scenarioId },
+    take: 200,
+  });
+
+  for (const as_ of airspaceStructures) {
+    addNode({
+      id: as_.id,
+      type: 'AIRSPACE_MEASURE',
+      label: as_.name,
+      sublabel: as_.structureType,
+      meta: {
+        altitudeLow: as_.altitudeLow,
+        altitudeHigh: as_.altitudeHigh,
+        controllingAuthority: as_.controllingAuthority,
+        effectiveStart: as_.effectiveStart?.toISOString(),
+        effectiveEnd: as_.effectiveEnd?.toISOString(),
+      },
+    });
+    if (as_.sourceDocId) {
+      addEdge({ source: as_.sourceDocId, target: as_.id, relationship: 'DEFINES' });
+    }
+  }
+
+  // ─── Coordination Measures (MAAP) ──────────────────────────────────────────
+
+  const coordMeasures = await prisma.coordinationMeasure.findMany({
+    where: { planningDoc: { scenarioId } },
+    include: { planningDoc: { select: { id: true } } },
+    take: 200,
+  });
+
+  for (const cm of coordMeasures) {
+    addNode({
+      id: cm.id,
+      type: 'COORDINATION_MEASURE',
+      label: cm.name,
+      sublabel: cm.measureType,
+      meta: {
+        effectiveStart: cm.effectiveStart?.toISOString(),
+        effectiveEnd: cm.effectiveEnd?.toISOString(),
+      },
+    });
+    addEdge({ source: cm.planningDoc.id, target: cm.id, relationship: 'DEFINES' });
+  }
+
+  // ─── Cross-link: Missions ↔ Procedures/Airspace/CommNets ───────────────────
+  // Connect missions to the SPINS procedures, comm nets, and airspace measures
+  // that govern them, based on mission type matching
+
+  const allMissionNodes = nodes.filter(n => n.type === 'MISSION');
+  for (const missionNode of allMissionNodes) {
+    const missionType = (missionNode.meta?.missionType as string) || (missionNode.sublabel?.split(' ')[0]) || '';
+
+    // Mission → Procedure/Restriction (GOVERNED_BY / RESTRICTED_BY)
+    for (const entry of spinsEntries) {
+      if (entry.applicableTo.includes('ALL') || entry.applicableTo.some(t => missionType.toUpperCase().includes(t.toUpperCase()))) {
+        const isRestriction = ['ROE', 'WEAPONS_RELEASE', 'EMCON'].includes(entry.category);
+        addEdge({
+          source: missionNode.id,
+          target: entry.id,
+          relationship: isRestriction ? 'RESTRICTED_BY' : 'GOVERNED_BY',
+        });
+      }
+    }
+
+    // Mission → Comm Net (COMMUNICATES_ON)
+    for (const comm of commPlans) {
+      if (comm.applicableTo.includes('ALL') || comm.applicableTo.some(t => missionType.toUpperCase().includes(t.toUpperCase()))) {
+        addEdge({ source: missionNode.id, target: comm.id, relationship: 'COMMUNICATES_ON' });
+      }
+    }
+  }
+
+  // ─── Cross-link: Units → Airspace (CONTROLS) ──────────────────────────────
+  // Link controlling authorities to their airspace measures
+  for (const as_ of airspaceStructures) {
+    if (!as_.controllingAuthority) continue;
+    const controlAuth = as_.controllingAuthority.toUpperCase();
+    for (const unitNode of nodes.filter(n => n.type === 'UNIT')) {
+      if (unitNode.label.toUpperCase().includes(controlAuth) ||
+          controlAuth.includes(unitNode.label.toUpperCase().split(' ')[0])) {
+        addEdge({ source: unitNode.id, target: as_.id, relationship: 'CONTROLS' });
       }
     }
   }
@@ -488,7 +621,12 @@ export async function buildIngestDelta(
     case 'PLANNING': {
       const doc = await prisma.planningDocument.findUnique({
         where: { id: createdId },
-        include: { priorities: { include: { strategyPriority: true } } },
+        include: {
+          priorities: { include: { strategyPriority: true } },
+          spinsEntries: true,
+          commPlans: true,
+          coordinationMeasures: true,
+        },
       });
       if (!doc) break;
 
@@ -504,13 +642,14 @@ export async function buildIngestDelta(
         edges.push({ source: doc.strategyDocId, target: doc.id, relationship: 'DIRECTS' });
       }
 
+      // Priority nodes (JIPTL, JPEL, MAAP targets, generic planning)
       for (const p of doc.priorities) {
         nodes.push({
           id: p.id,
           type: 'PRIORITY',
           label: p.effect,
           sublabel: `Rank ${p.rank}`,
-          meta: { targetId: p.targetId },
+          meta: { targetId: p.targetId, timeSensitive: p.timeSensitive, cdeLevel: p.cdeLevel },
         });
         edges.push({ source: doc.id, target: p.id, relationship: 'ESTABLISHES_PRIORITY', weight: 11 - p.rank });
 
@@ -518,6 +657,61 @@ export async function buildIngestDelta(
           edges.push({ source: p.strategyPriorityId, target: p.id, relationship: 'DERIVES_FROM' });
         }
       }
+
+      // SPINS entries → PROCEDURE / RESTRICTION nodes
+      for (const entry of doc.spinsEntries) {
+        const isRestriction = ['ROE', 'WEAPONS_RELEASE', 'EMCON'].includes(entry.category);
+        nodes.push({
+          id: entry.id,
+          type: isRestriction ? 'RESTRICTION' : 'PROCEDURE',
+          label: entry.title,
+          sublabel: entry.category,
+          meta: { category: entry.category, authority: entry.authority, applicableTo: entry.applicableTo },
+        });
+        edges.push({ source: doc.id, target: entry.id, relationship: 'DEFINES' });
+      }
+
+      // Comm plans → COMM_NET nodes
+      for (const comm of doc.commPlans) {
+        nodes.push({
+          id: comm.id,
+          type: 'COMM_NET',
+          label: comm.netName,
+          sublabel: comm.paceOrder ? `${comm.paceOrder} — ${comm.band || ''}` : (comm.band || comm.purpose),
+          meta: { band: comm.band, frequency: comm.frequency, paceOrder: comm.paceOrder, purpose: comm.purpose },
+        });
+        edges.push({ source: doc.id, target: comm.id, relationship: 'DEFINES' });
+      }
+
+      // Coordination measures → COORDINATION_MEASURE nodes
+      for (const cm of doc.coordinationMeasures) {
+        nodes.push({
+          id: cm.id,
+          type: 'COORDINATION_MEASURE',
+          label: cm.name,
+          sublabel: cm.measureType,
+          meta: { effectiveStart: cm.effectiveStart?.toISOString(), effectiveEnd: cm.effectiveEnd?.toISOString() },
+        });
+        edges.push({ source: doc.id, target: cm.id, relationship: 'DEFINES' });
+      }
+
+      // ACO airspace structures created during this ingest
+      if (doc.docType === 'ACO') {
+        const airspaceStructures = await prisma.airspaceStructure.findMany({
+          where: { sourceDocId: createdId },
+        });
+        for (const as_ of airspaceStructures) {
+          nodes.push({
+            id: as_.id,
+            type: 'AIRSPACE_MEASURE',
+            label: as_.name,
+            sublabel: as_.structureType,
+            meta: { altitudeLow: as_.altitudeLow, altitudeHigh: as_.altitudeHigh, controllingAuthority: as_.controllingAuthority },
+          });
+          edges.push({ source: doc.id, target: as_.id, relationship: 'DEFINES' });
+        }
+      }
+
       break;
     }
 

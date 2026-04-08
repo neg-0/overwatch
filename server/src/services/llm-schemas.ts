@@ -136,6 +136,302 @@ export const NORMALIZE_PLANNING_SCHEMA = {
   },
 };
 
+// ─── Schema 3a: Normalizer — JIPTL (Enhanced Planning) ─────────────────────
+
+const REVIEW_FLAGS_SCHEMA = {
+  type: 'array' as const,
+  items: {
+    type: 'object' as const,
+    properties: {
+      field: { type: 'string' as const },
+      rawValue: { type: 'string' as const },
+      confidence: { type: 'number' as const },
+      reason: { type: 'string' as const },
+    },
+    required: ['field', 'rawValue', 'confidence', 'reason'],
+    additionalProperties: false,
+  },
+};
+
+export const NORMALIZE_JIPTL_SCHEMA = {
+  name: 'normalized_jiptl',
+  strict: true,
+  schema: {
+    type: 'object' as const,
+    properties: {
+      title: { type: 'string' as const },
+      docType: { type: 'string' as const },
+      content: { type: 'string' as const },
+      effectiveDate: { type: 'string' as const },
+      priorities: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            rank: { type: 'number' as const },
+            effect: { type: 'string' as const, description: 'Desired effect: DESTROY, DEGRADE, DENY, PROTECT, SUSTAIN, DISRUPT, NEUTRALIZE' },
+            description: { type: 'string' as const },
+            justification: { type: 'string' as const },
+            targetId: { type: ['string', 'null'] as const, description: 'BE number or target reference (e.g., "BE-0042")' },
+            latitude: { type: ['number', 'null'] as const },
+            longitude: { type: ['number', 'null'] as const },
+            targetSystemCategory: { type: ['string', 'null'] as const, description: 'Target system: C2, IADS, LOC, WMD, NAVAL, AIRFIELD, POL, ELEC, BRIDGE, etc.' },
+            cdeLevel: { type: ['string', 'null'] as const, description: 'Collateral Damage Estimate: CDE_1, CDE_2, CDE_3, CDE_4, CDE_5, or null if not specified' },
+            noStrike: { type: 'boolean' as const, description: 'true if this is a no-strike or restricted target' },
+            timeSensitive: { type: 'boolean' as const, description: 'true if this is a Time-Sensitive Target (TST) requiring immediate prosecution' },
+            engagementAuthority: { type: ['string', 'null'] as const, description: 'Who can authorize engagement: JFACC, CCDR, SECDEF, etc.' },
+            weaponeering: { type: ['string', 'null'] as const, description: 'Recommended weapon/quantity (e.g., "2x GBU-31 JDAM", "SDB-II")' },
+            targetStatus: { type: ['string', 'null'] as const, description: 'NOMINATED, VALIDATED, APPROVED, STRUCK, RESTRIKE, BDA_PENDING' },
+          },
+          required: ['rank', 'effect', 'description', 'justification', 'targetId', 'latitude', 'longitude',
+            'targetSystemCategory', 'cdeLevel', 'noStrike', 'timeSensitive', 'engagementAuthority', 'weaponeering', 'targetStatus'],
+          additionalProperties: false,
+        },
+      },
+      reviewFlags: REVIEW_FLAGS_SCHEMA,
+    },
+    required: ['title', 'docType', 'content', 'effectiveDate', 'priorities', 'reviewFlags'],
+    additionalProperties: false,
+  },
+};
+
+// ─── Schema 3b: Normalizer — SPINS ────────────────────────────────────────
+
+export const NORMALIZE_SPINS_SCHEMA = {
+  name: 'normalized_spins',
+  strict: true,
+  schema: {
+    type: 'object' as const,
+    properties: {
+      title: { type: 'string' as const },
+      docType: { type: 'string' as const },
+      content: { type: 'string' as const },
+      effectiveDate: { type: 'string' as const },
+      procedures: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            category: { type: 'string' as const, description: 'ROE, EMCON, WEAPONS_RELEASE, TANKER, CSAR, IFF, DURESS, GENERAL' },
+            title: { type: 'string' as const },
+            description: { type: 'string' as const },
+            conditions: { type: ['string', 'null'] as const, description: 'When this procedure applies (phase, conditions, triggers)' },
+            authority: { type: ['string', 'null'] as const, description: 'Issuing or controlling authority' },
+            applicableTo: {
+              type: 'array' as const,
+              items: { type: 'string' as const },
+              description: 'Mission types this applies to: OCA, DCA, CAS, SEAD, ISR, TANKER, C2, ALL, etc.',
+            },
+          },
+          required: ['category', 'title', 'description', 'conditions', 'authority', 'applicableTo'],
+          additionalProperties: false,
+        },
+      },
+      commPlans: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            netName: { type: 'string' as const, description: 'Net or channel name (e.g., "BLUE-7", "RED CROWN")' },
+            frequency: { type: ['string', 'null'] as const, description: 'Frequency with unit (e.g., "243.0 MHz", "305.6 MHz")' },
+            band: { type: ['string', 'null'] as const, description: 'UHF, VHF, HF, SATCOM, SATCOM_PROTECTED, SATCOM_WIDEBAND, SATCOM_TACTICAL' },
+            callsign: { type: ['string', 'null'] as const, description: 'Controlling agency callsign' },
+            purpose: { type: 'string' as const, description: 'Purpose (e.g., "CAS Check-in", "AWACS Control", "Guard", "ISR Downlink")' },
+            paceOrder: { type: ['string', 'null'] as const, description: 'PRIMARY, ALTERNATE, CONTINGENCY, or EMERGENCY' },
+            applicableTo: {
+              type: 'array' as const,
+              items: { type: 'string' as const },
+              description: 'Mission types: CAS, SEAD, ISR, ALL, etc.',
+            },
+          },
+          required: ['netName', 'frequency', 'band', 'callsign', 'purpose', 'paceOrder', 'applicableTo'],
+          additionalProperties: false,
+        },
+      },
+      codeWords: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            word: { type: 'string' as const },
+            meaning: { type: 'string' as const },
+            conditions: { type: ['string', 'null'] as const },
+          },
+          required: ['word', 'meaning', 'conditions'],
+          additionalProperties: false,
+        },
+      },
+      reviewFlags: REVIEW_FLAGS_SCHEMA,
+    },
+    required: ['title', 'docType', 'content', 'effectiveDate', 'procedures', 'commPlans', 'codeWords', 'reviewFlags'],
+    additionalProperties: false,
+  },
+};
+
+// ─── Schema 3c: Normalizer — ACO ──────────────────────────────────────────
+
+export const NORMALIZE_ACO_SCHEMA = {
+  name: 'normalized_aco',
+  strict: true,
+  schema: {
+    type: 'object' as const,
+    properties: {
+      title: { type: 'string' as const },
+      docType: { type: 'string' as const },
+      content: { type: 'string' as const },
+      effectiveDate: { type: 'string' as const },
+      issuingAuthority: { type: 'string' as const },
+      airspaceControlMeasures: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            measureType: { type: 'string' as const, description: 'ROZ, ART, CAP, CORRIDOR, KILLBOX, HIDACZ, MRR, ADIZ, WFZ, SAAFR, FSCL' },
+            name: { type: 'string' as const },
+            controllingAuthority: { type: ['string', 'null'] as const },
+            boundaryDescription: { type: 'string' as const, description: 'Textual description of boundaries, coordinates, or center+radius' },
+            altitudeFloor: { type: ['number', 'null'] as const, description: 'Floor altitude in feet' },
+            altitudeCeiling: { type: ['number', 'null'] as const, description: 'Ceiling altitude in feet' },
+            altitudeUnit: { type: ['string', 'null'] as const, description: 'FT or FL (flight level)' },
+            effectiveStart: { type: ['string', 'null'] as const, description: 'ISO 8601 start time' },
+            effectiveEnd: { type: ['string', 'null'] as const, description: 'ISO 8601 end time' },
+            activationConditions: { type: ['string', 'null'] as const },
+            usageRestrictions: { type: ['string', 'null'] as const },
+          },
+          required: ['measureType', 'name', 'controllingAuthority', 'boundaryDescription',
+            'altitudeFloor', 'altitudeCeiling', 'altitudeUnit', 'effectiveStart', 'effectiveEnd',
+            'activationConditions', 'usageRestrictions'],
+          additionalProperties: false,
+        },
+      },
+      fireSupportMeasures: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            measureType: { type: 'string' as const, description: 'FSCL, CFL, NFL, RFL' },
+            name: { type: 'string' as const },
+            description: { type: ['string', 'null'] as const },
+            boundaryDescription: { type: 'string' as const, description: 'Coordinate description of the line or area' },
+            effectiveStart: { type: ['string', 'null'] as const },
+            effectiveEnd: { type: ['string', 'null'] as const },
+          },
+          required: ['measureType', 'name', 'description', 'boundaryDescription', 'effectiveStart', 'effectiveEnd'],
+          additionalProperties: false,
+        },
+      },
+      reviewFlags: REVIEW_FLAGS_SCHEMA,
+    },
+    required: ['title', 'docType', 'content', 'effectiveDate', 'issuingAuthority', 'airspaceControlMeasures', 'fireSupportMeasures', 'reviewFlags'],
+    additionalProperties: false,
+  },
+};
+
+// ─── Schema 3d: Normalizer — MAAP (Ingest) ────────────────────────────────
+
+export const NORMALIZE_MAAP_SCHEMA = {
+  name: 'normalized_maap',
+  strict: true,
+  schema: {
+    type: 'object' as const,
+    properties: {
+      title: { type: 'string' as const },
+      docType: { type: 'string' as const },
+      content: { type: 'string' as const },
+      effectiveDate: { type: 'string' as const },
+      classification: { type: 'string' as const },
+      phase: { type: ['string', 'null'] as const },
+      targetPriorityList: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            rank: { type: 'number' as const },
+            targetName: { type: 'string' as const },
+            targetId: { type: ['string', 'null'] as const, description: 'BE number if known' },
+            targetCategory: { type: 'string' as const },
+            desiredEffect: { type: 'string' as const },
+            weaponSystem: { type: ['string', 'null'] as const },
+            guidanceType: { type: ['string', 'null'] as const, description: 'GPS, LASER, INS, COMBO, or null' },
+            priority: { type: 'string' as const, description: 'IMMEDIATE, PRIORITY, or ROUTINE' },
+            justification: { type: 'string' as const },
+          },
+          required: ['rank', 'targetName', 'targetId', 'targetCategory', 'desiredEffect', 'weaponSystem', 'guidanceType', 'priority', 'justification'],
+          additionalProperties: false,
+        },
+      },
+      forceApportionment: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            missionType: { type: 'string' as const },
+            percentAllocation: { type: 'number' as const },
+            sorties: { type: 'number' as const },
+            rationale: { type: ['string', 'null'] as const },
+          },
+          required: ['missionType', 'percentAllocation', 'sorties', 'rationale'],
+          additionalProperties: false,
+        },
+      },
+      coordinationMeasures: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            measureType: { type: 'string' as const, description: 'FSCL, KILLBOX, ROZ, ADIZ, CAS_BP, TANKER_TRACK, AWACS_ORBIT' },
+            name: { type: 'string' as const },
+            description: { type: ['string', 'null'] as const },
+            coordinates: { type: ['string', 'null'] as const, description: 'Coordinate description if present' },
+            effectiveStart: { type: ['string', 'null'] as const },
+            effectiveEnd: { type: ['string', 'null'] as const },
+          },
+          required: ['measureType', 'name', 'description', 'coordinates', 'effectiveStart', 'effectiveEnd'],
+          additionalProperties: false,
+        },
+      },
+      weaponTargetPairings: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            targetName: { type: 'string' as const },
+            targetId: { type: ['string', 'null'] as const },
+            weaponSystem: { type: 'string' as const },
+            platform: { type: ['string', 'null'] as const },
+            quantity: { type: ['number', 'null'] as const },
+            desiredEffect: { type: 'string' as const },
+            guidanceType: { type: ['string', 'null'] as const, description: 'GPS, LASER, INS, COMBO — determines space dependency' },
+          },
+          required: ['targetName', 'targetId', 'weaponSystem', 'platform', 'quantity', 'desiredEffect', 'guidanceType'],
+          additionalProperties: false,
+        },
+      },
+      sortieFlow: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            phase: { type: ['string', 'null'] as const },
+            missionType: { type: 'string' as const },
+            dailySorties: { type: 'number' as const },
+            platforms: { type: ['string', 'null'] as const },
+            notes: { type: ['string', 'null'] as const },
+          },
+          required: ['phase', 'missionType', 'dailySorties', 'platforms', 'notes'],
+          additionalProperties: false,
+        },
+      },
+      guidance: { type: ['string', 'null'] as const },
+      reviewFlags: REVIEW_FLAGS_SCHEMA,
+    },
+    required: ['title', 'docType', 'content', 'effectiveDate', 'classification', 'phase',
+      'targetPriorityList', 'forceApportionment', 'coordinationMeasures', 'weaponTargetPairings',
+      'sortieFlow', 'guidance', 'reviewFlags'],
+    additionalProperties: false,
+  },
+};
+
 // ─── Shared sub-schemas for orders ──────────────────────────────────────────
 
 const WAYPOINT_SCHEMA = {
