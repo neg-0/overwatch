@@ -16,6 +16,7 @@ import {
   seedPlatformCatalog,
   seedSpaceAssetsForScenario,
 } from './reference-data.js';
+import { buildUnitIndex, resolveUnitForMission, type UnitIndex } from './unit-resolver.js';
 
 // ─── OpenAI Client ───────────────────────────────────────────────────────────
 
@@ -1249,6 +1250,9 @@ export async function generateDayOrders(scenarioId: string, atoDay: number, mode
 
   if (!scenario) throw new Error(`Scenario ${scenarioId} not found`);
 
+  // Build unit index for doctrine-driven mission → unit assignment (ORBAT match)
+  const unitIndex = buildUnitIndex(scenario.units);
+
   const dayDate = new Date(scenario.startDate.getTime() + (atoDay - 1) * 24 * 3600000);
   const dayStr = String(atoDay).padStart(3, '0');
 
@@ -1364,14 +1368,14 @@ export async function generateDayOrders(scenarioId: string, atoDay: number, mode
   await generateOrder(scenarioId, 'ATO', atoDay, dayDate, {
     ...sharedContext,
     spaceNeeds: '',
-  }, planningDocId, modelOverride);
+  }, planningDocId, unitIndex, modelOverride);
 
   // Generate MTO — linked to JIPTL planning doc
   console.log(`[ORDERS] Generating MTO Day ${atoDay}...`);
   await generateOrder(scenarioId, 'MTO', atoDay, dayDate, {
     ...sharedContext,
     spaceNeeds: '',
-  }, planningDocId, modelOverride);
+  }, planningDocId, unitIndex, modelOverride);
 
   // Generate STO (depends on ATO/MTO space needs) — linked to JIPTL planning doc
   console.log(`[ORDERS] Generating STO Day ${atoDay}...`);
@@ -1379,7 +1383,7 @@ export async function generateDayOrders(scenarioId: string, atoDay: number, mode
   await generateOrder(scenarioId, 'STO', atoDay, dayDate, {
     ...sharedContext,
     spaceNeeds: spaceNeedsSummary,
-  }, planningDocId, modelOverride);
+  }, planningDocId, unitIndex, modelOverride);
 }
 
 // ─── Enum normalizers: LLM output → Prisma enum ─────────────────────
@@ -1426,6 +1430,7 @@ async function generateOrder(
   dayDate: Date,
   context: Record<string, string>,
   planningDocId: string | null = null,
+  unitIndex: UnitIndex,
   modelOverride?: string,
 ) {
   const promptTemplate = orderType === 'ATO' ? ATO_PROMPT : orderType === 'MTO' ? MTO_PROMPT : STO_PROMPT;
@@ -1478,6 +1483,14 @@ async function generateOrder(
 
         if (pkg.missions) {
           for (const msn of pkg.missions) {
+            // Resolve executing unit from ORBAT via platform match (doctrine-driven)
+            const resolvedUnitId = resolveUnitForMission(
+              msn.platformType || 'Unknown',
+              msn.domain || 'AIR',
+              'FRIENDLY',
+              unitIndex,
+            );
+
             const dbMission = await prisma.mission.create({
               data: {
                 packageId: dbPkg.id,
@@ -1489,6 +1502,7 @@ async function generateOrder(
                 missionType: msn.missionType || 'General',
                 status: 'PLANNED',
                 affiliation: 'FRIENDLY',
+                unitId: resolvedUnitId,
               },
             });
 
