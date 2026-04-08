@@ -104,24 +104,26 @@ async function main() {
   // ─── Phase 4: Re-ingest strategy docs ──────────────────────────────────
   for (const doc of stratDocsToReingest) {
     console.log(`\n--- Re-ingesting STRATEGY: ${doc.docType} "${doc.title}" ---`);
-    await prisma.strategyDocument.delete({ where: { id: doc.id } });
     try {
       const result = await ingestDocument(SCENARIO_ID, doc.content, `reingest:${doc.docType}`, null as any);
+      // Only delete the old doc AFTER successful re-ingest to avoid data loss
+      await prisma.strategyDocument.delete({ where: { id: doc.id } });
       console.log(`  ✓ Created ${result.createdId} — extracted:`, result.extracted);
     } catch (err) {
-      console.error(`  ✗ FAILED:`, err instanceof Error ? err.message : err);
+      console.error(`  ✗ FAILED (original preserved):`, err instanceof Error ? err.message : err);
     }
   }
 
   // ─── Phase 5: Re-ingest planning docs ──────────────────────────────────
   for (const doc of planDocsToReingest) {
     console.log(`\n--- Re-ingesting PLANNING: ${doc.docType} "${doc.title}" ---`);
-    await prisma.planningDocument.delete({ where: { id: doc.id } });
     try {
       const result = await ingestDocument(SCENARIO_ID, doc.content, `reingest:${doc.docType}`, null as any);
+      // Only delete the old doc AFTER successful re-ingest to avoid data loss
+      await prisma.planningDocument.delete({ where: { id: doc.id } });
       console.log(`  ✓ Created ${result.createdId} — extracted:`, result.extracted);
     } catch (err) {
-      console.error(`  ✗ FAILED:`, err instanceof Error ? err.message : err);
+      console.error(`  ✗ FAILED (original preserved):`, err instanceof Error ? err.message : err);
     }
   }
 

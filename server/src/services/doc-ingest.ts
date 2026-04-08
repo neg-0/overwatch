@@ -34,6 +34,81 @@ function parseSafeDate(dateStr: string | undefined | null, fallback: Date = new 
   return isNaN(d.getTime()) ? fallback : d;
 }
 
+// ─── Traceability Matching ───────────────────────────────────────────────────
+// Multi-signal scoring to match a planning priority back to its parent strategy priority.
+// Shared by persistPlanning, persistJIPTL, and any future per-type persisters.
+
+interface StrategyPriorityRef {
+  id: string;
+  rank: number;
+  objective: string;
+  description: string;
+  effect: string | null;
+}
+
+interface PlanningPriorityInput {
+  effect: string;
+  description: string;
+  justification: string;
+}
+
+const DOCTRINAL_EFFECTS = ['deny', 'destroy', 'degrade', 'disrupt', 'protect', 'sustain', 'neutralize'];
+const STOP_WORDS = new Set(['which', 'their', 'these', 'those', 'under', 'through', 'within', 'being', 'would', 'could', 'should']);
+
+/** Pre-compute keyword lists for strategy priorities to avoid recomputation per planning priority. */
+function prepareStrategyKeywords(sp: StrategyPriorityRef): { text: string; effects: string[]; keywords: string[] } {
+  const text = `${sp.objective} ${sp.description}`.toLowerCase();
+  const effects = sp.effect ? [sp.effect.toLowerCase()] : DOCTRINAL_EFFECTS.filter(e => text.includes(e));
+  const keywords = text.split(/\s+/).filter(w => w.length > 4 && !STOP_WORDS.has(w));
+  return { text, effects, keywords };
+}
+
+function matchStrategyPriority(
+  planPriority: PlanningPriorityInput,
+  strategyPriorities: StrategyPriorityRef[],
+  /** Pre-computed keyword data per strategy priority (index-aligned). */
+  precomputed?: ReturnType<typeof prepareStrategyKeywords>[],
+): string | null {
+  if (strategyPriorities.length === 0) return null;
+
+  const planText = `${planPriority.effect} ${planPriority.description} ${planPriority.justification}`.toLowerCase();
+  const planEffects = DOCTRINAL_EFFECTS.filter(e => planText.includes(e));
+  let bestMatchId: string | null = null;
+  let bestScore = 0;
+
+  for (let i = 0; i < strategyPriorities.length; i++) {
+    const sp = strategyPriorities[i];
+    const prepared = precomputed?.[i] ?? prepareStrategyKeywords(sp);
+    let score = 0;
+
+    // Signal 1: Doctrinal effect match (DENY↔DENY, DESTROY↔DESTROY, etc.)
+    const effectOverlap = planEffects.filter(e => prepared.effects.includes(e)).length;
+    if (effectOverlap > 0) score += 0.4 * (effectOverlap / Math.max(prepared.effects.length, 1));
+
+    // Signal 2: Domain-specific keyword overlap
+    const keywordMatches = prepared.keywords.filter(w => planText.includes(w)).length;
+    const keywordScore = prepared.keywords.length > 0 ? keywordMatches / prepared.keywords.length : 0;
+    score += 0.4 * keywordScore;
+
+    // Signal 3: Explicit reference detection — "per NDS Priority 2", "traces to"
+    const rankPatterns = [
+      new RegExp(`priority\\s*${sp.rank}\\b`, 'i'),
+      new RegExp(`p${sp.rank}\\b`, 'i'),
+      new RegExp(`\\(${sp.rank}\\)`, 'i'),
+    ];
+    if (rankPatterns.some(re => re.test(planPriority.justification || '') || re.test(planPriority.description || ''))) {
+      score += 0.2;
+    }
+
+    if (score > bestScore && score > 0.12) {
+      bestScore = score;
+      bestMatchId = sp.id;
+    }
+  }
+
+  return bestMatchId;
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export type HierarchyLevel = 'STRATEGY' | 'PLANNING' | 'ORDER' | 'EVENT_LIST';
@@ -1012,86 +1087,88 @@ async function persistOPLAN(
     orderBy: [{ tier: 'desc' }, { effectiveDate: 'desc' }],
   });
 
-  const created = await prisma.strategyDocument.create({
-    data: {
-      scenarioId,
-      title: data.title || classification.title,
-      docType,
-      content: data.content || rawText,
-      authorityLevel: data.authorityLevel || classification.issuingAuthority,
-      effectiveDate,
-      tier,
-      parentDocId: parentDoc?.id || null,
-      sourceFormat: classification.sourceFormat,
-      confidence: classification.confidence,
-      commanderIntent: data.commanderIntent || null,
-      mission: data.mission || null,
-      ingestedAt: new Date(),
-    },
+  // Persist atomically — all OPLAN entities in a single transaction
+  const created = await prisma.$transaction(async (tx) => {
+    const doc = await tx.strategyDocument.create({
+      data: {
+        scenarioId,
+        title: data.title || classification.title,
+        docType,
+        content: data.content || rawText,
+        authorityLevel: data.authorityLevel || classification.issuingAuthority,
+        effectiveDate,
+        tier,
+        parentDocId: parentDoc?.id || null,
+        sourceFormat: classification.sourceFormat,
+        confidence: classification.confidence,
+        commanderIntent: data.commanderIntent || null,
+        mission: data.mission || null,
+        ingestedAt: new Date(),
+      },
+    });
+
+    // Strategic priorities
+    for (const p of data.priorities || []) {
+      await tx.strategyPriority.create({
+        data: {
+          strategyDocId: doc.id,
+          rank: p.rank,
+          objective: (p as any).objective || p.description?.substring(0, 100) || `Priority ${p.rank}`,
+          description: p.description || p.justification,
+          effect: p.effect || null,
+          confidence: classification.confidence,
+        },
+      });
+    }
+
+    // OPLAN phases
+    for (const phase of data.phases || []) {
+      await tx.oPLANPhase.create({
+        data: {
+          strategyDocId: doc.id,
+          phaseNumber: phase.phaseNumber,
+          phaseName: phase.phaseName,
+          startDate: phase.startDate || null,
+          endDate: phase.endDate || null,
+          description: phase.description,
+          keyTasks: phase.keyTasks || [],
+        },
+      });
+    }
+
+    // Command tasks (ORBAT task assignments)
+    for (const ct of data.commandTasks || []) {
+      await tx.commandTask.create({
+        data: {
+          strategyDocId: doc.id,
+          commandName: ct.commandName,
+          commandRole: ct.commandRole || null,
+          tasks: ct.tasks || [],
+        },
+      });
+    }
+
+    // PACE comms plans
+    for (const pace of data.paceComms || []) {
+      await tx.pACEComm.create({
+        data: {
+          strategyDocId: doc.id,
+          context: pace.context,
+          primary: pace.primary,
+          alternate: pace.alternate,
+          contingency: pace.contingency,
+          emergency: pace.emergency,
+        },
+      });
+    }
+
+    return doc;
   });
 
-  // Persist strategic priorities
-  let priorityCount = 0;
-  for (const p of data.priorities || []) {
-    await prisma.strategyPriority.create({
-      data: {
-        strategyDocId: created.id,
-        rank: p.rank,
-        objective: (p as any).objective || p.description?.substring(0, 100) || `Priority ${p.rank}`,
-        description: p.description || p.justification,
-        effect: p.effect || null,
-        confidence: classification.confidence,
-      },
-    });
-    priorityCount++;
-  }
-
-  // Persist OPLAN phases
-  let phaseCount = 0;
-  for (const phase of data.phases || []) {
-    await prisma.oPLANPhase.create({
-      data: {
-        strategyDocId: created.id,
-        phaseNumber: phase.phaseNumber,
-        phaseName: phase.phaseName,
-        startDate: phase.startDate || null,
-        endDate: phase.endDate || null,
-        description: phase.description,
-        keyTasks: phase.keyTasks || [],
-      },
-    });
-    phaseCount++;
-  }
-
-  // Persist command tasks (ORBAT task assignments)
-  let commandTaskCount = 0;
-  for (const ct of data.commandTasks || []) {
-    await prisma.commandTask.create({
-      data: {
-        strategyDocId: created.id,
-        commandName: ct.commandName,
-        commandRole: ct.commandRole || null,
-        tasks: ct.tasks || [],
-      },
-    });
-    commandTaskCount++;
-  }
-
-  // Persist PACE comms plans
-  let paceCount = 0;
-  for (const pace of data.paceComms || []) {
-    await prisma.pACEComm.create({
-      data: {
-        strategyDocId: created.id,
-        context: pace.context,
-        primary: pace.primary,
-        alternate: pace.alternate,
-        contingency: pace.contingency,
-        emergency: pace.emergency,
-      },
-    });
-    paceCount++;
-  }
+  const priorityCount = data.priorities?.length || 0;
+  const phaseCount = data.phases?.length || 0;
+  const commandTaskCount = data.commandTasks?.length || 0;
+  const paceCount = data.paceComms?.length || 0;
 
   console.log(`  [INGEST] OPLAN doc created: ${created.title} (tier ${tier}) — ${priorityCount} priorities, ${phaseCount} phases, ${commandTaskCount} command tasks, ${paceCount} PACE comms`);
   return {
@@ -1130,8 +1207,7 @@ async function persistPlanning(
   });
 
   // Create priority entries with AI-traced links to strategy priorities
-  // Fetch strategy priorities from the linked strategy doc to perform traceability matching
-  let strategyPriorities: { id: string; rank: number; objective: string; description: string; effect: string | null }[] = [];
+  let strategyPriorities: StrategyPriorityRef[] = [];
   if (strategyDocId) {
     strategyPriorities = await prisma.strategyPriority.findMany({
       where: { strategyDocId },
@@ -1139,52 +1215,10 @@ async function persistPlanning(
       orderBy: { rank: 'asc' },
     });
   }
+  const precomputed = strategyPriorities.map(prepareStrategyKeywords);
 
   for (const p of data.priorities || []) {
-    // Traceability: match planning priority to strategy priority using multi-signal scoring
-    let bestMatchId: string | null = null;
-    if (strategyPriorities.length > 0) {
-      const planText = `${p.effect} ${p.description} ${p.justification}`.toLowerCase();
-      let bestScore = 0;
-
-      for (const sp of strategyPriorities) {
-        let score = 0;
-        const spText = `${sp.objective} ${sp.description}`.toLowerCase();
-
-        // Signal 1: Doctrinal effect match (DENY↔DENY, DESTROY↔DESTROY, etc.)
-        // These are the strongest signal — JP 3-0 effects vocabulary is small and precise
-        const doctrinalEffects = ['deny', 'destroy', 'degrade', 'disrupt', 'protect', 'sustain', 'neutralize'];
-        const planEffects = doctrinalEffects.filter(e => planText.includes(e));
-        const spEffects = sp.effect ? [sp.effect.toLowerCase()] : doctrinalEffects.filter(e => spText.includes(e));
-        const effectOverlap = planEffects.filter(e => spEffects.includes(e)).length;
-        if (effectOverlap > 0) score += 0.4 * (effectOverlap / Math.max(spEffects.length, 1));
-
-        // Signal 2: Domain-specific keyword overlap (higher weight for military terms)
-        const militaryKeywords = spText
-          .split(/\s+/)
-          .filter(w => w.length > 4)
-          // Filter for substantive terms, not common English
-          .filter(w => !['which', 'their', 'these', 'those', 'under', 'through', 'within', 'being', 'would', 'could', 'should'].includes(w));
-        const keywordMatches = militaryKeywords.filter(w => planText.includes(w)).length;
-        const keywordScore = militaryKeywords.length > 0 ? keywordMatches / militaryKeywords.length : 0;
-        score += 0.4 * keywordScore;
-
-        // Signal 3: Explicit reference detection — "per NDS Priority 2", "traces to", "derived from"
-        const rankPatterns = [
-          new RegExp(`priority\\s*${sp.rank}\\b`, 'i'),
-          new RegExp(`p${sp.rank}\\b`, 'i'),
-          new RegExp(`\\(${sp.rank}\\)`, 'i'),
-        ];
-        if (rankPatterns.some(re => re.test(p.justification || '') || re.test(p.description || ''))) {
-          score += 0.2;
-        }
-
-        if (score > bestScore && score > 0.12) {
-          bestScore = score;
-          bestMatchId = sp.id;
-        }
-      }
-    }
+    const bestMatchId = matchStrategyPriority(p, strategyPriorities, precomputed);
 
     await prisma.priorityEntry.create({
       data: {
@@ -1236,7 +1270,7 @@ async function persistJIPTL(
   });
 
   // Fetch strategy priorities for traceability matching
-  let strategyPriorities: { id: string; rank: number; objective: string; description: string; effect: string | null }[] = [];
+  let strategyPriorities: StrategyPriorityRef[] = [];
   if (strategyDocId) {
     strategyPriorities = await prisma.strategyPriority.findMany({
       where: { strategyDocId },
@@ -1244,40 +1278,10 @@ async function persistJIPTL(
       orderBy: { rank: 'asc' },
     });
   }
+  const precomputed = strategyPriorities.map(prepareStrategyKeywords);
 
   for (const p of data.priorities || []) {
-    // Reuse the same multi-signal traceability matching from persistPlanning
-    let bestMatchId: string | null = null;
-    if (strategyPriorities.length > 0) {
-      const planText = `${p.effect} ${p.description} ${p.justification}`.toLowerCase();
-      let bestScore = 0;
-      for (const sp of strategyPriorities) {
-        let score = 0;
-        const spText = `${sp.objective} ${sp.description}`.toLowerCase();
-        const doctrinalEffects = ['deny', 'destroy', 'degrade', 'disrupt', 'protect', 'sustain', 'neutralize'];
-        const planEffects = doctrinalEffects.filter(e => planText.includes(e));
-        const spEffects = sp.effect ? [sp.effect.toLowerCase()] : doctrinalEffects.filter(e => spText.includes(e));
-        const effectOverlap = planEffects.filter(e => spEffects.includes(e)).length;
-        if (effectOverlap > 0) score += 0.4 * (effectOverlap / Math.max(spEffects.length, 1));
-        const militaryKeywords = spText.split(/\s+/).filter(w => w.length > 4)
-          .filter(w => !['which', 'their', 'these', 'those', 'under', 'through', 'within', 'being', 'would', 'could', 'should'].includes(w));
-        const keywordMatches = militaryKeywords.filter(w => planText.includes(w)).length;
-        const keywordScore = militaryKeywords.length > 0 ? keywordMatches / militaryKeywords.length : 0;
-        score += 0.4 * keywordScore;
-        const rankPatterns = [
-          new RegExp(`priority\\s*${sp.rank}\\b`, 'i'),
-          new RegExp(`p${sp.rank}\\b`, 'i'),
-          new RegExp(`\\(${sp.rank}\\)`, 'i'),
-        ];
-        if (rankPatterns.some(re => re.test(p.justification || '') || re.test(p.description || ''))) {
-          score += 0.2;
-        }
-        if (score > bestScore && score > 0.12) {
-          bestScore = score;
-          bestMatchId = sp.id;
-        }
-      }
-    }
+    const bestMatchId = matchStrategyPriority(p, strategyPriorities, precomputed);
 
     await prisma.priorityEntry.create({
       data: {

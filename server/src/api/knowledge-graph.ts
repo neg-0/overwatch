@@ -137,14 +137,6 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
         meta: { tasks: ct.tasks },
       });
       addEdge({ source: doc.id, target: ct.id, relationship: 'ASSIGNS_TASK' });
-
-      // Cross-link command tasks to units by name matching
-      for (const unitNode of nodes.filter(n => n.type === 'UNIT')) {
-        if (unitNode.label.toUpperCase().includes(ct.commandName.toUpperCase()) ||
-            ct.commandName.toUpperCase().includes(unitNode.label.toUpperCase().split(' ')[0])) {
-          addEdge({ source: ct.id, target: unitNode.id, relationship: 'TASKED_UNIT' });
-        }
-      }
     }
 
     // PACE comms
@@ -304,46 +296,8 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
     addEdge({ source: cm.planningDoc.id, target: cm.id, relationship: 'DEFINES' });
   }
 
-  // ─── Cross-link: Missions ↔ Procedures/Airspace/CommNets ───────────────────
-  // Connect missions to the SPINS procedures, comm nets, and airspace measures
-  // that govern them, based on mission type matching
-
-  const allMissionNodes = nodes.filter(n => n.type === 'MISSION');
-  for (const missionNode of allMissionNodes) {
-    const missionType = (missionNode.meta?.missionType as string) || (missionNode.sublabel?.split(' ')[0]) || '';
-
-    // Mission → Procedure/Restriction (GOVERNED_BY / RESTRICTED_BY)
-    for (const entry of spinsEntries) {
-      if (entry.applicableTo.includes('ALL') || entry.applicableTo.some(t => missionType.toUpperCase().includes(t.toUpperCase()))) {
-        const isRestriction = ['ROE', 'WEAPONS_RELEASE', 'EMCON'].includes(entry.category);
-        addEdge({
-          source: missionNode.id,
-          target: entry.id,
-          relationship: isRestriction ? 'RESTRICTED_BY' : 'GOVERNED_BY',
-        });
-      }
-    }
-
-    // Mission → Comm Net (COMMUNICATES_ON)
-    for (const comm of commPlans) {
-      if (comm.applicableTo.includes('ALL') || comm.applicableTo.some(t => missionType.toUpperCase().includes(t.toUpperCase()))) {
-        addEdge({ source: missionNode.id, target: comm.id, relationship: 'COMMUNICATES_ON' });
-      }
-    }
-  }
-
-  // ─── Cross-link: Units → Airspace (CONTROLS) ──────────────────────────────
-  // Link controlling authorities to their airspace measures
-  for (const as_ of airspaceStructures) {
-    if (!as_.controllingAuthority) continue;
-    const controlAuth = as_.controllingAuthority.toUpperCase();
-    for (const unitNode of nodes.filter(n => n.type === 'UNIT')) {
-      if (unitNode.label.toUpperCase().includes(controlAuth) ||
-          controlAuth.includes(unitNode.label.toUpperCase().split(' ')[0])) {
-        addEdge({ source: unitNode.id, target: as_.id, relationship: 'CONTROLS' });
-      }
-    }
-  }
+  // NOTE: Cross-linking (missions↔procedures, units↔airspace, command tasks↔units)
+  // is deferred to the end of the function after ALL nodes are populated.
 
   // ─── Space Needs (Priority Traceability) ────────────────────────────────────
 
@@ -613,6 +567,59 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
           });
           addEdge({ source: mission.id, target: tgt.id, relationship: 'TARGETS' });
         }
+      }
+    }
+  }
+
+  // ─── Deferred Cross-Linking Pass ─────────────────────────────────────────────
+  // All nodes (units, missions, procedures, airspace, command tasks) are now
+  // populated. Perform cross-linking that depends on multiple node types.
+
+  // Command Tasks → Units (by name matching)
+  const allCommandTaskNodes = nodes.filter(n => n.type === 'COMMAND_TASK');
+  const allUnitNodes = nodes.filter(n => n.type === 'UNIT');
+  for (const ctNode of allCommandTaskNodes) {
+    const ctName = ctNode.label.toUpperCase();
+    for (const unitNode of allUnitNodes) {
+      const unitLabel = unitNode.label.toUpperCase();
+      if (unitLabel.includes(ctName) || ctName.includes(unitLabel.split(' ')[0])) {
+        addEdge({ source: ctNode.id, target: unitNode.id, relationship: 'TASKED_UNIT' });
+      }
+    }
+  }
+
+  // Missions → Procedures/Restrictions (GOVERNED_BY / RESTRICTED_BY)
+  // Missions → Comm Nets (COMMUNICATES_ON)
+  const allMissionNodes = nodes.filter(n => n.type === 'MISSION');
+  for (const missionNode of allMissionNodes) {
+    const missionType = (missionNode.meta?.missionType as string) || (missionNode.sublabel?.split(' ')[0]) || '';
+
+    for (const entry of spinsEntries) {
+      if (entry.applicableTo.includes('ALL') || entry.applicableTo.some(t => missionType.toUpperCase().includes(t.toUpperCase()))) {
+        const isRestriction = ['ROE', 'WEAPONS_RELEASE', 'EMCON'].includes(entry.category);
+        addEdge({
+          source: missionNode.id,
+          target: entry.id,
+          relationship: isRestriction ? 'RESTRICTED_BY' : 'GOVERNED_BY',
+        });
+      }
+    }
+
+    for (const comm of commPlans) {
+      if (comm.applicableTo.includes('ALL') || comm.applicableTo.some(t => missionType.toUpperCase().includes(t.toUpperCase()))) {
+        addEdge({ source: missionNode.id, target: comm.id, relationship: 'COMMUNICATES_ON' });
+      }
+    }
+  }
+
+  // Units → Airspace (CONTROLS)
+  for (const as_ of airspaceStructures) {
+    if (!as_.controllingAuthority) continue;
+    const controlAuth = as_.controllingAuthority.toUpperCase();
+    for (const unitNode of allUnitNodes) {
+      if (unitNode.label.toUpperCase().includes(controlAuth) ||
+          controlAuth.includes(unitNode.label.toUpperCase().split(' ')[0])) {
+        addEdge({ source: unitNode.id, target: as_.id, relationship: 'CONTROLS' });
       }
     }
   }
