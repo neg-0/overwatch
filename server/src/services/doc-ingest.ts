@@ -12,6 +12,7 @@ import {
   NORMALIZE_PLANNING_SCHEMA,
   NORMALIZE_STRATEGY_SCHEMA,
 } from './llm-schemas.js';
+import { buildUnitIndex, resolveUnitForMission } from './unit-resolver.js';
 
 // ─── OpenAI Client ───────────────────────────────────────────────────────────
 import { getOpenAIClient } from '../lib/openai-client.js';
@@ -774,6 +775,13 @@ async function persistOrder(
     : 'UNCLASSIFIED';
 
   const result = await prisma.$transaction(async (tx) => {
+    // Build unit index for doctrine-driven mission → unit assignment (ORBAT match)
+    const units = await tx.unit.findMany({
+      where: { scenarioId },
+      include: { assets: { include: { assetType: true } } },
+    });
+    const unitIndex = buildUnitIndex(units);
+
     // Create the tasking order
     const order = await tx.taskingOrder.create({
       data: {
@@ -818,6 +826,14 @@ async function persistOrder(
           ? (msn.domain as typeof validDomains[number])
           : 'AIR';
 
+        // Resolve executing unit from ORBAT via platform match (doctrine-driven)
+        const resolvedUnitId = resolveUnitForMission(
+          msn.platformType || 'UNKNOWN',
+          domain,
+          'FRIENDLY',
+          unitIndex,
+        );
+
         const mission = await tx.mission.create({
           data: {
             packageId: missionPackage.id,
@@ -828,6 +844,7 @@ async function persistOrder(
             platformCount: msn.platformCount || 1,
             missionType: msn.missionType || 'UNKNOWN',
             status: 'PLANNED',
+            unitId: resolvedUnitId,
           },
         });
         missionCount++;
@@ -923,6 +940,41 @@ async function persistOrder(
           });
         }
 
+        // ─── Derive coverage point for space needs ────────────────────────
+        // Space coverage requires a lat/lon for satellite line-of-sight.
+        // Derive from the mission's target area (JIPTL) or operating area (ATO waypoints).
+        let coverageLat: number | null = null;
+        let coverageLon: number | null = null;
+
+        // Best source: first target with coordinates (JIPTL-derived)
+        if (msn.targets?.length) {
+          const tgt = msn.targets[0];
+          if (tgt.latitude && tgt.longitude) {
+            coverageLat = tgt.latitude;
+            coverageLon = tgt.longitude;
+          }
+        }
+
+        // Fallback: first significant waypoint (IP/TGT/CP from ATO)
+        if (coverageLat == null && msn.waypoints?.length) {
+          const sigWp = msn.waypoints.find((wp: any) =>
+            ['IP', 'TGT', 'CP', 'ORBIT', 'CAP', 'PATROL'].includes(wp.waypointType),
+          );
+          if (sigWp && sigWp.latitude && sigWp.longitude) {
+            coverageLat = sigWp.latitude;
+            coverageLon = sigWp.longitude;
+          }
+        }
+
+        // Last resort: any waypoint with valid coordinates
+        if (coverageLat == null && msn.waypoints?.length) {
+          const anyWp = msn.waypoints.find((wp: any) => wp.latitude && wp.longitude);
+          if (anyWp) {
+            coverageLat = anyWp.latitude;
+            coverageLon = anyWp.longitude;
+          }
+        }
+
         // Space needs — with fallback, criticality, and priority traceability
         for (const sn of msn.spaceNeeds || []) {
           const validCapTypes = ['GPS', 'GPS_MILITARY', 'SATCOM', 'SATCOM_PROTECTED', 'SATCOM_WIDEBAND', 'SATCOM_TACTICAL', 'OPIR', 'ISR_SPACE', 'EW_SPACE', 'WEATHER', 'PNT', 'LINK16', 'SIGINT_SPACE', 'SDA', 'LAUNCH_DETECT', 'CYBER_SPACE', 'DATALINK', 'SSA'] as const;
@@ -956,6 +1008,8 @@ async function persistOrder(
               priority: sn.priority || 5,
               startTime: effectiveStart,
               endTime: effectiveEnd,
+              coverageLat,
+              coverageLon,
               fallbackCapability,
               missionCriticality,
               riskIfDenied: sn.riskIfDenied || null,

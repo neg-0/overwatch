@@ -8,6 +8,32 @@
 
 import prisma from '../db/prisma-client.js';
 
+// ─── Geographic coverage validation ──────────────────────────────────────────
+
+/** Check if a space need's coverage point falls within a coverage window's swath */
+function isWithinCoverage(
+  need: { coverageLat?: number | null; coverageLon?: number | null },
+  cw: { centerLat: number; centerLon: number; swathWidthKm: number },
+): boolean {
+  // If need has no coordinates, skip geographic check (accept any time-matched coverage)
+  if (need.coverageLat == null || need.coverageLon == null) return true;
+
+  // Haversine distance between need point and coverage window center
+  const R = 6371; // Earth radius in km
+  const dLat = ((cw.centerLat - need.coverageLat) * Math.PI) / 180;
+  const dLon = ((cw.centerLon - need.coverageLon) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((need.coverageLat * Math.PI) / 180) *
+      Math.cos((cw.centerLat * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
+  const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return dist <= cw.swathWidthKm / 2;
+}
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
 export interface ContentionEvent {
   contentionGroup: string;
   capability: string;
@@ -121,27 +147,44 @@ export async function allocateSpaceResources(
     const groupId = `CONT-${group.capability}-${group.needs.map(n => n.need.id.slice(0, 8)).sort().join('-')}`;
 
     if (group.needs.length === 1) {
-      // No contention — check if we have coverage
+      // No contention — find the best matching asset with time + geographic coverage
       const entry = group.needs[0];
-      const hasAsset = spaceAssets.some(a =>
+      const matchedAsset = spaceAssets.find(a =>
         a.capabilities.includes(entry.need.capabilityType as any) &&
         a.coverageWindows.some(cw =>
           cw.capabilityType === entry.need.capabilityType &&
           cw.startTime <= entry.need.endTime &&
-          cw.endTime >= entry.need.startTime,
+          cw.endTime >= entry.need.startTime &&
+          isWithinCoverage(entry.need, cw),
         ),
       );
+      const hasAsset = !!matchedAsset;
 
       const existingAllocation = await prisma.spaceAllocation.findFirst({
         where: { spaceNeedId: entry.need.id },
       });
 
-      const status = hasAsset ? 'FULFILLED' : 'DENIED';
-      const allocatedCapability = hasAsset ? entry.need.capabilityType : null;
-      const rationale = hasAsset
-        ? `Asset available for ${entry.need.capabilityType}`
-        : `No operational ${entry.need.capabilityType} asset with coverage window`;
-      const riskLevel = hasAsset ? 'LOW' : (entry.need.missionCriticality === 'CRITICAL' ? 'CRITICAL' : 'MODERATE');
+      let status: string;
+      let allocatedCapability: string | null;
+      let rationale: string;
+      let riskLevel: string;
+
+      if (hasAsset) {
+        status = 'FULFILLED';
+        allocatedCapability = entry.need.capabilityType;
+        rationale = `Allocated ${matchedAsset!.name} for ${entry.need.capabilityType}`;
+        riskLevel = 'LOW';
+      } else if (entry.need.fallbackCapability) {
+        status = 'DEGRADED';
+        allocatedCapability = entry.need.fallbackCapability;
+        rationale = `No operational ${entry.need.capabilityType} asset with coverage window. Degraded to ${entry.need.fallbackCapability}`;
+        riskLevel = entry.need.missionCriticality === 'CRITICAL' ? 'HIGH' : 'MODERATE';
+      } else {
+        status = 'DENIED';
+        allocatedCapability = null;
+        rationale = `No operational ${entry.need.capabilityType} asset with coverage window`;
+        riskLevel = entry.need.missionCriticality === 'CRITICAL' ? 'CRITICAL' : 'MODERATE';
+      }
 
       const allocation = existingAllocation
         ? await prisma.spaceAllocation.update({
@@ -149,6 +192,7 @@ export async function allocateSpaceResources(
             data: {
               status: status as any,
               allocatedCapability: allocatedCapability as any,
+              spaceAssetId: matchedAsset?.id ?? null,
               rationale,
               riskLevel,
             },
@@ -158,6 +202,7 @@ export async function allocateSpaceResources(
               spaceNeedId: entry.need.id,
               status: status as any,
               allocatedCapability: allocatedCapability as any,
+              spaceAssetId: matchedAsset?.id ?? null,
               rationale,
               riskLevel,
             },
@@ -176,14 +221,17 @@ export async function allocateSpaceResources(
       // Contention! Multiple needs competing for the same capability.
       // First, check whether any asset actually provides coverage —
       // if not, contention resolution is moot and everyone is DENIED.
-      const hasCoverage = spaceAssets.some(a =>
+      const coverageAsset = spaceAssets.find(a =>
         a.capabilities.includes(group.capability as any) &&
         a.coverageWindows.some(cw =>
           cw.capabilityType === group.capability &&
           cw.startTime <= group.timeEnd &&
-          cw.endTime >= group.timeStart,
+          cw.endTime >= group.timeStart &&
+          // Geographic check: at least one need in the group is within swath
+          group.needs.some(n => isWithinCoverage(n.need, cw)),
         ),
       );
+      const hasCoverage = !!coverageAsset;
 
       // Sort by priority (lower rank = higher priority)
       const sorted = [...group.needs].sort((a, b) => {
@@ -241,12 +289,16 @@ export async function allocateSpaceResources(
           where: { spaceNeedId: entry.need.id },
         });
 
+        // Only the contention winner gets the matched asset; losers stay unassigned
+        const winnerAssetId = isWinner ? (coverageAsset?.id ?? null) : null;
+
         const allocation = existingContAlloc
           ? await prisma.spaceAllocation.update({
               where: { id: existingContAlloc.id },
               data: {
                 status: status as any,
                 allocatedCapability: allocatedCapability as any,
+                spaceAssetId: winnerAssetId,
                 rationale,
                 riskLevel,
                 contentionGroup: groupId,
@@ -258,6 +310,7 @@ export async function allocateSpaceResources(
                 spaceNeedId: entry.need.id,
                 status: status as any,
                 allocatedCapability: allocatedCapability as any,
+                spaceAssetId: winnerAssetId,
                 rationale,
                 riskLevel,
                 contentionGroup: groupId,
