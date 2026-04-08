@@ -1119,6 +1119,139 @@ body {
   border-radius: 0 4px 4px 0;
 }
 
+/* ─── Heatmap ─────────────────────────────────────────────────────────────── */
+
+.gantt-heatmap-section {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.gantt-heatmap-header {
+  display: flex;
+  height: 28px;
+  align-items: center;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.gantt-heatmap-header__label {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border-right: 1px solid var(--border-subtle);
+}
+
+.gantt-heatmap-collapse-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.gantt-heatmap-collapse-btn:hover {
+  color: var(--text-bright);
+}
+
+.gantt-heatmap-row {
+  display: flex;
+  min-height: 32px;
+  border-bottom: 1px solid var(--border-subtle);
+  align-items: center;
+}
+
+.gantt-heatmap-row:last-child {
+  border-bottom: none;
+}
+
+.gantt-heatmap-label {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border-right: 1px solid var(--border-subtle);
+  font-size: 11px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  color: var(--text-bright);
+}
+
+.gantt-heatmap-label__remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.gantt-heatmap-row:hover .gantt-heatmap-label__remove {
+  opacity: 1;
+}
+
+.gantt-heatmap-label__remove:hover {
+  color: #ef4444;
+}
+
+.gantt-heatmap-canvas-area {
+  flex: 1;
+  height: 28px;
+  position: relative;
+  overflow: hidden;
+}
+
+.gantt-heatmap-legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding-right: 12px;
+}
+
+.gantt-heatmap-legend__gradient {
+  width: 60px;
+  height: 8px;
+  border-radius: 2px;
+  background: linear-gradient(to right, rgba(30,58,95,0.5), #2563eb, #eab308, #f97316, #ef4444);
+}
+
+/* Asset Selector Popover */
+
+.asset-selector-popover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  z-index: 100;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  min-width: 220px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.asset-selector-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.1s;
+}
+
+.asset-selector-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
 /* ─── Space Dashboard ─────────────────────────────────────────────────────── */
 
 .space-grid {

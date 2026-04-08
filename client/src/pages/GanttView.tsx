@@ -24,8 +24,14 @@ interface SpaceDependency {
   criticality: string;
   allocatedTo: string | null;
   status: string;
+  systemName: string | null;
   startTime: string;
   endTime: string;
+}
+
+interface SpaceAssetInfo {
+  name: string;
+  constellation: string;
 }
 
 interface TimelineMission {
@@ -52,6 +58,20 @@ interface TimelineData {
   scenarioId: string;
   atoPeriod: { start: string; end: string } | null;
   missions: TimelineMission[];
+}
+
+interface HeatmapSample {
+  timePct: number;
+  weightedScore: number;
+  missions: TimelineMission[];
+}
+
+interface HeatmapTooltipData {
+  asset: string;
+  x: number;
+  y: number;
+  missions: TimelineMission[];
+  score: number;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -127,6 +147,74 @@ function hasCriticalUnallocated(m: TimelineMission): boolean {
   return m.spaceDependencies.some(
     d => d.criticality === 'CRITICAL' && d.status === 'UNALLOCATED'
   );
+}
+
+// ─── Heatmap Helpers ────────────────────────────────────────────────────────
+
+const HEAT_STOPS: [number, [number, number, number]][] = [
+  [0.0, [30, 58, 95]],    // dark blue
+  [0.25, [37, 99, 235]],  // blue
+  [0.5, [234, 179, 8]],   // yellow
+  [0.75, [249, 115, 22]], // orange
+  [1.0, [239, 68, 68]],   // red
+];
+
+function scoreToColor(normalized: number): string {
+  const n = Math.max(0, Math.min(1, normalized));
+  if (n === 0) return 'rgba(30,58,95,0.3)';
+  for (let i = 1; i < HEAT_STOPS.length; i++) {
+    const [t0, c0] = HEAT_STOPS[i - 1];
+    const [t1, c1] = HEAT_STOPS[i];
+    if (n <= t1) {
+      const f = (n - t0) / (t1 - t0);
+      const r = Math.round(c0[0] + (c1[0] - c0[0]) * f);
+      const g = Math.round(c0[1] + (c1[1] - c0[1]) * f);
+      const b = Math.round(c0[2] + (c1[2] - c0[2]) * f);
+      return `rgb(${r},${g},${b})`;
+    }
+  }
+  return 'rgb(239,68,68)';
+}
+
+function computeHeatmapForAsset(
+  asset: SpaceAssetInfo,
+  missions: TimelineMission[],
+  periodStartMs: number,
+  periodDurMs: number,
+): HeatmapSample[] {
+  if (periodDurMs <= 0) return [];
+  const sampleCount = Math.max(200, Math.floor(periodDurMs / 900000)); // ~15min intervals
+  const samples: HeatmapSample[] = [];
+  const step = periodDurMs / sampleCount;
+
+  for (let i = 0; i <= sampleCount; i++) {
+    const tMs = periodStartMs + i * step;
+    const timePct = (i / sampleCount) * 100;
+    let weightedScore = 0;
+    const activeMissions: TimelineMission[] = [];
+
+    for (const m of missions) {
+      // Match by direct allocation name OR by systemName matching constellation
+      const deps = m.spaceDependencies.filter(d =>
+        d.allocatedTo === asset.name ||
+        (d.systemName && d.systemName === asset.constellation)
+      );
+      if (deps.length === 0) continue;
+      const isActive = deps.some(d => {
+        const dStart = new Date(d.startTime).getTime();
+        const dEnd = new Date(d.endTime).getTime();
+        return tMs >= dStart && tMs <= dEnd;
+      });
+      if (isActive) {
+        activeMissions.push(m);
+        weightedScore += 6 - m.priority; // P1=5, P2=4, P3=3, P4=2, P5=1
+      }
+    }
+
+    samples.push({ timePct, weightedScore, missions: activeMissions });
+  }
+
+  return samples;
 }
 
 // ─── Tooltip ─────────────────────────────────────────────────────────────────
@@ -347,6 +435,362 @@ function MissionDetailPanel({ mission, onClose }: DetailPanelProps) {
   );
 }
 
+// ─── Heatmap Tooltip ────────────────────────────────────────────────────────
+
+function HeatmapTooltip({ asset, x, y, missions, score }: HeatmapTooltipData) {
+  const style: React.CSSProperties = {
+    position: 'fixed',
+    left: Math.min(x + 12, window.innerWidth - 300),
+    top: Math.min(y - 8, window.innerHeight - 200),
+    zIndex: 9999,
+    pointerEvents: 'none',
+  };
+
+  const sorted = [...missions].sort((a, b) => a.priority - b.priority);
+  const shown = sorted.slice(0, 5);
+  const remaining = missions.length - shown.length;
+
+  return (
+    <div className="gantt-tooltip" style={style}>
+      <div className="gantt-tooltip__header">
+        <span style={{ fontWeight: 700, color: 'var(--text-bright)' }}>{asset}</span>
+        <span style={{ color: 'var(--text-muted)', fontSize: '10px', marginLeft: '6px' }}>
+          Score: {score}
+        </span>
+      </div>
+      <div className="gantt-tooltip__row" style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
+        {missions.length} mission{missions.length !== 1 ? 's' : ''} active
+      </div>
+      {shown.map(m => (
+        <div key={m.id} className="gantt-tooltip__row" style={{ fontSize: '11px' }}>
+          <span style={{
+            color: PRIORITY_COLORS[m.priority] || '#6b7280',
+            fontWeight: 600,
+            marginRight: '4px',
+            fontSize: '9px',
+          }}>P{m.priority}</span>
+          <span style={{ color: 'var(--text-bright)' }}>{m.callsign}</span>
+          <span style={{ color: 'var(--text-muted)', marginLeft: '6px' }}>{m.type}</span>
+        </div>
+      ))}
+      {remaining > 0 && (
+        <div className="gantt-tooltip__row" style={{ color: 'var(--text-muted)', fontSize: '10px', fontStyle: 'italic' }}>
+          +{remaining} more
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Asset Heatmap Row ──────────────────────────────────────────────────────
+
+interface AssetHeatmapRowProps {
+  assetName: string;
+  samples: HeatmapSample[];
+  maxScore: number;
+  nowPct: number | null;
+  onRemove: () => void;
+  onHover: (data: HeatmapTooltipData | null) => void;
+}
+
+function AssetHeatmapRow({ assetName, samples, maxScore, nowPct, onRemove, onHover }: AssetHeatmapRowProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(400);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) setContainerWidth(entry.contentRect.width);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Draw heatmap on canvas
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || samples.length < 2 || maxScore <= 0) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const h = 28;
+    canvas.width = containerWidth * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = `${containerWidth}px`;
+    canvas.style.height = `${h}px`;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, containerWidth, h);
+
+    for (let i = 0; i < samples.length - 1; i++) {
+      const s = samples[i];
+      const sNext = samples[i + 1];
+      const x0 = (s.timePct / 100) * containerWidth;
+      const x1 = (sNext.timePct / 100) * containerWidth;
+      const norm = s.weightedScore / maxScore;
+      ctx.fillStyle = scoreToColor(norm);
+      ctx.fillRect(x0, 0, Math.max(x1 - x0, 1), h);
+    }
+
+    // Now line
+    if (nowPct !== null) {
+      const nx = (nowPct / 100) * containerWidth;
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(nx, 0);
+      ctx.lineTo(nx, h);
+      ctx.stroke();
+    }
+  }, [samples, maxScore, containerWidth, nowPct]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas || samples.length === 0) return;
+    const rect = canvas.getBoundingClientRect();
+    const xPct = ((e.clientX - rect.left) / rect.width) * 100;
+    // Find nearest sample
+    let closest = samples[0];
+    let minDist = Math.abs(closest.timePct - xPct);
+    for (let i = 1; i < samples.length; i++) {
+      const dist = Math.abs(samples[i].timePct - xPct);
+      if (dist < minDist) { closest = samples[i]; minDist = dist; }
+    }
+    if (closest.missions.length > 0) {
+      onHover({
+        asset: assetName,
+        x: e.clientX,
+        y: e.clientY,
+        missions: closest.missions,
+        score: closest.weightedScore,
+      });
+    } else {
+      onHover(null);
+    }
+  }, [samples, assetName, onHover]);
+
+  const handleMouseLeave = useCallback(() => onHover(null), [onHover]);
+
+  return (
+    <div className="gantt-heatmap-row">
+      <div className="gantt-heatmap-label">
+        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {assetName}
+        </span>
+        <button className="gantt-heatmap-label__remove" onClick={onRemove} title="Remove">×</button>
+      </div>
+      <div ref={containerRef} className="gantt-heatmap-canvas-area">
+        <canvas
+          ref={canvasRef}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={handleMouseLeave}
+          style={{ display: 'block', cursor: 'crosshair' }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ─── Asset Selector Popover ─────────────────────────────────────────────────
+
+interface AssetSelectorProps {
+  availableAssets: string[];
+  selectedAssets: string[];
+  onToggle: (asset: string) => void;
+  onClose: () => void;
+}
+
+function AssetSelectorPopover({ availableAssets, selectedAssets, onToggle, onClose }: AssetSelectorProps) {
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [onClose]);
+
+  return (
+    <div ref={popoverRef} className="asset-selector-popover">
+      <div style={{ padding: '6px 10px', fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)' }}>
+        SELECT ASSETS
+      </div>
+      <div style={{ maxHeight: '240px', overflowY: 'auto' }}>
+        {availableAssets.length === 0 && (
+          <div style={{ padding: '12px', color: 'var(--text-muted)', fontSize: '11px', fontStyle: 'italic' }}>
+            No allocated assets found
+          </div>
+        )}
+        {availableAssets.map(asset => {
+          const checked = selectedAssets.includes(asset);
+          return (
+            <label key={asset} className="asset-selector-item">
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => onToggle(asset)}
+                style={{ accentColor: 'var(--accent-primary)' }}
+              />
+              <span style={{ color: checked ? 'var(--text-bright)' : 'var(--text-secondary)' }}>{asset}</span>
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Asset Heatmap Section ──────────────────────────────────────────────────
+
+interface AssetHeatmapSectionProps {
+  missions: TimelineMission[];
+  periodStartMs: number;
+  periodDurMs: number;
+  nowPct: number | null;
+  selectedAssets: string[];
+  setSelectedAssets: React.Dispatch<React.SetStateAction<string[]>>;
+  onHeatmapHover: (data: HeatmapTooltipData | null) => void;
+  scenarioId: string | null;
+}
+
+function AssetHeatmapSection({
+  missions, periodStartMs, periodDurMs, nowPct,
+  selectedAssets, setSelectedAssets, onHeatmapHover, scenarioId,
+}: AssetHeatmapSectionProps) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [selectorOpen, setSelectorOpen] = useState(false);
+  const [spaceAssets, setSpaceAssets] = useState<SpaceAssetInfo[]>([]);
+
+  // Fetch space assets for the selector
+  useEffect(() => {
+    if (!scenarioId) return;
+    let mounted = true;
+    fetch(`/api/space-assets?scenarioId=${scenarioId}`)
+      .then(r => r.json())
+      .then(json => {
+        if (!mounted) return;
+        const assets: SpaceAssetInfo[] = (json.data || json || [])
+          .filter((a: any) => a.affiliation === 'FRIENDLY' && a.status !== 'LOST')
+          .map((a: any) => ({ name: a.name, constellation: a.constellation }));
+        setSpaceAssets(assets);
+      })
+      .catch(() => {});
+    return () => { mounted = false; };
+  }, [scenarioId]);
+
+  const availableAssets = useMemo(() =>
+    spaceAssets.map(a => a.name).sort(),
+  [spaceAssets]);
+
+  // Build a name→asset lookup for computation
+  const assetLookup = useMemo(() => {
+    const map = new Map<string, SpaceAssetInfo>();
+    for (const a of spaceAssets) map.set(a.name, a);
+    return map;
+  }, [spaceAssets]);
+
+  const heatmapData = useMemo(() => {
+    const map = new Map<string, HeatmapSample[]>();
+    for (const name of selectedAssets) {
+      const asset = assetLookup.get(name);
+      if (!asset) continue;
+      map.set(name, computeHeatmapForAsset(asset, missions, periodStartMs, periodDurMs));
+    }
+    return map;
+  }, [selectedAssets, assetLookup, missions, periodStartMs, periodDurMs]);
+
+  const maxScore = useMemo(() => {
+    let max = 1;
+    for (const samples of heatmapData.values()) {
+      for (const s of samples) {
+        if (s.weightedScore > max) max = s.weightedScore;
+      }
+    }
+    return max;
+  }, [heatmapData]);
+
+  const handleToggleAsset = useCallback((asset: string) => {
+    setSelectedAssets(prev =>
+      prev.includes(asset) ? prev.filter(a => a !== asset) : [...prev, asset]
+    );
+  }, [setSelectedAssets]);
+
+  const handleRemoveAsset = useCallback((asset: string) => {
+    setSelectedAssets(prev => prev.filter(a => a !== asset));
+  }, [setSelectedAssets]);
+
+  if (availableAssets.length === 0) return null;
+
+  return (
+    <div className="gantt-heatmap-section">
+      {/* Header */}
+      <div className="gantt-heatmap-header">
+        <div className="gantt-heatmap-header__label">
+          <button
+            className="gantt-heatmap-collapse-btn"
+            onClick={() => setCollapsed(c => !c)}
+            title={collapsed ? 'Expand' : 'Collapse'}
+          >
+            <span style={{ transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)', display: 'inline-block', transition: 'transform 0.15s' }}>
+              ▾
+            </span>
+          </button>
+          <span style={{ fontWeight: 700, fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>
+            ASSET UTILIZATION
+          </span>
+          {selectedAssets.length > 0 && (
+            <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginLeft: '4px' }}>
+              ({selectedAssets.length})
+            </span>
+          )}
+        </div>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', paddingLeft: '8px', position: 'relative' }}>
+          <button
+            className="btn btn-sm btn-secondary"
+            style={{ fontSize: '10px', padding: '2px 8px' }}
+            onClick={() => setSelectorOpen(o => !o)}
+          >
+            + Add Asset
+          </button>
+          {selectorOpen && (
+            <AssetSelectorPopover
+              availableAssets={availableAssets}
+              selectedAssets={selectedAssets}
+              onToggle={handleToggleAsset}
+              onClose={() => setSelectorOpen(false)}
+            />
+          )}
+          {/* Legend */}
+          <div className="gantt-heatmap-legend">
+            <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>Low</span>
+            <div className="gantt-heatmap-legend__gradient" />
+            <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>High</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Rows */}
+      {!collapsed && selectedAssets.map(asset => (
+        <AssetHeatmapRow
+          key={asset}
+          assetName={asset}
+          samples={heatmapData.get(asset) || []}
+          maxScore={maxScore}
+          nowPct={nowPct}
+          onRemove={() => handleRemoveAsset(asset)}
+          onHover={onHeatmapHover}
+        />
+      ))}
+    </div>
+  );
+}
+
 // ─── Time Axis Header ─────────────────────────────────────────────────────────
 
 interface TimeAxisProps {
@@ -532,6 +976,8 @@ export function GanttView() {
   const [hoveredMission, setHoveredMission] = useState<TimelineMission | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const [selectedMission, setSelectedMission] = useState<TimelineMission | null>(null);
+  const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
+  const [heatmapTooltip, setHeatmapTooltip] = useState<HeatmapTooltipData | null>(null);
   const ganttContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -636,6 +1082,9 @@ export function GanttView() {
       {hoveredMission && (
         <MissionTooltip mission={hoveredMission} x={tooltipPos.x} y={tooltipPos.y} />
       )}
+      {heatmapTooltip && (
+        <HeatmapTooltip {...heatmapTooltip} />
+      )}
 
       <div className="content-header">
         <h1>Mission Timeline — Gantt View</h1>
@@ -690,6 +1139,17 @@ export function GanttView() {
                   periodDurMs={periodDurMs}
                   maxAtoDay={maxAtoDay}
                   atoPeriod={data?.atoPeriod ?? null}
+                />
+
+                <AssetHeatmapSection
+                  missions={filteredMissions}
+                  periodStartMs={periodStartMs}
+                  periodDurMs={periodDurMs}
+                  nowPct={nowPct}
+                  selectedAssets={selectedAssets}
+                  setSelectedAssets={setSelectedAssets}
+                  onHeatmapHover={setHeatmapTooltip}
+                  scenarioId={activeScenarioId}
                 />
 
                 {priorityGroups.map(group => (
