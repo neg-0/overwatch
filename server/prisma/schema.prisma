@@ -168,6 +168,7 @@ model Scenario {
   scenarioInjects  ScenarioInject[]
   generationLogs   GenerationLog[]
   airspaceStructures AirspaceStructure[]
+  spaceSupportRequests SpaceSupportRequest[]
 
   @@map("scenarios")
 }
@@ -553,6 +554,62 @@ model SpaceCoverageWindow {
   createdAt         DateTime            @default(now())
 
   @@map("space_coverage_windows")
+}
+
+// ─── Space Support Requests ──────────────────────────────────────────────────
+
+enum SSRStatus {
+  FULFILLED   // Green — asset providing requested capability
+  DEGRADED    // Yellow — backup/reduced capability assigned
+  DENIED      // Red — no asset available, mission accepts risk
+}
+
+model SpaceSupportRequest {
+  id              String              @id @default(uuid())
+  scenarioId      String
+  scenario        Scenario            @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  atoDayNumber    Int
+
+  // Submitter
+  submitter       String              // "613th AOC", "1st Space Brigade", "CENTCOM J6"
+  submitterType   String              // "AOC", "CCMD", "SPACE_BDE", "JFC"
+  component       String              // "AFCENT", "ARCENT", "NAVCENT", "MARCENT"
+
+  // Operation/Mission Reference (text — NOT FK)
+  callsignSupported   String          // "VIPER 11", "HAMMER 03"
+  missionDescription  String          // "DCA sweep northern corridor"
+  operationArea       String          // "AO THUNDER", "CENTCOM AOR"
+  coverageLat         Float?
+  coverageLon         Float?
+
+  // Timing
+  startTime       DateTime
+  endTime         DateTime
+
+  // Capability Requested
+  capabilityRequested SpaceCapabilityType
+  bandRequested       String?         // "EHF", "SHF", "UHF", "Ka", "L-BAND"
+  systemPreferred     String?         // "AEHF", "WGS", "MUOS", "SBIRS"
+
+  // C2 / PACE Plan
+  controllingAuthority String         // "18th SDS", "614th AOC/CSD"
+  primaryComm     String              // "SIPRNET Chat / AEHF Ch 7"
+  alternateComm   String?             // "WGS Ch 12"
+  contingencyComm String?             // "UHF SATCOM 293.5 MHz"
+  emergencyComm   String?             // "HF 8992 kHz / TACAMO"
+
+  // Assignment
+  assetAssigned   String?             // "WGS-4", "SBIRS GEO-3", "GPS III SV05"
+  constellationAssigned String?       // "WGS", "SBIRS", "GPS III"
+
+  // Status
+  status          SSRStatus           @default(FULFILLED)
+  statusRationale String?             // "Degraded: WGS-4 antenna 2 offline, using backup feed"
+
+  createdAt       DateTime            @default(now())
+
+  @@index([scenarioId, atoDayNumber])
+  @@map("space_support_requests")
 }
 
 // ─── Simulation ──────────────────────────────────────────────────────────────

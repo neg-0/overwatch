@@ -1119,6 +1119,29 @@ body {
   border-radius: 0 4px 4px 0;
 }
 
+/* ─── Space Support Requests ─────────────────────────────────────────────── */
+
+.ssr-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.ssr-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: rgba(167, 139, 250, 0.06);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
 /* ─── Map Detail Panel (reuses gantt-detail pattern) ─────────────────────── */
 
 .map-detail-panel {
