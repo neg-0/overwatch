@@ -199,6 +199,15 @@ model StrategyDocument {
   planningDocs   PlanningDocument[]
   priorities     StrategyPriority[]
 
+  // OPLAN/CONPLAN-specific fields
+  commanderIntent String?  @db.Text
+  mission         String?  @db.Text
+
+  // OPLAN/CONPLAN-specific extraction relations
+  oplanPhases            OPLANPhase[]
+  commandTasks           CommandTask[]
+  paceComms              PACEComm[]
+
   @@map("strategy_documents")
 }
 
@@ -218,6 +227,53 @@ model StrategyPriority {
   derivedPriorities PriorityEntry[]
 
   @@map("strategy_priorities")
+}
+
+// ─── OPLAN/CONPLAN Extraction Models ─────────────────────────────────────────
+// Structured data extracted from OPLAN/CONPLAN documents — phases, command tasks, PACE plans
+
+model OPLANPhase {
+  id              String           @id @default(uuid())
+  strategyDocId   String
+  strategyDoc     StrategyDocument @relation(fields: [strategyDocId], references: [id], onDelete: Cascade)
+  phaseNumber     Int              // 0-4 typically
+  phaseName       String           // e.g., "SHAPE / PREPARE", "DEPLOY / DISPERSE"
+  startDate       String?          // e.g., "01 MAR 2026" or ISO 8601
+  endDate         String?
+  description     String           @db.Text  // Full phase description
+  keyTasks        String[]         // Array of key tasks for this phase
+  createdAt       DateTime         @default(now())
+
+  @@index([strategyDocId])
+  @@map("oplan_phases")
+}
+
+model CommandTask {
+  id              String           @id @default(uuid())
+  strategyDocId   String
+  strategyDoc     StrategyDocument @relation(fields: [strategyDocId], references: [id], onDelete: Cascade)
+  commandName     String           // e.g., "PACFLT (JFMCC)", "PACAF (JFACC)"
+  commandRole     String?          // e.g., "JFMCC", "JFACC", "JFSCC"
+  tasks           String[]         // Array of assigned tasks
+  createdAt       DateTime         @default(now())
+
+  @@index([strategyDocId])
+  @@map("command_tasks")
+}
+
+model PACEComm {
+  id              String           @id @default(uuid())
+  strategyDocId   String
+  strategyDoc     StrategyDocument @relation(fields: [strategyDocId], references: [id], onDelete: Cascade)
+  context         String           // e.g., "Exercise-level", "JTF HQ", "Maritime"
+  primary         String           // P — primary comm method
+  alternate       String           // A — alternate
+  contingency     String           // C — contingency
+  emergency       String           // E — emergency
+  createdAt       DateTime         @default(now())
+
+  @@index([strategyDocId])
+  @@map("pace_comms")
 }
 
 model PlanningDocument {

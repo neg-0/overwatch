@@ -19,7 +19,10 @@ export type GraphNodeType =
   | 'PROCEDURE'
   | 'COMM_NET'
   | 'COORDINATION_MEASURE'
-  | 'RESTRICTION';
+  | 'RESTRICTION'
+  | 'PHASE'
+  | 'COMMAND_TASK'
+  | 'PACE_COMM';
 
 export interface GraphNode {
   id: string;
@@ -64,7 +67,7 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
 
   const allStrategies = await prisma.strategyDocument.findMany({
     where: { scenarioId },
-    include: { priorities: true },
+    include: { priorities: true, oplanPhases: true, commandTasks: true, paceComms: true },
     orderBy: { tier: 'asc' },
     take: 200,
   });
@@ -110,6 +113,50 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
         meta: { effect: p.effect },
       });
       addEdge({ source: doc.id, target: p.id, relationship: 'ESTABLISHES_PRIORITY', weight: 11 - p.rank });
+    }
+
+    // OPLAN phases
+    for (const phase of doc.oplanPhases) {
+      addNode({
+        id: phase.id,
+        type: 'PHASE',
+        label: phase.phaseName,
+        sublabel: `Phase ${phase.phaseNumber}`,
+        meta: { startDate: phase.startDate, endDate: phase.endDate, keyTasks: phase.keyTasks },
+      });
+      addEdge({ source: doc.id, target: phase.id, relationship: 'DEFINES_PHASE' });
+    }
+
+    // Command tasks (ORBAT task assignments)
+    for (const ct of doc.commandTasks) {
+      addNode({
+        id: ct.id,
+        type: 'COMMAND_TASK',
+        label: ct.commandName,
+        sublabel: ct.commandRole || undefined,
+        meta: { tasks: ct.tasks },
+      });
+      addEdge({ source: doc.id, target: ct.id, relationship: 'ASSIGNS_TASK' });
+
+      // Cross-link command tasks to units by name matching
+      for (const unitNode of nodes.filter(n => n.type === 'UNIT')) {
+        if (unitNode.label.toUpperCase().includes(ct.commandName.toUpperCase()) ||
+            ct.commandName.toUpperCase().includes(unitNode.label.toUpperCase().split(' ')[0])) {
+          addEdge({ source: ct.id, target: unitNode.id, relationship: 'TASKED_UNIT' });
+        }
+      }
+    }
+
+    // PACE comms
+    for (const pace of doc.paceComms) {
+      addNode({
+        id: pace.id,
+        type: 'PACE_COMM',
+        label: `PACE: ${pace.context}`,
+        sublabel: `P: ${pace.primary}`,
+        meta: { primary: pace.primary, alternate: pace.alternate, contingency: pace.contingency, emergency: pace.emergency },
+      });
+      addEdge({ source: doc.id, target: pace.id, relationship: 'DEFINES' });
     }
   }
 
@@ -589,7 +636,7 @@ export async function buildIngestDelta(
     case 'STRATEGY': {
       const doc = await prisma.strategyDocument.findUnique({
         where: { id: createdId },
-        include: { priorities: true },
+        include: { priorities: true, oplanPhases: true, commandTasks: true, paceComms: true },
       });
       if (!doc) break;
 
@@ -615,6 +662,43 @@ export async function buildIngestDelta(
         });
         edges.push({ source: doc.id, target: p.id, relationship: 'ESTABLISHES_PRIORITY', weight: 11 - p.rank });
       }
+
+      // OPLAN phases
+      for (const phase of doc.oplanPhases) {
+        nodes.push({
+          id: phase.id,
+          type: 'PHASE',
+          label: phase.phaseName,
+          sublabel: `Phase ${phase.phaseNumber}`,
+          meta: { startDate: phase.startDate, endDate: phase.endDate, keyTasks: phase.keyTasks },
+        });
+        edges.push({ source: doc.id, target: phase.id, relationship: 'DEFINES_PHASE' });
+      }
+
+      // Command tasks
+      for (const ct of doc.commandTasks) {
+        nodes.push({
+          id: ct.id,
+          type: 'COMMAND_TASK',
+          label: ct.commandName,
+          sublabel: ct.commandRole || undefined,
+          meta: { tasks: ct.tasks },
+        });
+        edges.push({ source: doc.id, target: ct.id, relationship: 'ASSIGNS_TASK' });
+      }
+
+      // PACE comms
+      for (const pace of doc.paceComms) {
+        nodes.push({
+          id: pace.id,
+          type: 'PACE_COMM',
+          label: `PACE: ${pace.context}`,
+          sublabel: `P: ${pace.primary}`,
+          meta: { primary: pace.primary, alternate: pace.alternate, contingency: pace.contingency, emergency: pace.emergency },
+        });
+        edges.push({ source: doc.id, target: pace.id, relationship: 'DEFINES' });
+      }
+
       break;
     }
 

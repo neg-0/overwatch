@@ -87,6 +87,116 @@ export const NORMALIZE_STRATEGY_SCHEMA = {
   },
 };
 
+// ─── Schema 2a: Normalizer — OPLAN/CONPLAN ─────────────────────────────────
+
+export const NORMALIZE_OPLAN_SCHEMA = {
+  name: 'normalized_oplan',
+  strict: true,
+  schema: {
+    type: 'object' as const,
+    properties: {
+      title: { type: 'string' as const },
+      docType: { type: 'string' as const },
+      authorityLevel: { type: 'string' as const },
+      content: { type: 'string' as const },
+      effectiveDate: { type: 'string' as const },
+      tier: { type: 'number' as const },
+      parentDocReference: { type: ['string', 'null'] as const },
+      commanderIntent: { type: ['string', 'null'] as const, description: 'Commander\'s intent: purpose, method, end state' },
+      mission: { type: ['string', 'null'] as const, description: 'Mission statement from section 2' },
+      priorities: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            rank: { type: 'number' as const },
+            effect: { type: 'string' as const },
+            description: { type: 'string' as const },
+            justification: { type: 'string' as const },
+          },
+          required: ['rank', 'effect', 'description', 'justification'],
+          additionalProperties: false,
+        },
+      },
+      phases: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            phaseNumber: { type: 'number' as const },
+            phaseName: { type: 'string' as const },
+            startDate: { type: ['string', 'null'] as const },
+            endDate: { type: ['string', 'null'] as const },
+            description: { type: 'string' as const },
+            keyTasks: { type: 'array' as const, items: { type: 'string' as const } },
+          },
+          required: ['phaseNumber', 'phaseName', 'startDate', 'endDate', 'description', 'keyTasks'],
+          additionalProperties: false,
+        },
+      },
+      commandTasks: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            commandName: { type: 'string' as const, description: 'Command name (e.g., "PACFLT", "PACAF", "USSPACEFOR-INDOPACOM")' },
+            commandRole: { type: ['string', 'null'] as const, description: 'Functional role (JFMCC, JFACC, JFLC, JFSCC, JFCCC, etc.)' },
+            tasks: { type: 'array' as const, items: { type: 'string' as const } },
+          },
+          required: ['commandName', 'commandRole', 'tasks'],
+          additionalProperties: false,
+        },
+      },
+      paceComms: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            context: { type: 'string' as const, description: 'Context this PACE plan applies to (e.g., "Exercise-level", "JTF HQ")' },
+            primary: { type: 'string' as const },
+            alternate: { type: 'string' as const },
+            contingency: { type: 'string' as const },
+            emergency: { type: 'string' as const },
+          },
+          required: ['context', 'primary', 'alternate', 'contingency', 'emergency'],
+          additionalProperties: false,
+        },
+      },
+      logisticsPriorities: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            rank: { type: 'number' as const },
+            category: { type: 'string' as const },
+            description: { type: 'string' as const },
+          },
+          required: ['rank', 'category', 'description'],
+          additionalProperties: false,
+        },
+      },
+      reviewFlags: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            field: { type: 'string' as const },
+            rawValue: { type: 'string' as const },
+            confidence: { type: 'number' as const },
+            reason: { type: 'string' as const },
+          },
+          required: ['field', 'rawValue', 'confidence', 'reason'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['title', 'docType', 'authorityLevel', 'content', 'effectiveDate', 'tier',
+      'parentDocReference', 'commanderIntent', 'mission', 'priorities', 'phases',
+      'commandTasks', 'paceComms', 'logisticsPriorities', 'reviewFlags'],
+    additionalProperties: false,
+  },
+};
+
 // ─── Schema 3: Normalizer — Planning ────────────────────────────────────────
 
 export const NORMALIZE_PLANNING_SCHEMA = {

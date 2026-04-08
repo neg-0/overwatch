@@ -11,6 +11,7 @@ import {
   NORMALIZE_JIPTL_SCHEMA,
   NORMALIZE_MAAP_SCHEMA,
   NORMALIZE_MSEL_SCHEMA,
+  NORMALIZE_OPLAN_SCHEMA,
   NORMALIZE_ORDER_SCHEMA,
   NORMALIZE_PLANNING_SCHEMA,
   NORMALIZE_SPINS_SCHEMA,
@@ -67,6 +68,36 @@ export interface NormalizedStrategy {
     effect: string;
     description: string;
     justification: string;
+  }>;
+}
+
+export interface NormalizedOPLAN extends NormalizedStrategy {
+  commanderIntent?: string | null;
+  mission?: string | null;
+  phases: Array<{
+    phaseNumber: number;
+    phaseName: string;
+    startDate?: string | null;
+    endDate?: string | null;
+    description: string;
+    keyTasks: string[];
+  }>;
+  commandTasks: Array<{
+    commandName: string;
+    commandRole?: string | null;
+    tasks: string[];
+  }>;
+  paceComms: Array<{
+    context: string;
+    primary: string;
+    alternate: string;
+    contingency: string;
+    emergency: string;
+  }>;
+  logisticsPriorities: Array<{
+    rank: number;
+    category: string;
+    description: string;
   }>;
 }
 
@@ -326,6 +357,9 @@ export interface IngestResult {
     forceApportionmentCount?: number;
     weaponTargetPairCount?: number;
     coordinationMeasureCount?: number;
+    phaseCount?: number;
+    commandTaskCount?: number;
+    paceCommCount?: number;
   };
   reviewFlags: ReviewFlag[];
   parseTimeMs: number;
@@ -337,8 +371,8 @@ const CLASSIFY_PROMPT = `You are a military document classifier. Analyze the fol
 
 1. **hierarchyLevel**: One of:
    - "STRATEGY" — High-level directives from senior commanders: NDS, NMS, JSCP, CONPLAN, OPLAN, Campaign Plans, JFC Guidance, Component Directives. NOTE: CONPLAN (Contingency Plan) and OPLAN (Operations Plan) issued by a combatant commander are STRATEGY, NOT planning or order documents.
-   - "PLANNING" — Staff-level planning products (JIPTL, JPEL, SPINS, ACO, MAAP, Component Priority Lists). These support execution planning, not strategic direction.
-   - "ORDER" — Tactical-level execution orders (ATO, MTO, STO, OPORD, EXORD, FRAGORD)
+   - "PLANNING" — Staff-level planning products (JIPTL, JPEL, SPINS, ACO, MAAP, Component Priority Lists). These support execution planning, not strategic direction. IMPORTANT: The ACO (Airspace Control Order) is a PLANNING document, NOT an ORDER. Despite having "Order" in its name, it defines airspace structures and coordination measures — it is a planning product per JP 3-52.
+   - "ORDER" — Tactical-level execution orders that task specific units/missions (ATO, MTO, STO, OPORD, EXORD, FRAGORD). An ATO contains mission packages with callsigns, targets, and timelines. Do NOT classify ACO or SPINS as orders.
    - "EVENT_LIST" — Exercise event lists (MSEL, scenario inject lists, exercise event schedules)
 
 2. **documentType**: Specific type (NDS, NMS, JSCP, CONPLAN, OPLAN, CAMPAIGN_PLAN, JFC_GUIDANCE, COMPONENT_GUIDANCE, JIPTL, JPEL, SPINS, ACO, MAAP, ATO, MTO, STO, OPORD, EXORD, FRAGORD, MSEL)
@@ -398,6 +432,27 @@ export async function classifyDocument(rawText: string, sourceHint?: string): Pr
   // Validate hierarchy level
   if (!['STRATEGY', 'PLANNING', 'ORDER', 'EVENT_LIST'].includes(result.hierarchyLevel)) {
     throw new Error(`Invalid hierarchy level: ${result.hierarchyLevel}`);
+  }
+
+  // ─── Post-classification guards ────────────────────────────────────────
+  // Fix known LLM misclassifications based on document type semantics
+
+  // ACO and SPINS are ALWAYS planning documents, never orders
+  if (['ACO', 'SPINS'].includes(result.documentType) && result.hierarchyLevel === 'ORDER') {
+    console.log(`  [INGEST] Guard: Reclassified ${result.documentType} from ORDER → PLANNING`);
+    result.hierarchyLevel = 'PLANNING';
+  }
+
+  // OPLAN and CONPLAN are ALWAYS strategy documents
+  if (['OPLAN', 'CONPLAN'].includes(result.documentType) && result.hierarchyLevel !== 'STRATEGY') {
+    console.log(`  [INGEST] Guard: Reclassified ${result.documentType} from ${result.hierarchyLevel} → STRATEGY`);
+    result.hierarchyLevel = 'STRATEGY';
+  }
+
+  // MSEL is always EVENT_LIST
+  if (result.documentType === 'MSEL' && result.hierarchyLevel !== 'EVENT_LIST') {
+    console.log(`  [INGEST] Guard: Reclassified MSEL from ${result.hierarchyLevel} → EVENT_LIST`);
+    result.hierarchyLevel = 'EVENT_LIST';
   }
 
   return result;
@@ -474,6 +529,40 @@ CRITICAL EXTRACTION RULES:
   - If coordinates say "Fictional" or similar, still convert the numeric values
   - If no coordinates present, set latitude/longitude to null
 - Preserve the "targetId" (BE number) exactly as written — this links to ATO mission targets downstream
+
+Return ONLY valid JSON.
+
+DOCUMENT:
+`;
+
+const OPLAN_NORMALIZE_PROMPT = `You are a military operations planner extracting structured data from an OPLAN (Operations Plan) or CONPLAN (Contingency Plan).
+
+These are the richest strategy documents. Extract ALL of the following:
+
+BASIC FIELDS:
+- title, docType (OPLAN or CONPLAN), authorityLevel, content (full text), effectiveDate, tier (CONPLAN=4, OPLAN=5)
+- parentDocReference: the parent authority document referenced (e.g., JSCP, NMS)
+- commanderIntent: the full commander's intent (purpose, method, end state) from section 3.a
+- mission: the mission statement from section 2
+
+PRIORITIES — Extract ALL strategic priorities, targeting priorities, key tasks, and objectives. Sources include:
+- Key tasks from commander's intent (section 3.a.4)
+- Targeting priorities (section 4.2 or fires annex)
+- Lines of operation/effort objectives
+- Any numbered priority list
+Each priority gets: rank, effect (JP 3-0 term), description, justification
+
+PHASES — Extract every phase of the operation:
+- phaseNumber (0-based), phaseName, startDate, endDate, description, keyTasks array
+
+COMMAND TASKS — Extract tasks assigned to each subordinate command (section 3.c):
+- commandName (e.g., "PACFLT"), commandRole (e.g., "JFMCC"), tasks array
+
+PACE COMMUNICATIONS — Extract any PACE (Primary/Alternate/Contingency/Emergency) communication plans:
+- context (what this PACE applies to), primary, alternate, contingency, emergency
+
+LOGISTICS PRIORITIES — Extract sustainment priorities (section 6.2 or logistics annex):
+- rank, category (e.g., "Fuel", "Munitions", "Repair Parts"), description
 
 Return ONLY valid JSON.
 
@@ -744,11 +833,15 @@ Return ONLY valid JSON.
 DOCUMENT:
 `;
 
-type NormalizedData = NormalizedStrategy | NormalizedPlanning | NormalizedJIPTL | NormalizedSPINS | NormalizedACO | NormalizedMAAP | NormalizedOrder | NormalizedMSEL;
+type NormalizedData = NormalizedStrategy | NormalizedOPLAN | NormalizedPlanning | NormalizedJIPTL | NormalizedSPINS | NormalizedACO | NormalizedMAAP | NormalizedOrder | NormalizedMSEL;
 
 function getPromptAndSchema(classification: ClassifyResult): { prompt: string; schema: any } {
   switch (classification.hierarchyLevel) {
     case 'STRATEGY':
+      // OPLAN and CONPLAN get a richer extraction schema
+      if (classification.documentType === 'OPLAN' || classification.documentType === 'CONPLAN') {
+        return { prompt: OPLAN_NORMALIZE_PROMPT, schema: NORMALIZE_OPLAN_SCHEMA };
+      }
       return { prompt: STRATEGY_NORMALIZE_PROMPT, schema: NORMALIZE_STRATEGY_SCHEMA };
     case 'PLANNING':
       // Dispatch by document type for type-specific extraction
@@ -898,6 +991,119 @@ async function persistStrategy(
 
   console.log(`  [INGEST] Strategy doc created: ${created.title} (tier ${tier}) with ${priorityCount} strategic priorities`);
   return { createdId: created.id, parentLinkId: parentDoc?.id };
+}
+
+// ─── OPLAN/CONPLAN Persist (strategy + phases, command tasks, PACE comms) ────
+
+async function persistOPLAN(
+  scenarioId: string,
+  data: NormalizedOPLAN,
+  rawText: string,
+  classification: ClassifyResult,
+): Promise<{ createdId: string; parentLinkId?: string; extracted: IngestResult['extracted'] }> {
+  const effectiveDate = parseSafeDate(data.effectiveDate || classification.effectiveDateStr);
+
+  const tierMap: Record<string, number> = { NDS: 1, NMS: 2, JSCP: 3, CONPLAN: 4, OPLAN: 5 };
+  const docType = data.docType || classification.documentType;
+  const tier = data.tier || tierMap[docType] || 5;
+
+  const parentDoc = await prisma.strategyDocument.findFirst({
+    where: { scenarioId, tier: { lt: tier } },
+    orderBy: [{ tier: 'desc' }, { effectiveDate: 'desc' }],
+  });
+
+  const created = await prisma.strategyDocument.create({
+    data: {
+      scenarioId,
+      title: data.title || classification.title,
+      docType,
+      content: data.content || rawText,
+      authorityLevel: data.authorityLevel || classification.issuingAuthority,
+      effectiveDate,
+      tier,
+      parentDocId: parentDoc?.id || null,
+      sourceFormat: classification.sourceFormat,
+      confidence: classification.confidence,
+      commanderIntent: data.commanderIntent || null,
+      mission: data.mission || null,
+      ingestedAt: new Date(),
+    },
+  });
+
+  // Persist strategic priorities
+  let priorityCount = 0;
+  for (const p of data.priorities || []) {
+    await prisma.strategyPriority.create({
+      data: {
+        strategyDocId: created.id,
+        rank: p.rank,
+        objective: (p as any).objective || p.description?.substring(0, 100) || `Priority ${p.rank}`,
+        description: p.description || p.justification,
+        effect: p.effect || null,
+        confidence: classification.confidence,
+      },
+    });
+    priorityCount++;
+  }
+
+  // Persist OPLAN phases
+  let phaseCount = 0;
+  for (const phase of data.phases || []) {
+    await prisma.oPLANPhase.create({
+      data: {
+        strategyDocId: created.id,
+        phaseNumber: phase.phaseNumber,
+        phaseName: phase.phaseName,
+        startDate: phase.startDate || null,
+        endDate: phase.endDate || null,
+        description: phase.description,
+        keyTasks: phase.keyTasks || [],
+      },
+    });
+    phaseCount++;
+  }
+
+  // Persist command tasks (ORBAT task assignments)
+  let commandTaskCount = 0;
+  for (const ct of data.commandTasks || []) {
+    await prisma.commandTask.create({
+      data: {
+        strategyDocId: created.id,
+        commandName: ct.commandName,
+        commandRole: ct.commandRole || null,
+        tasks: ct.tasks || [],
+      },
+    });
+    commandTaskCount++;
+  }
+
+  // Persist PACE comms plans
+  let paceCount = 0;
+  for (const pace of data.paceComms || []) {
+    await prisma.pACEComm.create({
+      data: {
+        strategyDocId: created.id,
+        context: pace.context,
+        primary: pace.primary,
+        alternate: pace.alternate,
+        contingency: pace.contingency,
+        emergency: pace.emergency,
+      },
+    });
+    paceCount++;
+  }
+
+  console.log(`  [INGEST] OPLAN doc created: ${created.title} (tier ${tier}) — ${priorityCount} priorities, ${phaseCount} phases, ${commandTaskCount} command tasks, ${paceCount} PACE comms`);
+  return {
+    createdId: created.id,
+    parentLinkId: parentDoc?.id,
+    extracted: {
+      priorityCount,
+      phaseCount,
+      commandTaskCount,
+      paceCommCount: paceCount,
+    },
+  };
 }
 
 async function persistPlanning(
@@ -1786,12 +1992,19 @@ export async function ingestDocument(
   try {
     switch (classification.hierarchyLevel) {
       case 'STRATEGY': {
-        const result = await persistStrategy(scenarioId, normalized as NormalizedStrategy, rawText, classification);
-        createdId = result.createdId;
-        parentLinkId = result.parentLinkId;
-
-        const stratData = normalized as NormalizedStrategy;
-        extracted.priorityCount = stratData.priorities?.length || 0;
+        // OPLAN/CONPLAN get richer extraction with phases, command tasks, PACE comms
+        if (classification.documentType === 'OPLAN' || classification.documentType === 'CONPLAN') {
+          const result = await persistOPLAN(scenarioId, normalized as NormalizedOPLAN, rawText, classification);
+          createdId = result.createdId;
+          parentLinkId = result.parentLinkId;
+          extracted = result.extracted;
+        } else {
+          const result = await persistStrategy(scenarioId, normalized as NormalizedStrategy, rawText, classification);
+          createdId = result.createdId;
+          parentLinkId = result.parentLinkId;
+          const stratData = normalized as NormalizedStrategy;
+          extracted.priorityCount = stratData.priorities?.length || 0;
+        }
         break;
       }
       case 'PLANNING': {
