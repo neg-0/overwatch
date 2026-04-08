@@ -32,17 +32,101 @@ interface MissionTarget {
   priorityRank: number;
 }
 
+type LinkMode = 'OFF' | 'SELECTED' | 'ON';
+
+// ─── Selected Entity Types ──────────────────────────────────────────────────
+
+interface SelectedTrack {
+  kind: 'track';
+  missionId: string;
+  callsign: string;
+  domain: string;
+  status: string;
+  latitude: number;
+  longitude: number;
+  altitude_ft?: number;
+  heading?: number;
+  speed_kts?: number;
+}
+
+interface SelectedUnit {
+  kind: 'unit';
+  units: UnitPosition[];
+  location: string;
+}
+
+interface SelectedBase {
+  kind: 'base';
+  base: BaseData;
+}
+
+interface SelectedTarget {
+  kind: 'target';
+  target: MissionTarget;
+}
+
+interface SelectedSatellite {
+  kind: 'satellite';
+  missionId: string;
+  callsign: string;
+  domain: string;
+  status: string;
+  latitude: number;
+  longitude: number;
+  altitude_ft?: number;
+}
+
+type SelectedEntity = SelectedTrack | SelectedUnit | SelectedBase | SelectedTarget | SelectedSatellite;
+
+interface SpaceAllocationLink {
+  id: string;
+  status: string;
+  allocatedCapability: string | null;
+  rationale: string | null;
+  riskLevel: string | null;
+  spaceAsset: {
+    id: string;
+    name: string;
+    constellation: string;
+    capabilities: string[];
+    operator: string | null;
+    status: string;
+    affiliation: string;
+  } | null;
+  spaceNeed: {
+    id: string;
+    capabilityType: string;
+    role: string;
+    missionCriticality: string;
+    startTime: string;
+    endTime: string;
+    mission: {
+      id: string;
+      missionId: string;
+      callsign: string | null;
+      domain: string;
+      missionType: string;
+      status: string;
+      affiliation: string;
+      unitId: string | null;
+      unit: { id: string; unitDesignation: string; unitName: string } | null;
+    };
+  };
+}
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const DOMAIN_COLORS: Record<string, string> = {
   AIR: '#00d4ff',
   MARITIME: '#0090ff',
+  LAND: '#22c55e',
   SPACE: '#a855f7',
 };
 
 const TRAIL_COLORS: Record<string, string> = {
   AIR: '#00ffd4',
   MARITIME: '#00ff90',
+  LAND: '#4ade80',
   SPACE: '#c084fc',
 };
 
@@ -101,6 +185,14 @@ function makeDomainIcon(domain: string, color: string, size: number): HTMLDivEle
     // Ship hull with superstructure
     svg.appendChild(svgEl('path', { d: 'M3 17 L5 12 L8 12 L8 8 L10 8 L10 10 L14 10 L14 8 L16 8 L16 12 L19 12 L21 17 Z', fill: color, stroke: 'none' }));
     svg.appendChild(svgEl('path', { d: 'M2 19 Q12 22 22 19', stroke: color, fill: 'none', 'stroke-width': '1.5', 'stroke-linecap': 'round' }));
+  } else if (domain === 'LAND') {
+    // Tank/ground vehicle silhouette
+    svg.appendChild(svgEl('rect', { x: '4', y: '10', width: '16', height: '7', rx: '2', fill: color, stroke: 'none' }));
+    svg.appendChild(svgEl('rect', { x: '7', y: '6', width: '10', height: '5', rx: '1', fill: color, stroke: 'none' }));
+    svg.appendChild(svgEl('line', { x1: '15', y1: '8', x2: '22', y2: '5', stroke: color, 'stroke-width': '2', 'stroke-linecap': 'round' }));
+    svg.appendChild(svgEl('circle', { cx: '7', cy: '18', r: '2', fill: color, stroke: 'none', opacity: '0.8' }));
+    svg.appendChild(svgEl('circle', { cx: '12', cy: '18', r: '2', fill: color, stroke: 'none', opacity: '0.8' }));
+    svg.appendChild(svgEl('circle', { cx: '17', cy: '18', r: '2', fill: color, stroke: 'none', opacity: '0.8' }));
   } else if (domain === 'SPACE') {
     // Satellite with solar panels
     svg.appendChild(svgEl('rect', { x: '10', y: '6', width: '4', height: '12', rx: '1', fill: color, stroke: 'none' }));
@@ -116,24 +208,25 @@ function makeDomainIcon(domain: string, color: string, size: number): HTMLDivEle
   return wrapper;
 }
 
-/** Attach hover popup to a marker element — shows instantly on mouseenter */
-function attachHoverPopup(el: HTMLElement, marker: mapboxgl.Marker, popup: mapboxgl.Popup, map: mapboxgl.Map) {
-  let pinned = false;
+/** Attach hover popup + click-to-select to a marker element */
+function attachHoverPopup(
+  el: HTMLElement,
+  marker: mapboxgl.Marker,
+  popup: mapboxgl.Popup,
+  map: mapboxgl.Map,
+  onSelect?: () => void,
+) {
   el.addEventListener('mouseenter', () => {
-    if (!pinned) {
-      popup.setLngLat(marker.getLngLat()).addTo(map);
-    }
-  });
-  el.addEventListener('mouseleave', () => {
-    if (!pinned) popup.remove();
-  });
-  // Click pins the popup open; close button will dismiss via Mapbox internals
-  el.addEventListener('click', (e) => {
-    e.stopPropagation();
-    pinned = true;
     popup.setLngLat(marker.getLngLat()).addTo(map);
   });
-  popup.on('close', () => { pinned = false; });
+  el.addEventListener('mouseleave', () => {
+    popup.remove();
+  });
+  el.addEventListener('click', (e) => {
+    e.stopPropagation();
+    popup.remove();
+    if (onSelect) onSelect();
+  });
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -173,7 +266,7 @@ function MapViewInner() {
   const animFrameRef = useRef<number>(0);
 
   const { positions, activeScenarioId, simulation, bases, coverageWindows, unitPositions } = useOverwatchStore();
-  const [activeDomains, setActiveDomains] = useState<Set<string>>(new Set(['AIR', 'MARITIME', 'SPACE']));
+  const [activeDomains, setActiveDomains] = useState<Set<string>>(new Set(['AIR', 'MARITIME', 'LAND', 'SPACE']));
   const [affiliation, setAffiliation] = useState<'ALL' | 'FRIENDLY' | 'HOSTILE'>('ALL');
   const [routes, setRoutes] = useState<MissionRoute[]>([]);
   const [targets, setTargets] = useState<MissionTarget[]>([]);
@@ -186,6 +279,16 @@ function MapViewInner() {
   const [showTracks, setShowTracks] = useState(true);
   const [layerMenuOpen, setLayerMenuOpen] = useState(false);
   const unitMarkersRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
+
+  // Entity selection + space links
+  const [selectedEntity, setSelectedEntity] = useState<SelectedEntity | null>(null);
+  const [linkMode, setLinkMode] = useState<LinkMode>('OFF');
+  const [allocations, setAllocations] = useState<SpaceAllocationLink[]>([]);
+  const [missionDetail, setMissionDetail] = useState<any>(null);
+
+  // Keep a stable ref for onSelect so marker effects don't re-run
+  const selectEntityRef = useRef(setSelectedEntity);
+  selectEntityRef.current = setSelectedEntity;
 
   // ─── Initialize Map ─────────────────────────────────────────────────────────
 
@@ -302,6 +405,37 @@ function MapViewInner() {
       })
       .catch(err => console.error('[MAP] Failed to fetch mission routes:', err));
   }, [activeScenarioId]);
+
+  // ─── Fetch Space Allocations for Link Lines ─────────────────────────────────
+
+  useEffect(() => {
+    if (!activeScenarioId) return;
+    fetch(`/api/space-assets/allocations?scenarioId=${activeScenarioId}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.success && Array.isArray(data.data)) {
+          setAllocations(data.data);
+        }
+      })
+      .catch(err => console.error('[MAP] Failed to fetch allocations:', err));
+  }, [activeScenarioId]);
+
+  // ─── Fetch Mission Detail When Track/Satellite Selected ────────────────────
+
+  useEffect(() => {
+    if (!selectedEntity) { setMissionDetail(null); return; }
+    if (selectedEntity.kind !== 'track' && selectedEntity.kind !== 'satellite') {
+      setMissionDetail(null);
+      return;
+    }
+    const missionId = selectedEntity.missionId;
+    fetch(`/api/missions/${missionId}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.success) setMissionDetail(data.data);
+      })
+      .catch(err => console.error('[MAP] Failed to fetch mission detail:', err));
+  }, [selectedEntity]);
 
   // ─── Update Route Lines on Map ──────────────────────────────────────────────
 
@@ -436,7 +570,11 @@ function MapViewInner() {
       const marker = new mapboxgl.Marker({ element: el })
         .setLngLat([base.longitude, base.latitude])
         .addTo(map);
-      attachHoverPopup(el, marker, popup, map);
+      attachHoverPopup(el, marker, popup, map, () => {
+        selectEntityRef.current(prev =>
+          prev?.kind === 'base' && (prev as SelectedBase).base.id === base.id ? null : { kind: 'base', base }
+        );
+      });
 
       currentBaseMarkers.set(base.id, marker);
     });
@@ -485,7 +623,11 @@ function MapViewInner() {
       const marker = new mapboxgl.Marker({ element: el })
         .setLngLat([target.longitude, target.latitude])
         .addTo(map);
-      attachHoverPopup(el, marker, popup, map);
+      attachHoverPopup(el, marker, popup, map, () => {
+        selectEntityRef.current(prev =>
+          prev?.kind === 'target' && (prev as SelectedTarget).target.targetId === target.targetId ? null : { kind: 'target', target }
+        );
+      });
 
       currentTargetMarkers.set(target.targetId, marker);
     });
@@ -559,7 +701,12 @@ function MapViewInner() {
       const marker = new mapboxgl.Marker({ element: el })
         .setLngLat([first.baseLon, first.baseLat])
         .addTo(map);
-      attachHoverPopup(el, marker, popup, map);
+      const capturedUnits = [...units];
+      attachHoverPopup(el, marker, popup, map, () => {
+        selectEntityRef.current(prev =>
+          prev?.kind === 'unit' && (prev as SelectedUnit).location === key ? null : { kind: 'unit', units: capturedUnits, location: key }
+        );
+      });
 
       currentUnitMarkers.set(key, marker);
     });
@@ -784,7 +931,27 @@ function MapViewInner() {
         const marker = new mapboxgl.Marker({ element: el })
           .setLngLat([pos.longitude, pos.latitude])
           .addTo(map);
-        attachHoverPopup(el, marker, popup, map);
+
+        const capturedMissionId = missionId;
+        const capturedPos = { ...pos };
+        attachHoverPopup(el, marker, popup, map, () => {
+          const entityKind = capturedPos.domain === 'SPACE' ? 'satellite' : 'track';
+          selectEntityRef.current(prev => {
+            if (prev && (prev.kind === 'track' || prev.kind === 'satellite') && prev.missionId === capturedMissionId) return null;
+            return {
+              kind: entityKind,
+              missionId: capturedMissionId,
+              callsign: capturedPos.callsign || capturedMissionId.slice(0, 8),
+              domain: capturedPos.domain,
+              status: capturedPos.status,
+              latitude: capturedPos.latitude,
+              longitude: capturedPos.longitude,
+              altitude_ft: capturedPos.altitude_ft,
+              heading: capturedPos.heading,
+              speed_kts: capturedPos.speed_kts,
+            } as SelectedTrack | SelectedSatellite;
+          });
+        });
 
         currentMarkers.set(missionId, marker);
       }
@@ -803,6 +970,115 @@ function MapViewInner() {
     updateTrails();
   }, [positions, activeDomains, affiliation, updateTrails]);
 
+  // ─── Space Dependency Link Lines ────────────────────────────────────────────
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoadedRef.current) return;
+
+    const sourceId = 'space-links';
+
+    // Determine which links to show
+    let links: SpaceAllocationLink[] = [];
+    if (linkMode === 'ON') {
+      links = allocations;
+    } else if (linkMode === 'SELECTED' && selectedEntity) {
+      if (selectedEntity.kind === 'satellite' || selectedEntity.kind === 'track') {
+        const mid = selectedEntity.missionId;
+        links = allocations.filter(a =>
+          a.spaceNeed.mission.id === mid ||
+          a.spaceAsset?.id === mid // satellite selected by its position missionId
+        );
+        // Also check by matching the spaceAsset that's associated with the position
+        if (selectedEntity.kind === 'satellite') {
+          const satLinks = allocations.filter(a => {
+            // Find allocations where this satellite's callsign matches the spaceAsset name
+            return a.spaceAsset?.name === selectedEntity.callsign;
+          });
+          if (satLinks.length > 0 && links.length === 0) links = satLinks;
+        }
+      }
+    }
+
+    // Build GeoJSON features
+    const features: GeoJSON.Feature[] = [];
+    const STATUS_LINE_COLORS: Record<string, string> = {
+      FULFILLED: '#22c55e',
+      DEGRADED: '#f59e0b',
+      DENIED: '#ef4444',
+      PENDING: '#64748b',
+      CONTENTION: '#f59e0b',
+    };
+
+    // Build lookup maps for position resolution
+    const posByCallsign = new Map<string, { lng: number; lat: number }>();
+    const posById = new Map<string, { lng: number; lat: number }>();
+    positions.forEach((p, mId) => {
+      const coord = { lng: p.longitude, lat: p.latitude };
+      posById.set(mId, coord);
+      if (p.callsign) posByCallsign.set(p.callsign, coord);
+    });
+
+    for (const alloc of links) {
+      if (!alloc.spaceAsset) continue;
+      const mission = alloc.spaceNeed.mission;
+
+      // Find satellite position by callsign match to asset name
+      const satPos = posByCallsign.get(alloc.spaceAsset.name);
+      if (!satPos) continue;
+
+      // Find mission position, fallback to unit base
+      let missionPos = posById.get(mission.id);
+      if (!missionPos && mission.unitId) {
+        const up = unitPositions.find(u => u.id === mission.unitId);
+        if (up) missionPos = { lng: up.baseLon, lat: up.baseLat };
+      }
+      if (!missionPos) continue;
+
+      const color = STATUS_LINE_COLORS[alloc.status] || '#64748b';
+      features.push({
+        type: 'Feature',
+        geometry: {
+          type: 'LineString',
+          coordinates: [[satPos.lng, satPos.lat], [missionPos.lng, missionPos.lat]],
+        },
+        properties: {
+          color,
+          status: alloc.status,
+          capability: alloc.spaceNeed.capabilityType,
+          assetName: alloc.spaceAsset.name,
+          missionCallsign: mission.callsign || mission.missionId,
+        },
+      });
+    }
+
+    const geojson: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features };
+
+    const source = map.getSource(sourceId) as mapboxgl.GeoJSONSource;
+    if (source) {
+      source.setData(geojson);
+    } else if (features.length > 0) {
+      map.addSource(sourceId, { type: 'geojson', data: geojson });
+      map.addLayer({
+        id: `${sourceId}-line`,
+        type: 'line',
+        source: sourceId,
+        paint: {
+          'line-color': ['get', 'color'],
+          'line-width': 1.5,
+          'line-opacity': 0.7,
+          'line-dasharray': [4, 3],
+        },
+      });
+    }
+
+    // Clean up when no features
+    if (features.length === 0 && map.getLayer(`${sourceId}-line`)) {
+      map.removeLayer(`${sourceId}-line`);
+      if (map.getSource(sourceId)) map.removeSource(sourceId);
+    }
+  }, [linkMode, selectedEntity, allocations, positions, unitPositions]);
+
   // ─── Domain Toggle ──────────────────────────────────────────────────────────
 
   const toggleDomain = (domain: string) => {
@@ -817,109 +1093,121 @@ function MapViewInner() {
   // ─── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="page-content" style={{ position: 'relative', height: '100%', padding: 0 }}>
-      {/* Map Toolbar */}
-      <div style={{
-        position: 'absolute',
-        top: '12px',
-        left: '12px',
-        zIndex: 10,
-        display: 'flex',
-        gap: '8px',
-        alignItems: 'flex-start',
-      }}>
-        {/* Eyeball layer menu */}
-        <div style={{ position: 'relative' }}>
-          <button
-            onClick={() => setLayerMenuOpen(!layerMenuOpen)}
-            className="btn btn-sm btn-secondary"
+    <div className="page-content" style={{ display: 'flex', flexDirection: 'row', height: '100%', padding: 0, overflow: 'hidden' }}>
+      {/* Map + overlays */}
+      <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
+        {/* Map Toolbar */}
+        <div style={{
+          position: 'absolute',
+          top: '12px',
+          left: '12px',
+          zIndex: 10,
+          display: 'flex',
+          gap: '8px',
+          alignItems: 'flex-start',
+        }}>
+          {/* Eyeball layer menu */}
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => setLayerMenuOpen(!layerMenuOpen)}
+              className="btn btn-sm btn-secondary"
+              style={{
+                padding: '6px 10px',
+                fontSize: '14px',
+                lineHeight: 1,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+              title="Layer visibility"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+              <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.05em' }}>LAYERS</span>
+            </button>
+
+            {layerMenuOpen && (
+              <>
+                {/* Backdrop to close menu */}
+                <div
+                  style={{ position: 'fixed', inset: 0, zIndex: 20 }}
+                  onClick={() => setLayerMenuOpen(false)}
+                />
+                <div style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  marginTop: '4px',
+                  background: 'rgba(10, 15, 30, 0.95)',
+                  backdropFilter: 'blur(12px)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '8px',
+                  padding: '8px 0',
+                  minWidth: '180px',
+                  zIndex: 21,
+                }}>
+                  {/* Domain toggles */}
+                  <div style={{ padding: '4px 12px 6px', fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.1em' }}>
+                    DOMAINS
+                  </div>
+                  {(['AIR', 'MARITIME', 'LAND', 'SPACE'] as const).map(domain => (
+                    <LayerMenuItem
+                      key={domain}
+                      label={domain}
+                      active={activeDomains.has(domain)}
+                      color={DOMAIN_COLORS[domain]}
+                      onToggle={() => toggleDomain(domain)}
+                    />
+                  ))}
+
+                  <div style={{ margin: '4px 12px', borderTop: '1px solid var(--border-subtle)' }} />
+
+                  {/* Data layer toggles */}
+                  <div style={{ padding: '4px 12px 6px', fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.1em' }}>
+                    OVERLAYS
+                  </div>
+                  <LayerMenuItem label="BASES" active={showBases} onToggle={() => setShowBases(!showBases)} />
+                  <LayerMenuItem label="TARGETS" active={showTargets} onToggle={() => setShowTargets(!showTargets)} />
+                  <LayerMenuItem label="UNITS" active={showUnits} onToggle={() => setShowUnits(!showUnits)} />
+                  <LayerMenuItem label="COVERAGE" active={showCoverage} onToggle={() => setShowCoverage(!showCoverage)} />
+                  <LayerMenuItem label="SPACE TRACKS" active={showTracks} onToggle={() => setShowTracks(!showTracks)} />
+
+                  <div style={{ margin: '4px 12px', borderTop: '1px solid var(--border-subtle)' }} />
+
+                  {/* Space dependency link toggles */}
+                  <div style={{ padding: '4px 12px 6px', fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.1em' }}>
+                    LINKS
+                  </div>
+                  {(['OFF', 'SELECTED', 'ON'] as LinkMode[]).map(mode => (
+                    <LinkModeItem key={mode} label={mode} active={linkMode === mode} onSelect={() => setLinkMode(mode)} />
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
+          <select
+            value={affiliation}
+            onChange={e => setAffiliation(e.target.value as any)}
             style={{
               padding: '6px 10px',
-              fontSize: '14px',
-              lineHeight: 1,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '6px',
+              color: 'var(--text-primary)',
+              fontSize: '11px',
             }}
-            title="Layer visibility"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-              <circle cx="12" cy="12" r="3" />
-            </svg>
-            <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.05em' }}>LAYERS</span>
-          </button>
-
-          {layerMenuOpen && (
-            <>
-              {/* Backdrop to close menu */}
-              <div
-                style={{ position: 'fixed', inset: 0, zIndex: 20 }}
-                onClick={() => setLayerMenuOpen(false)}
-              />
-              <div style={{
-                position: 'absolute',
-                top: '100%',
-                left: 0,
-                marginTop: '4px',
-                background: 'rgba(10, 15, 30, 0.95)',
-                backdropFilter: 'blur(12px)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: '8px',
-                padding: '8px 0',
-                minWidth: '180px',
-                zIndex: 21,
-              }}>
-                {/* Domain toggles */}
-                <div style={{ padding: '4px 12px 6px', fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.1em' }}>
-                  DOMAINS
-                </div>
-                {(['AIR', 'MARITIME', 'SPACE'] as const).map(domain => (
-                  <LayerMenuItem
-                    key={domain}
-                    label={domain}
-                    active={activeDomains.has(domain)}
-                    color={DOMAIN_COLORS[domain]}
-                    onToggle={() => toggleDomain(domain)}
-                  />
-                ))}
-
-                <div style={{ margin: '4px 12px', borderTop: '1px solid var(--border-subtle)' }} />
-
-                {/* Data layer toggles */}
-                <div style={{ padding: '4px 12px 6px', fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.1em' }}>
-                  OVERLAYS
-                </div>
-                <LayerMenuItem label="BASES" active={showBases} onToggle={() => setShowBases(!showBases)} />
-                <LayerMenuItem label="TARGETS" active={showTargets} onToggle={() => setShowTargets(!showTargets)} />
-                <LayerMenuItem label="UNITS" active={showUnits} onToggle={() => setShowUnits(!showUnits)} />
-                <LayerMenuItem label="COVERAGE" active={showCoverage} onToggle={() => setShowCoverage(!showCoverage)} />
-                <LayerMenuItem label="SPACE TRACKS" active={showTracks} onToggle={() => setShowTracks(!showTracks)} />
-              </div>
-            </>
-          )}
+            <option value="ALL">ALL FORCES</option>
+            <option value="FRIENDLY">FRIENDLY</option>
+            <option value="HOSTILE">HOSTILE</option>
+          </select>
         </div>
 
-        <select
-          value={affiliation}
-          onChange={e => setAffiliation(e.target.value as any)}
-          style={{
-            padding: '6px 10px',
-            background: 'var(--bg-secondary)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '6px',
-            color: 'var(--text-primary)',
-            fontSize: '11px',
-          }}
-        >
-          <option value="ALL">ALL FORCES</option>
-          <option value="FRIENDLY">FRIENDLY</option>
-          <option value="HOSTILE">HOSTILE</option>
-        </select>
-      </div>
-
-      {/* Map Container */}
-      <div ref={mapContainerRef} style={{ width: '100%', height: '100%' }} />
+        {/* Map Container */}
+        <div ref={mapContainerRef} style={{ width: '100%', height: '100%' }} />
 
       {/* Map Legend */}
       <div style={{
@@ -939,6 +1227,7 @@ function MapViewInner() {
         </div>
         <LegendItem color="#00d4ff" label="AIR" symbol="circle" />
         <LegendItem color="#0090ff" label="MARITIME" symbol="circle" />
+        <LegendItem color="#22c55e" label="LAND" symbol="circle" />
         <LegendItem color="#a855f7" label="SPACE" symbol="diamond" />
         <div style={{ margin: '8px 0', borderTop: '1px solid var(--border-subtle)' }} />
         <LegendItem color="" label="Planned Route" symbol="dashed" />
@@ -981,6 +1270,18 @@ function MapViewInner() {
           </>
         )}
 
+        {linkMode !== 'OFF' && (
+          <>
+            <div style={{ margin: '8px 0', borderTop: '1px solid var(--border-subtle)' }} />
+            <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px', letterSpacing: '0.1em' }}>
+              SPACE LINKS
+            </div>
+            <LegendItem color="#22c55e" label="Fulfilled" symbol="solid" />
+            <LegendItem color="#f59e0b" label="Degraded" symbol="dashed" />
+            <LegendItem color="#ef4444" label="Denied" symbol="dashed" />
+          </>
+        )}
+
         <div style={{ margin: '8px 0', borderTop: '1px solid var(--border-subtle)' }} />
         <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
           {positions.size} tracks{bases.length > 0 ? ` | ${bases.length} bases` : ''}{unitPositions.length > 0 ? ` | ${unitPositions.length} units` : ''}
@@ -992,6 +1293,17 @@ function MapViewInner() {
           </div>
         )}
       </div>
+      </div>{/* end map wrapper */}
+
+      {/* Entity Detail Slideout */}
+      {selectedEntity && (
+        <MapDetailPanel
+          entity={selectedEntity}
+          missionDetail={missionDetail}
+          allocations={allocations}
+          onClose={() => setSelectedEntity(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1071,7 +1383,7 @@ function LegendItem({ color, label, symbol }: { color: string; label: string; sy
       return (
         <span style={{
           width: '18px', height: '2px',
-          background: 'var(--accent-success)',
+          background: color || 'var(--accent-success)',
           display: 'inline-block',
         }} />
       );
@@ -1104,6 +1416,465 @@ function LegendItem({ color, label, symbol }: { color: string; label: string; sy
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
       {renderSymbol()}
       <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 600 }}>{label}</span>
+    </div>
+  );
+}
+
+// ─── Link Mode Radio Button ─────────────────────────────────────────────────
+
+function LinkModeItem({ label, active, onSelect }: { label: string; active: boolean; onSelect: () => void }) {
+  return (
+    <button
+      onClick={onSelect}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        width: '100%',
+        padding: '6px 12px',
+        background: 'none',
+        border: 'none',
+        cursor: 'pointer',
+        fontSize: '11px',
+        fontWeight: 600,
+        fontFamily: 'var(--font-mono)',
+        letterSpacing: '0.05em',
+        color: active ? 'var(--accent-primary)' : 'var(--text-muted)',
+        textAlign: 'left',
+      }}
+      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)'; }}
+      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'none'; }}
+    >
+      <span style={{
+        width: '14px',
+        height: '14px',
+        borderRadius: '50%',
+        border: `2px solid ${active ? 'var(--accent-primary)' : 'var(--border-subtle)'}`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+      }}>
+        {active && (
+          <span style={{
+            width: '6px',
+            height: '6px',
+            borderRadius: '50%',
+            background: 'var(--accent-primary)',
+          }} />
+        )}
+      </span>
+      {label}
+    </button>
+  );
+}
+
+// ─── Map Detail Panel (Slideout) ─────────────────────────────────────────────
+
+const ALLOC_STATUS_COLORS: Record<string, string> = {
+  FULFILLED: '#22c55e',
+  DEGRADED: '#f59e0b',
+  DENIED: '#ef4444',
+  PENDING: '#64748b',
+  CONTENTION: '#f59e0b',
+};
+
+interface MapDetailPanelProps {
+  entity: SelectedEntity;
+  missionDetail: any;
+  allocations: SpaceAllocationLink[];
+  onClose: () => void;
+}
+
+function MapDetailPanel({ entity, missionDetail, allocations, onClose }: MapDetailPanelProps) {
+  return (
+    <div className="map-detail-panel">
+      <div className="map-detail-panel__header">
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {entity.kind === 'track' && <TrackHeader entity={entity} />}
+          {entity.kind === 'satellite' && <SatelliteHeader entity={entity} />}
+          {entity.kind === 'unit' && <UnitHeader entity={entity} />}
+          {entity.kind === 'base' && <BaseHeader entity={entity} />}
+          {entity.kind === 'target' && <TargetHeader entity={entity} />}
+        </div>
+        <button onClick={onClose} style={{ marginLeft: 'auto', fontSize: '18px', lineHeight: 1, background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px 6px', flexShrink: 0 }}>×</button>
+      </div>
+
+      <div className="map-detail-panel__body">
+        {entity.kind === 'track' && <TrackBody entity={entity} missionDetail={missionDetail} />}
+        {entity.kind === 'satellite' && <SatelliteBody entity={entity} missionDetail={missionDetail} allocations={allocations} />}
+        {entity.kind === 'unit' && <UnitBody entity={entity} />}
+        {entity.kind === 'base' && <BaseBody entity={entity} />}
+        {entity.kind === 'target' && <TargetBody entity={entity} />}
+      </div>
+    </div>
+  );
+}
+
+// ─── Panel Sub-Components ────────────────────────────────────────────────────
+
+function TrackHeader({ entity }: { entity: SelectedTrack }) {
+  const color = DOMAIN_COLORS[entity.domain] || '#888';
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <span style={{ background: color + '22', border: `1px solid ${color}`, color, borderRadius: '4px', padding: '2px 6px', fontSize: '10px', fontWeight: 700 }}>
+          {entity.domain}
+        </span>
+        <span style={{ fontWeight: 700, color: 'var(--text-bright)', fontSize: '14px' }}>{entity.callsign}</span>
+      </div>
+      <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '2px' }}>{entity.missionId.slice(0, 12)}</div>
+    </>
+  );
+}
+
+function TrackBody({ entity, missionDetail }: { entity: SelectedTrack; missionDetail: any }) {
+  return (
+    <>
+      <div className="map-detail-section">
+        <div className="map-detail-section__title">POSITION</div>
+        <div className="map-detail-grid">
+          <span className="map-detail-label">Status</span>
+          <span className="map-detail-value">{entity.status}</span>
+          {entity.altitude_ft != null && <>
+            <span className="map-detail-label">Altitude</span>
+            <span className="map-detail-value">{entity.altitude_ft.toLocaleString()} ft</span>
+          </>}
+          {entity.heading != null && <>
+            <span className="map-detail-label">Heading</span>
+            <span className="map-detail-value">{entity.heading.toFixed(0)}°</span>
+          </>}
+          {entity.speed_kts != null && <>
+            <span className="map-detail-label">Speed</span>
+            <span className="map-detail-value">{entity.speed_kts} kts</span>
+          </>}
+          <span className="map-detail-label">Lat</span>
+          <span className="map-detail-value">{entity.latitude.toFixed(4)}°</span>
+          <span className="map-detail-label">Lon</span>
+          <span className="map-detail-value">{entity.longitude.toFixed(4)}°</span>
+        </div>
+      </div>
+
+      {missionDetail && (
+        <>
+          <div className="map-detail-section">
+            <div className="map-detail-section__title">MISSION</div>
+            <div className="map-detail-grid">
+              <span className="map-detail-label">Type</span>
+              <span className="map-detail-value">{missionDetail.missionType}</span>
+              <span className="map-detail-label">Platform</span>
+              <span className="map-detail-value">{missionDetail.platformType} x{missionDetail.platformCount}</span>
+              {missionDetail.unit && <>
+                <span className="map-detail-label">Unit</span>
+                <span className="map-detail-value">{missionDetail.unit.unitDesignation}</span>
+              </>}
+            </div>
+          </div>
+
+          {missionDetail.spaceNeeds?.length > 0 && (
+            <div className="map-detail-section">
+              <div className="map-detail-section__title">SPACE DEPENDENCIES ({missionDetail.spaceNeeds.length})</div>
+              {missionDetail.spaceNeeds.map((sn: any) => {
+                const statusColor = sn.fulfilled ? '#22c55e' : '#ef4444';
+                return (
+                  <div key={sn.id} className="map-detail-dep" style={{ borderLeftColor: statusColor }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontWeight: 600, fontSize: '12px', color: 'var(--text-bright)' }}>{sn.capabilityType}</span>
+                      <span style={{ fontSize: '9px', fontWeight: 700, padding: '1px 4px', borderRadius: '3px', background: '#64748b22', color: '#94a3b8' }}>
+                        {sn.role}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '11px', marginTop: '2px' }}>
+                      {sn.spaceAsset
+                        ? <span style={{ color: '#22c55e' }}>→ {sn.spaceAsset.name}</span>
+                        : <span style={{ color: '#ef4444' }}>Unallocated</span>
+                      }
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {missionDetail.targets?.length > 0 && (
+            <div className="map-detail-section">
+              <div className="map-detail-section__title">TARGETS ({missionDetail.targets.length})</div>
+              {missionDetail.targets.map((t: any) => (
+                <div key={t.id} className="map-detail-dep-item">
+                  <div style={{ fontWeight: 600, color: 'var(--text-bright)', fontSize: '12px' }}>
+                    {t.targetName}
+                    {t.priorityRank && <span style={{ color: 'var(--text-muted)', marginLeft: '6px', fontWeight: 400 }}>P{t.priorityRank}</span>}
+                  </div>
+                  <div style={{ color: '#ef4444', fontSize: '11px' }}>{t.desiredEffect}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {!missionDetail && (
+        <div style={{ color: 'var(--text-muted)', fontSize: '12px', textAlign: 'center', padding: '20px' }}>
+          Loading mission detail...
+        </div>
+      )}
+    </>
+  );
+}
+
+function SatelliteHeader({ entity }: { entity: SelectedSatellite }) {
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <span style={{ background: '#a855f722', border: '1px solid #a855f7', color: '#a855f7', borderRadius: '4px', padding: '2px 6px', fontSize: '10px', fontWeight: 700 }}>
+          SAT
+        </span>
+        <span style={{ fontWeight: 700, color: 'var(--text-bright)', fontSize: '14px' }}>{entity.callsign}</span>
+      </div>
+      <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '2px' }}>{entity.status}</div>
+    </>
+  );
+}
+
+function SatelliteBody({ entity, missionDetail, allocations }: { entity: SelectedSatellite; missionDetail: any; allocations: SpaceAllocationLink[] }) {
+  // Find allocations where this satellite is the asset
+  const satAllocations = allocations.filter(a => a.spaceAsset?.name === entity.callsign);
+
+  return (
+    <>
+      <div className="map-detail-section">
+        <div className="map-detail-section__title">POSITION</div>
+        <div className="map-detail-grid">
+          <span className="map-detail-label">Status</span>
+          <span className="map-detail-value">{entity.status}</span>
+          <span className="map-detail-label">Lat</span>
+          <span className="map-detail-value">{entity.latitude.toFixed(4)}°</span>
+          <span className="map-detail-label">Lon</span>
+          <span className="map-detail-value">{entity.longitude.toFixed(4)}°</span>
+          {entity.altitude_ft != null && <>
+            <span className="map-detail-label">Altitude</span>
+            <span className="map-detail-value">{entity.altitude_ft.toLocaleString()} km</span>
+          </>}
+        </div>
+      </div>
+
+      {missionDetail?.spaceNeeds?.length > 0 && (
+        <div className="map-detail-section">
+          <div className="map-detail-section__title">CAPABILITIES</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+            {[...new Set(missionDetail.spaceNeeds.map((sn: any) => sn.capabilityType))].map((cap: any) => (
+              <span key={cap} style={{ fontSize: '10px', fontWeight: 600, padding: '2px 6px', borderRadius: '4px', background: '#a855f722', color: '#c084fc' }}>
+                {cap}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {satAllocations.length > 0 && (
+        <div className="map-detail-section">
+          <div className="map-detail-section__title">SUPPORTING ({satAllocations.length} missions)</div>
+          {satAllocations.map(alloc => {
+            const mission = alloc.spaceNeed.mission;
+            const statusColor = ALLOC_STATUS_COLORS[alloc.status] || '#64748b';
+            return (
+              <div key={alloc.id} className="map-detail-dep" style={{ borderLeftColor: statusColor }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontWeight: 600, fontSize: '12px', color: 'var(--text-bright)' }}>
+                    {mission.callsign || mission.missionId}
+                  </span>
+                  <span style={{ fontSize: '9px', fontWeight: 700, padding: '1px 4px', borderRadius: '3px', background: statusColor + '22', color: statusColor }}>
+                    {alloc.status}
+                  </span>
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                  {alloc.spaceNeed.capabilityType} · {mission.domain} · {mission.missionType}
+                </div>
+                {alloc.spaceNeed.missionCriticality === 'CRITICAL' && (
+                  <div style={{ fontSize: '10px', color: '#ef4444', marginTop: '2px' }}>CRITICAL dependency</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {satAllocations.length === 0 && (
+        <div style={{ color: 'var(--text-muted)', fontSize: '12px', textAlign: 'center', padding: '20px' }}>
+          No active allocations for this satellite.
+        </div>
+      )}
+    </>
+  );
+}
+
+function UnitHeader({ entity }: { entity: SelectedUnit }) {
+  const first = entity.units[0];
+  const isOpfor = first.affiliation === 'HOSTILE';
+  const totalAssets = entity.units.reduce((s, u) => s + u.assetCount, 0);
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <span style={{
+          background: isOpfor ? '#ef444422' : '#3b82f622',
+          border: `1px solid ${isOpfor ? '#ef4444' : '#3b82f6'}`,
+          color: isOpfor ? '#ef4444' : '#60a5fa',
+          borderRadius: '4px', padding: '2px 6px', fontSize: '10px', fontWeight: 700,
+        }}>
+          {isOpfor ? 'OPFOR' : 'BLUFOR'}
+        </span>
+        <span style={{ fontWeight: 700, color: 'var(--text-bright)', fontSize: '14px' }}>
+          {entity.units.length} Unit{entity.units.length > 1 ? 's' : ''}
+        </span>
+      </div>
+      <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '2px' }}>
+        {first.baseLocation || 'Unknown Location'} · {totalAssets} assets
+      </div>
+    </>
+  );
+}
+
+function UnitBody({ entity }: { entity: SelectedUnit }) {
+  return (
+    <>
+      {entity.units.map(u => (
+        <div key={u.id} className="map-detail-section">
+          <div className="map-detail-section__title">{u.unitDesignation}</div>
+          <div className="map-detail-grid">
+            <span className="map-detail-label">Name</span>
+            <span className="map-detail-value">{u.unitName}</span>
+            <span className="map-detail-label">Service</span>
+            <span className="map-detail-value">{u.serviceBranch}</span>
+            <span className="map-detail-label">Domain</span>
+            <span className="map-detail-value" style={{ color: DOMAIN_COLORS[u.domain] || 'inherit' }}>{u.domain}</span>
+            <span className="map-detail-label">Assets</span>
+            <span className="map-detail-value">{u.assetCount}</span>
+            <span className="map-detail-label">Location</span>
+            <span className="map-detail-value">{u.baseLocation}</span>
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+function BaseHeader({ entity }: { entity: SelectedBase }) {
+  const b = entity.base;
+  const color = BASE_COLORS[b.baseType] || '#10b981';
+  const symbol = BASE_SYMBOLS[b.baseType] || '◆';
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <span style={{ fontSize: '16px', color }}>{symbol}</span>
+        <span style={{ fontWeight: 700, color: 'var(--text-bright)', fontSize: '14px' }}>{b.name}</span>
+      </div>
+      <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '2px' }}>
+        {b.baseType.replace('_', ' ')} · {b.country}
+      </div>
+    </>
+  );
+}
+
+function BaseBody({ entity }: { entity: SelectedBase }) {
+  const b = entity.base;
+  return (
+    <>
+      <div className="map-detail-section">
+        <div className="map-detail-section__title">DETAILS</div>
+        <div className="map-detail-grid">
+          <span className="map-detail-label">Type</span>
+          <span className="map-detail-value">{b.baseType.replace('_', ' ')}</span>
+          <span className="map-detail-label">Country</span>
+          <span className="map-detail-value">{b.country}</span>
+          {b.icaoCode && <>
+            <span className="map-detail-label">ICAO</span>
+            <span className="map-detail-value">{b.icaoCode}</span>
+          </>}
+          <span className="map-detail-label">Lat</span>
+          <span className="map-detail-value">{b.latitude.toFixed(4)}°</span>
+          <span className="map-detail-label">Lon</span>
+          <span className="map-detail-value">{b.longitude.toFixed(4)}°</span>
+          <span className="map-detail-label">Units</span>
+          <span className="map-detail-value">{b.unitCount}</span>
+          <span className="map-detail-label">Assets</span>
+          <span className="map-detail-value">{b.totalAssets}</span>
+        </div>
+      </div>
+
+      {b.units.length > 0 && (
+        <div className="map-detail-section">
+          <div className="map-detail-section__title">ASSIGNED UNITS ({b.units.length})</div>
+          {b.units.map((u, i) => (
+            <div key={i} className="map-detail-dep-item">
+              <div style={{ fontWeight: 600, color: 'var(--text-bright)', fontSize: '12px' }}>
+                {u.unitDesignation}
+              </div>
+              <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
+                {u.assetCount} assets
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {b.radarSensors.length > 0 && (
+        <div className="map-detail-section">
+          <div className="map-detail-section__title">SENSORS</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+            {b.radarSensors.map((r, i) => (
+              <span key={i} style={{ fontSize: '10px', fontWeight: 600, padding: '2px 6px', borderRadius: '4px', background: '#f59e0b22', color: '#f59e0b' }}>
+                {r}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function TargetHeader({ entity }: { entity: SelectedTarget }) {
+  const t = entity.target;
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <span style={{ background: '#ef444422', border: '1px solid #ef4444', color: '#ef4444', borderRadius: '4px', padding: '2px 6px', fontSize: '10px', fontWeight: 700 }}>
+          TGT
+        </span>
+        <span style={{ fontWeight: 700, color: 'var(--text-bright)', fontSize: '14px' }}>{t.targetName}</span>
+      </div>
+      <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '2px' }}>{t.targetId}</div>
+    </>
+  );
+}
+
+function TargetBody({ entity }: { entity: SelectedTarget }) {
+  const t = entity.target;
+  return (
+    <div className="map-detail-section">
+      <div className="map-detail-section__title">TARGET DETAILS</div>
+      <div className="map-detail-grid">
+        <span className="map-detail-label">Name</span>
+        <span className="map-detail-value">{t.targetName}</span>
+        <span className="map-detail-label">ID</span>
+        <span className="map-detail-value">{t.targetId}</span>
+        {t.beNumber && <>
+          <span className="map-detail-label">BE#</span>
+          <span className="map-detail-value">{t.beNumber}</span>
+        </>}
+        {t.targetCategory && <>
+          <span className="map-detail-label">Category</span>
+          <span className="map-detail-value">{t.targetCategory}</span>
+        </>}
+        <span className="map-detail-label">Effect</span>
+        <span className="map-detail-value" style={{ color: '#ef4444' }}>{t.desiredEffect}</span>
+        <span className="map-detail-label">Priority</span>
+        <span className="map-detail-value">P{t.priorityRank}</span>
+        <span className="map-detail-label">Lat</span>
+        <span className="map-detail-value">{t.latitude.toFixed(4)}°</span>
+        <span className="map-detail-label">Lon</span>
+        <span className="map-detail-value">{t.longitude.toFixed(4)}°</span>
+      </div>
     </div>
   );
 }
