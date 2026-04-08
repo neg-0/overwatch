@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useOverwatchStore } from '../store/overwatch-store';
 import type { IngestCard, BatchStatus } from '../store/overwatch-store';
+import type { OrderDetail as OrderDetailData } from '../types/orders';
+import { orderTypeBadge } from '../types/orders';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -118,6 +120,77 @@ function findEntityMatches(rawText: string, doc: DocItem): EntityMatch[] {
   return matches;
 }
 
+/** Build entity matches for an order doc from its structured detail data */
+function findOrderEntityMatches(rawText: string, detail: OrderDetailData): EntityMatch[] {
+  const matches: EntityMatch[] = [];
+  const usedRanges: Array<[number, number]> = [];
+  let colorIdx = 0;
+
+  const tryMatch = (label: string, type: string, searchTerms: string[], meta?: Record<string, any>) => {
+    for (const term of searchTerms) {
+      if (!term || term.length < 3) continue;
+      const idx = rawText.indexOf(term);
+      if (idx === -1) continue;
+      const overlaps = usedRanges.some(([s, e]) =>
+        (idx >= s && idx < e) || (idx + term.length > s && idx + term.length <= e)
+      );
+      if (overlaps) continue;
+      usedRanges.push([idx, idx + term.length]);
+      matches.push({
+        id: `order-${type}-${matches.length}`,
+        label, type, value: term,
+        charStart: idx, charEnd: idx + term.length,
+        meta,
+        color: ENTITY_COLORS[colorIdx % ENTITY_COLORS.length],
+      });
+      colorIdx++;
+      return;
+    }
+  };
+
+  // Match mission callsigns, IDs, platform types
+  for (const pkg of detail.missionPackages) {
+    for (const m of pkg.missions) {
+      tryMatch(
+        `Mission: ${m.callsign || m.missionId}`,
+        'mission',
+        [m.callsign, m.missionId, m.platformType].filter(Boolean) as string[],
+        { domain: m.domain, status: m.status, platform: m.platformType },
+      );
+      // Match targets
+      for (const tgt of m.targets) {
+        tryMatch(
+          `Target: ${tgt.targetName}`,
+          'target',
+          [tgt.targetName, tgt.desiredEffect].filter(Boolean) as string[],
+          { effect: tgt.desiredEffect, priority: tgt.priorityRank, category: tgt.targetCategory },
+        );
+      }
+      // Match time windows
+      for (const tw of m.timeWindows) {
+        tryMatch(
+          `Time: ${tw.windowType}`,
+          'time-window',
+          [tw.windowType].filter(Boolean) as string[],
+          { start: tw.startTime, end: tw.endTime },
+        );
+      }
+    }
+    // Match package-level info
+    if (pkg.packageId) {
+      tryMatch(
+        `Package: ${pkg.packageId}`,
+        'package',
+        [pkg.packageId, pkg.missionType, pkg.effectDesired].filter(Boolean) as string[],
+        { missionType: pkg.missionType, effect: pkg.effectDesired, priority: pkg.priorityRank },
+      );
+    }
+  }
+
+  matches.sort((a, b) => a.charStart - b.charStart);
+  return matches;
+}
+
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export function DocumentIntake() {
@@ -135,6 +208,10 @@ export function DocumentIntake() {
   const [docs, setDocs] = useState<DocItem[]>([]);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [loadingDocs, setLoadingDocs] = useState(false);
+
+  // Order detail cache (fetched on-demand when an order is selected)
+  const [orderDetails, setOrderDetails] = useState<Map<string, OrderDetailData>>(new Map());
+  const [loadingOrderDetail, setLoadingOrderDetail] = useState(false);
 
   // Entity matches for selected doc
   const [entityMatches, setEntityMatches] = useState<EntityMatch[]>([]);
@@ -214,6 +291,20 @@ export function DocumentIntake() {
         });
       }
 
+      // Tasking orders (ATO, MTO, STO)
+      for (const o of (scenario.taskingOrders || [])) {
+        items.push({
+          id: o.id,
+          title: o.orderId || `${o.orderType}-${o.id.slice(0, 6)}`,
+          docType: o.orderType,
+          content: o.rawText || '',
+          effectiveDate: o.effectiveStart,
+          category: 'order',
+          icon: getDocIcon(o.orderType),
+          ingestedAt: o.ingestedAt,
+        });
+      }
+
       setDocs(items);
     } catch (err) {
       console.error('Failed to fetch scenario docs:', err);
@@ -274,6 +365,36 @@ export function DocumentIntake() {
     }
   };
 
+  // ─── Fetch Order Detail When an Order Doc is Selected ────────────────────
+
+  useEffect(() => {
+    if (!selectedDoc || selectedDoc.category !== 'order') return;
+    if (orderDetails.has(selectedDoc.id)) return; // already cached
+
+    let mounted = true;
+    setLoadingOrderDetail(true);
+    fetch(`/api/orders/${selectedDoc.id}`)
+      .then(r => {
+        if (!r.ok) throw new Error('Failed to fetch order details');
+        return r.json();
+      })
+      .then(json => {
+        if (!json.success || !mounted) return;
+        setOrderDetails(prev => new Map(prev).set(selectedDoc.id, json.data));
+      })
+      .catch(err => {
+        if (mounted) console.error('Order fetch error:', err);
+      })
+      .finally(() => { if (mounted) setLoadingOrderDetail(false); });
+
+    return () => { mounted = false; };
+  }, [selectedDoc?.id, selectedDoc?.category]);
+
+  // Derived: order detail for the currently selected doc (if it's an order)
+  const selectedOrderDetail = selectedDoc?.category === 'order'
+    ? orderDetails.get(selectedDoc.id) ?? null
+    : null;
+
   // ─── Compute Entity Matches When Doc Selected ───────────────────────────
 
   useEffect(() => {
@@ -281,7 +402,15 @@ export function DocumentIntake() {
       setEntityMatches([]);
       return;
     }
-    const matches = findEntityMatches(selectedDoc.content, selectedDoc);
+
+    let matches: EntityMatch[];
+
+    // For order docs, use structured order data to find entity matches
+    if (selectedDoc.category === 'order' && selectedOrderDetail && selectedDoc.content) {
+      matches = findOrderEntityMatches(selectedDoc.content, selectedOrderDetail);
+    } else {
+      matches = findEntityMatches(selectedDoc.content, selectedDoc);
+    }
 
     // Merge review flags as additional entity matches for the selected doc
     const docFlags = reviewFlags.filter(
@@ -315,7 +444,7 @@ export function DocumentIntake() {
 
     matches.sort((a, b) => a.charStart - b.charStart);
     setEntityMatches(matches);
-  }, [selectedDoc, reviewFlags]);
+  }, [selectedDoc, selectedOrderDetail, reviewFlags]);
 
   // ─── Draw Link Lines ────────────────────────────────────────────────────
 
@@ -850,6 +979,21 @@ export function DocumentIntake() {
               </DocGroup>
             )}
 
+            {/* Tasking Orders group */}
+            {docs.filter(d => d.category === 'order').length > 0 && (
+              <DocGroup label="Tasking Orders">
+                {docs.filter(d => d.category === 'order').map(d => (
+                  <DocListItem
+                    key={d.id}
+                    doc={d}
+                    selected={selectedDocId === d.id}
+                    onClick={() => setSelectedDocId(d.id)}
+                    hasPendingFlags={pendingFlags.some(f => f.documentId === d.id)}
+                  />
+                ))}
+              </DocGroup>
+            )}
+
             {docs.length === 0 && !loadingDocs && (
               <div style={{
                 padding: '32px 16px', textAlign: 'center',
@@ -1047,6 +1191,145 @@ export function DocumentIntake() {
           }}>
             STRUCTURED DATA
           </div>
+
+          {/* Order overview when an order doc is selected */}
+          {selectedDoc?.category === 'order' && loadingOrderDetail && (
+            <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>
+              Loading order detail...
+            </div>
+          )}
+          {selectedDoc?.category === 'order' && selectedOrderDetail && (
+            <div style={{ padding: '8px' }}>
+              {/* Order Overview Card */}
+              <div style={{
+                padding: '10px 12px', marginBottom: '8px', borderRadius: '8px',
+                border: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                  <span className={`badge badge-${orderTypeBadge(selectedOrderDetail.orderType)}`} style={{ fontSize: '9px' }}>
+                    {selectedOrderDetail.orderType}
+                  </span>
+                  <span style={{ fontSize: '10px', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--text-bright)' }}>
+                    {selectedOrderDetail.orderId}
+                  </span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr', gap: '2px 8px', fontSize: '10px' }}>
+                  {selectedOrderDetail.issuingAuthority && (
+                    <>
+                      <span style={{ color: 'var(--text-muted)' }}>Authority</span>
+                      <span style={{ color: 'var(--text-secondary)' }}>{selectedOrderDetail.issuingAuthority}</span>
+                    </>
+                  )}
+                  {selectedOrderDetail.atoDayNumber != null && (
+                    <>
+                      <span style={{ color: 'var(--text-muted)' }}>ATO Day</span>
+                      <span style={{ color: 'var(--text-secondary)' }}>{selectedOrderDetail.atoDayNumber}</span>
+                    </>
+                  )}
+                  {selectedOrderDetail.classification && (
+                    <>
+                      <span style={{ color: 'var(--text-muted)' }}>Class.</span>
+                      <span style={{ color: 'var(--text-secondary)' }}>{selectedOrderDetail.classification}</span>
+                    </>
+                  )}
+                  {selectedOrderDetail.confidence != null && (
+                    <>
+                      <span style={{ color: 'var(--text-muted)' }}>Confidence</span>
+                      <span style={{ color: 'var(--text-secondary)' }}>{(selectedOrderDetail.confidence * 100).toFixed(0)}%</span>
+                    </>
+                  )}
+                  <span style={{ color: 'var(--text-muted)' }}>Packages</span>
+                  <span style={{ color: 'var(--text-secondary)' }}>
+                    {selectedOrderDetail.missionPackages.length} pkg · {selectedOrderDetail.missionPackages.reduce((s, p) => s + p.missions.length, 0)} missions
+                  </span>
+                </div>
+              </div>
+
+              {/* Mission Package Cards */}
+              {selectedOrderDetail.missionPackages.map((pkg, pkgIdx) => (
+                <div key={pkg.id} style={{
+                  padding: '10px 12px', marginBottom: '6px', borderRadius: '8px',
+                  border: '1px solid rgba(96, 165, 250, 0.3)', background: 'rgba(96, 165, 250, 0.04)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                    <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#60a5fa' }} />
+                    <span style={{ fontSize: '10px', fontWeight: 700, fontFamily: 'var(--font-mono)', color: '#60a5fa', textTransform: 'uppercase' }}>
+                      Package {pkg.priorityRank ?? pkgIdx + 1}{pkg.packageId ? ` — ${pkg.packageId}` : ''}
+                    </span>
+                  </div>
+                  {(pkg.missionType || pkg.effectDesired) && (
+                    <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                      {[pkg.missionType, pkg.effectDesired].filter(Boolean).join(' · ')}
+                    </div>
+                  )}
+                  {pkg.missions.map(mission => (
+                    <div key={mission.id} style={{
+                      marginTop: '6px', padding: '6px 8px', borderRadius: '4px',
+                      background: 'rgba(255,255,255,0.025)', borderLeft: '2px solid var(--border-subtle)',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '2px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-bright)' }}>
+                          {mission.callsign || mission.missionId}
+                        </span>
+                        {mission.domain && (
+                          <span className={`badge badge-${mission.domain === 'AIR' ? 'air' : mission.domain === 'MARITIME' ? 'maritime' : mission.domain === 'SPACE' ? 'space' : 'land'}`} style={{ fontSize: '8px' }}>
+                            {mission.domain}
+                          </span>
+                        )}
+                        {mission.status && (
+                          <span style={{ marginLeft: 'auto', fontSize: '8px', fontWeight: 600, color: 'var(--text-muted)' }}>
+                            {mission.status}
+                          </span>
+                        )}
+                      </div>
+                      {mission.platformType && (
+                        <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
+                          {mission.platformType}{mission.platformCount ? ` ×${mission.platformCount}` : ''}
+                          {mission.unit ? ` · ${mission.unit.name}` : ''}
+                        </div>
+                      )}
+                      {mission.targets.length > 0 && (
+                        <div style={{ marginTop: '4px' }}>
+                          {mission.targets.map(tgt => (
+                            <div key={tgt.id} style={{ fontSize: '9px', color: 'var(--text-secondary)', display: 'flex', gap: '4px' }}>
+                              <span style={{ color: '#f59e0b' }}>TGT</span>
+                              <span>{tgt.targetName}</span>
+                              {tgt.desiredEffect && <span style={{ color: 'var(--text-muted)' }}>({tgt.desiredEffect})</span>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {mission.spaceNeeds.length > 0 && (
+                        <div style={{ marginTop: '3px', display: 'flex', flexWrap: 'wrap', gap: '3px' }}>
+                          {mission.spaceNeeds.map(sn => (
+                            <span key={sn.id} style={{
+                              fontSize: '8px', padding: '1px 4px', borderRadius: '3px',
+                              background: sn.fulfilled ? 'rgba(16,185,129,0.15)' : 'rgba(139,92,246,0.15)',
+                              color: sn.fulfilled ? '#34d399' : '#a78bfa', fontWeight: 600,
+                            }}>
+                              {sn.capabilityType}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {mission.supportReqs.length > 0 && (
+                        <div style={{ marginTop: '3px', display: 'flex', flexWrap: 'wrap', gap: '3px' }}>
+                          {mission.supportReqs.map(req => (
+                            <span key={req.id} style={{
+                              fontSize: '8px', padding: '1px 4px', borderRadius: '3px',
+                              background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)', fontWeight: 600,
+                            }}>
+                              {req.supportType}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
 
           {selectedDoc && entityMatches.length > 0 ? (
             <div style={{ padding: '8px' }}>
@@ -1250,17 +1533,21 @@ export function DocumentIntake() {
                 );
               })}
             </div>
-          ) : selectedDoc ? (
+          ) : selectedDoc && !selectedOrderDetail ? (
             <div style={{
               padding: '32px 16px', textAlign: 'center',
               color: 'var(--text-muted)', fontSize: '12px', lineHeight: 1.6,
             }}>
               <span style={{ fontSize: '24px', display: 'block', marginBottom: '8px', opacity: 0.4 }}>🔍</span>
               No structured entities found in this document.
-              <br /><br />
-              Click <strong>⚡ Ingest</strong> to run the AI extraction pipeline.
+              {selectedDoc.category !== 'order' && (
+                <>
+                  <br /><br />
+                  Click <strong>⚡ Ingest</strong> to run the AI extraction pipeline.
+                </>
+              )}
             </div>
-          ) : (
+          ) : !selectedDoc ? (
             <div style={{
               padding: '32px 16px', textAlign: 'center',
               color: 'var(--text-muted)', fontSize: '12px', lineHeight: 1.6,
@@ -1268,7 +1555,7 @@ export function DocumentIntake() {
               <span style={{ fontSize: '24px', display: 'block', marginBottom: '8px', opacity: 0.4 }}>📊</span>
               Select a document to see extracted structured data.
             </div>
-          )}
+          ) : null}
         </div>
       </div>
 
