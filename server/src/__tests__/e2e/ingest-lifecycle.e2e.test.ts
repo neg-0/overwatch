@@ -326,9 +326,230 @@ describe('Ingest Lifecycle E2E', () => {
     const logRes = await fetch(`${app.baseUrl}/api/ingest/log?scenarioId=${seed.scenarioId}`);
     expect(logRes.status).toBe(200);
     const logBody: any = await logRes.json();
-    expect(logBody.logs).toHaveLength(1);
-    expect(logBody.logs[0].hierarchyLevel).toBe('STRATEGY');
-    expect(logBody.logs[0].parseTimeMs).toBeGreaterThan(0);
+    expect(logBody.success).toBe(true);
+    expect(logBody.data).toHaveLength(1);
+    expect(logBody.data[0].hierarchyLevel).toBe('STRATEGY');
+    expect(logBody.data[0].parseTimeMs).toBeGreaterThan(0);
+  });
+
+  it('ingests an OPLAN and creates phases, command tasks, PACE comms in DB', async () => {
+    // Mock classify as OPLAN
+    mockCreate.mockResolvedValueOnce({
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            hierarchyLevel: 'STRATEGY',
+            documentType: 'OPLAN',
+            sourceFormat: 'MEMORANDUM',
+            confidence: 0.85,
+            title: 'OPLAN — Pacific Shield',
+            issuingAuthority: 'USINDOPACOM',
+            effectiveDateStr: '2026-03-01T00:00:00Z',
+          })
+        }
+      }],
+    });
+    // Mock normalize with OPLAN-specific data
+    mockCreate.mockResolvedValueOnce({
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            title: 'OPLAN — Pacific Shield',
+            docType: 'OPLAN',
+            authorityLevel: 'COCOM',
+            content: 'Full OPLAN content...',
+            effectiveDate: '2026-03-01T00:00:00Z',
+            commanderIntent: 'Establish multi-domain superiority.',
+            mission: 'USINDOPACOM conducts operations to deter aggression.',
+            priorities: [
+              { rank: 1, effect: 'Air superiority', description: 'P1', justification: 'Critical' },
+            ],
+            phases: [
+              { phaseNumber: 0, phaseName: 'SHAPE', description: 'Shape the environment', keyTasks: ['Posture forces', 'ISR'] },
+              { phaseNumber: 1, phaseName: 'DETER', description: 'Deter adversary', keyTasks: ['Show of force'] },
+            ],
+            commandTasks: [
+              { commandName: 'PACAF (JFACC)', commandRole: 'JFACC', tasks: ['Air superiority', 'OCA'] },
+            ],
+            paceComms: [
+              { context: 'JTF HQ', primary: 'SIPRNET VTC', alternate: 'SATCOM', contingency: 'HF', emergency: 'Runner' },
+            ],
+          })
+        }
+      }],
+    });
+
+    const res = await fetch(`${app.baseUrl}/api/ingest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scenarioId: seed.scenarioId,
+        rawText: 'OPLAN — WESTERN PACIFIC MULTI-DOMAIN OPERATIONS\n1. SITUATION...',
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const httpResult: any = await res.json();
+    expect(httpResult.success).toBe(true);
+    expect(httpResult.hierarchyLevel).toBe('STRATEGY');
+    expect(httpResult.documentType).toBe('OPLAN');
+    expect(httpResult.extracted.phaseCount).toBe(2);
+    expect(httpResult.extracted.commandTaskCount).toBe(1);
+    expect(httpResult.extracted.paceCommCount).toBe(1);
+
+    // Verify DB records
+    const prisma = getTestPrisma();
+    const phases = await prisma.oPLANPhase.findMany({
+      where: { strategyDoc: { scenarioId: seed.scenarioId } },
+      orderBy: { phaseNumber: 'asc' },
+    });
+    expect(phases).toHaveLength(2);
+    expect(phases[0].phaseName).toBe('SHAPE');
+    expect(phases[0].keyTasks).toContain('Posture forces');
+    expect(phases[1].phaseName).toBe('DETER');
+
+    const tasks = await prisma.commandTask.findMany({
+      where: { strategyDoc: { scenarioId: seed.scenarioId } },
+    });
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].commandName).toBe('PACAF (JFACC)');
+    expect(tasks[0].commandRole).toBe('JFACC');
+
+    const paceComms = await prisma.pACEComm.findMany({
+      where: { strategyDoc: { scenarioId: seed.scenarioId } },
+    });
+    expect(paceComms).toHaveLength(1);
+    expect(paceComms[0].context).toBe('JTF HQ');
+    expect(paceComms[0].primary).toBe('SIPRNET VTC');
+  });
+
+  it('ingests SPINS and creates procedures + comm plans in DB', async () => {
+    mockCreate.mockResolvedValueOnce({
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            hierarchyLevel: 'PLANNING',
+            documentType: 'SPINS',
+            sourceFormat: 'STAFF_DOC',
+            confidence: 0.90,
+            title: 'SPINS Version 01',
+            issuingAuthority: '613 AOC',
+            effectiveDateStr: '2026-03-01T00:00:00Z',
+          })
+        }
+      }],
+    });
+    mockCreate.mockResolvedValueOnce({
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            title: 'SPINS Version 01',
+            docType: 'SPINS',
+            content: 'SPINS procedures...',
+            effectiveDate: '2026-03-01T00:00:00Z',
+            codeWords: [{ word: 'BRIGHT STAR', meaning: 'Initiate defense' }],
+            procedures: [
+              { category: 'ROE', title: 'Weapons Release', description: 'WRA procedures', applicableTo: ['ALL'] },
+              { category: 'EMCON', title: 'EMCON Alpha', description: 'Full emission control', applicableTo: ['AIR'] },
+            ],
+            commPlans: [
+              { netName: 'BLUE-7', frequency: '305.6 MHz', band: 'UHF', callsign: 'MAGIC', purpose: 'AWACS', applicableTo: ['DCA'] },
+            ],
+          })
+        }
+      }],
+    });
+
+    const res = await fetch(`${app.baseUrl}/api/ingest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scenarioId: seed.scenarioId,
+        rawText: 'SPECIAL INSTRUCTIONS (SPINS)\n1. ROE...',
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const httpResult: any = await res.json();
+    expect(httpResult.success).toBe(true);
+    expect(httpResult.documentType).toBe('SPINS');
+
+    const prisma = getTestPrisma();
+    const spinsEntries = await prisma.sPINSEntry.findMany({
+      where: { planningDoc: { scenarioId: seed.scenarioId } },
+    });
+    expect(spinsEntries.length).toBeGreaterThanOrEqual(2);
+
+    const commPlans = await prisma.commPlan.findMany({
+      where: { planningDoc: { scenarioId: seed.scenarioId } },
+    });
+    expect(commPlans.length).toBeGreaterThanOrEqual(1);
+    expect(commPlans[0].netName).toBe('BLUE-7');
+  });
+
+  it('classifier guard: ACO classified as ORDER gets corrected to PLANNING', async () => {
+    // Intentionally classify ACO as ORDER (common LLM mistake)
+    mockCreate.mockResolvedValueOnce({
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            hierarchyLevel: 'ORDER',
+            documentType: 'ACO',
+            sourceFormat: 'STAFF_DOC',
+            confidence: 0.75,
+            title: 'Airspace Control Order',
+            issuingAuthority: 'JFACC',
+            effectiveDateStr: '2026-03-01T00:00:00Z',
+          })
+        }
+      }],
+    });
+    mockCreate.mockResolvedValueOnce({
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            title: 'ACO 01-15 MAR',
+            docType: 'ACO',
+            content: 'ACO content...',
+            effectiveDate: '2026-03-01T00:00:00Z',
+            airspaceControlMeasures: [
+              { measureType: 'ROZ', name: 'ROZ ALPHA', controllingAuthority: 'JFACC', boundaryDescription: 'N25.5 E126.5 to N26.0 E127.0', altitudeFloor: 0, altitudeCeiling: 35000 },
+            ],
+            issuingAuthority: 'JFACC',
+            fireSupportMeasures: [],
+          })
+        }
+      }],
+    });
+
+    const res = await fetch(`${app.baseUrl}/api/ingest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scenarioId: seed.scenarioId,
+        rawText: 'AIRSPACE CONTROL ORDER\nEffective: 01 MAR 2026...',
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const httpResult: any = await res.json();
+    expect(httpResult.success).toBe(true);
+    // Should be corrected to PLANNING, not ORDER
+    expect(httpResult.hierarchyLevel).toBe('PLANNING');
+    expect(httpResult.documentType).toBe('ACO');
+
+    // Verify it was persisted as a planning document, not a tasking order
+    const prisma = getTestPrisma();
+    const planDocs = await prisma.planningDocument.findMany({
+      where: { scenarioId: seed.scenarioId, docType: 'ACO' },
+    });
+    expect(planDocs.length).toBeGreaterThanOrEqual(1);
+
+    // Verify airspace structures were created
+    const airspace = await prisma.airspaceStructure.findMany({
+      where: { scenarioId: seed.scenarioId },
+    });
+    expect(airspace.length).toBeGreaterThanOrEqual(1);
   });
 
   it('demo-stream status lifecycle: inactive → start → active → stop → inactive', async () => {

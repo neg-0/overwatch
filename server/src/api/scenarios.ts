@@ -353,7 +353,12 @@ scenarioRoutes.get('/:id', async (req, res) => {
         },
         strategies: {
           orderBy: { effectiveDate: 'asc' },
-          include: { priorities: { orderBy: { rank: 'asc' } } },
+          include: {
+            priorities: { orderBy: { rank: 'asc' } },
+            oplanPhases: { orderBy: { phaseNumber: 'asc' } },
+            commandTasks: true,
+            paceComms: true,
+          },
         },
         planningDocs: {
           include: {
@@ -361,6 +366,12 @@ scenarioRoutes.get('/:id', async (req, res) => {
               orderBy: { rank: 'asc' },
               include: { strategyPriority: true },
             },
+            spinsEntries: true,
+            commPlans: true,
+            coordinationMeasures: true,
+            forceApportionments: true,
+            weaponTargetPairs: true,
+            fireSupportMeasures: true,
           },
           orderBy: { effectiveDate: 'asc' },
         },

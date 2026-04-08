@@ -301,59 +301,108 @@ export function ScenarioDetail() {
                   expanded={expanded === 'strategies'} onToggle={() => toggleExpand('strategies')}
                   onRegenerate={() => handleRegenerateStep('Strategic Context')} isRegenerating={regeneratingSteps['Strategic Context']}
                 >
-                  {scenarioDetail.strategies?.map((s: any, i: number) => (
-                    <div key={i} style={{ ...artifactDetailStyle, cursor: 'pointer', transition: 'background 0.2s ease' }}
-                      onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-tertiary)'}
-                      onMouseLeave={(e) => e.currentTarget.style.background = 'var(--bg-secondary)'}
-                      onClick={() => setSelectedDoc(s)}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <span style={{ fontSize: '20px' }}>📄</span>
-                        <div>
-                          <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '2px' }}>{s.title}</div>
-                          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                            Effective: {new Date(s.effectiveDate).toLocaleDateString()}
+                  {scenarioDetail.strategies?.map((s: any, i: number) => {
+                    const badges: { label: string; count: number }[] = [];
+                    if (s.priorities?.length > 0) badges.push({ label: 'priorities', count: s.priorities.length });
+                    if (s.oplanPhases?.length > 0) badges.push({ label: 'phases', count: s.oplanPhases.length });
+                    if (s.commandTasks?.length > 0) badges.push({ label: 'tasks', count: s.commandTasks.length });
+                    if (s.paceComms?.length > 0) badges.push({ label: 'PACE', count: s.paceComms.length });
+
+                    return (
+                      <div key={i} style={{ ...artifactDetailStyle, cursor: 'pointer', transition: 'background 0.2s ease' }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-tertiary)'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = 'var(--bg-secondary)'}
+                        onClick={() => setSelectedDoc(s)}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <span style={{ fontSize: '20px' }}>📄</span>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+                              <span style={{ fontWeight: 600, fontSize: '13px' }}>{s.title}</span>
+                              <span style={{
+                                fontSize: '10px', fontWeight: 600, padding: '1px 6px', borderRadius: '3px',
+                                background: 'rgba(0, 212, 255, 0.12)', color: 'var(--accent-primary)',
+                                fontFamily: 'var(--font-mono)',
+                              }}>{s.docType}</span>
+                            </div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                              Effective: {new Date(s.effectiveDate).toLocaleDateString()}
+                            </div>
+                            {badges.length > 0 && (
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                {badges.map((b, j) => (
+                                  <span key={j} style={{
+                                    fontSize: '10px', padding: '2px 6px', borderRadius: '4px',
+                                    background: 'rgba(0, 200, 83, 0.12)', color: 'var(--accent-success)',
+                                    fontFamily: 'var(--font-mono)', fontWeight: 600,
+                                  }}>
+                                    {b.count} {b.label}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </ArtifactSection>
 
-                <ArtifactSection icon="🎯" title="Planning Documents (JIPTL)" count={scenarioDetail.planningDocs?.length || 0}
+                <ArtifactSection icon="🎯" title="Planning Documents" count={scenarioDetail.planningDocs?.length || 0}
                   expanded={expanded === 'planning'} onToggle={() => toggleExpand('planning')}
                   onRegenerate={() => handleRegenerateStep('Planning Documents')} isRegenerating={regeneratingSteps['Planning Documents']}
                 >
-                  {scenarioDetail.planningDocs?.map((doc: any, i: number) => (
-                    <div key={i} style={{ ...artifactDetailStyle, cursor: 'pointer', transition: 'background 0.2s ease' }}
-                      onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-tertiary)'}
-                      onMouseLeave={(e) => e.currentTarget.style.background = 'var(--bg-secondary)'}
-                      onClick={() => setSelectedDoc(doc)}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <span style={{ fontSize: '20px' }}>📄</span>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '4px' }}>{doc.title}</div>
-                          {doc.priorities?.length > 0 && (
-                            <div style={{ marginTop: '4px' }}>
-                              <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)' }}>PRIORITIES:</span>
-                              {doc.priorities.slice(0, 3).map((p: any, j: number) => (
-                                <div key={j} style={{ display: 'flex', gap: '8px', alignItems: 'baseline', fontSize: '11px', marginTop: '4px', paddingLeft: '8px' }}>
-                                  <span style={{ fontWeight: 700, color: 'var(--accent-warning)', fontFamily: 'var(--font-mono)', minWidth: '16px' }}>#{p.rank}</span>
-                                  <span style={{ color: 'var(--text-secondary)' }}>{p.targetName}</span>
-                                </div>
-                              ))}
-                              {doc.priorities.length > 3 && (
-                                <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px', paddingLeft: '8px' }}>
-                                  + {doc.priorities.length - 3} more
-                                </div>
-                              )}
+                  {scenarioDetail.planningDocs?.map((doc: any, i: number) => {
+                    // Build extraction summary badges per doc type
+                    const badges: { label: string; count: number }[] = [];
+                    if (doc.priorities?.length > 0) badges.push({ label: 'priorities', count: doc.priorities.length });
+                    if (doc.spinsEntries?.length > 0) badges.push({ label: 'procedures', count: doc.spinsEntries.length });
+                    if (doc.commPlans?.length > 0) badges.push({ label: 'comm plans', count: doc.commPlans.length });
+                    if (doc.coordinationMeasures?.length > 0) badges.push({ label: 'coord measures', count: doc.coordinationMeasures.length });
+                    if (doc.forceApportionments?.length > 0) badges.push({ label: 'force apportion', count: doc.forceApportionments.length });
+                    if (doc.weaponTargetPairs?.length > 0) badges.push({ label: 'WTPs', count: doc.weaponTargetPairs.length });
+                    if (doc.fireSupportMeasures?.length > 0) badges.push({ label: 'fire support', count: doc.fireSupportMeasures.length });
+
+                    return (
+                      <div key={i} style={{ ...artifactDetailStyle, cursor: 'pointer', transition: 'background 0.2s ease' }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-tertiary)'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = 'var(--bg-secondary)'}
+                        onClick={() => setSelectedDoc(doc)}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <span style={{ fontSize: '20px' }}>📄</span>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                              <span style={{ fontWeight: 600, fontSize: '13px' }}>{doc.title}</span>
+                              <span style={{
+                                fontSize: '10px', fontWeight: 600, padding: '1px 6px', borderRadius: '3px',
+                                background: 'rgba(0, 212, 255, 0.12)', color: 'var(--accent-primary)',
+                                fontFamily: 'var(--font-mono)',
+                              }}>{doc.docType}</span>
                             </div>
-                          )}
+                            {badges.length > 0 && (
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '4px' }}>
+                                {badges.map((b, j) => (
+                                  <span key={j} style={{
+                                    fontSize: '10px', padding: '2px 6px', borderRadius: '4px',
+                                    background: 'rgba(0, 200, 83, 0.12)', color: 'var(--accent-success)',
+                                    fontFamily: 'var(--font-mono)', fontWeight: 600,
+                                  }}>
+                                    {b.count} {b.label}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            {badges.length === 0 && (
+                              <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontStyle: 'italic', marginTop: '2px' }}>
+                                No structured data extracted
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </ArtifactSection>
 
                 <ArtifactSection icon="⚔️" title="Order of Battle (ORBAT)" count={scenarioDetail.units?.length || 0}

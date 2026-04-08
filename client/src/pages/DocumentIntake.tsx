@@ -16,6 +16,17 @@ interface DocItem {
   icon: string;
   ingestedAt?: string | null;
   priorities?: any[];
+  // Strategy OPLAN/CONPLAN extraction
+  oplanPhases?: any[];
+  commandTasks?: any[];
+  paceComms?: any[];
+  // Planning doc extraction
+  spinsEntries?: any[];
+  commPlans?: any[];
+  coordinationMeasures?: any[];
+  forceApportionments?: any[];
+  weaponTargetPairs?: any[];
+  fireSupportMeasures?: any[];
 }
 
 interface EntityMatch {
@@ -111,6 +122,114 @@ function findEntityMatches(rawText: string, doc: DocItem): EntityMatch[] {
         'priority',
         searchTerms,
         { rank: p.rank, effect: p.effect },
+      );
+    }
+  }
+
+  // Match OPLAN phases
+  if (doc.oplanPhases) {
+    for (const ph of doc.oplanPhases) {
+      addMatch(
+        `Phase ${ph.phaseNumber}: ${ph.phaseName}`,
+        'phase',
+        [ph.phaseName, ph.description?.substring(0, 60)].filter(Boolean),
+        { tasks: ph.keyTasks?.length || 0 },
+      );
+    }
+  }
+
+  // Match command tasks
+  if (doc.commandTasks) {
+    for (const ct of doc.commandTasks) {
+      addMatch(
+        `${ct.commandName}${ct.commandRole ? ` (${ct.commandRole})` : ''}`,
+        'command-task',
+        [ct.commandName, ct.commandRole, ...(ct.tasks?.slice(0, 2) || [])].filter(Boolean),
+        { role: ct.commandRole, tasks: ct.tasks?.length || 0 },
+      );
+    }
+  }
+
+  // Match PACE comms
+  if (doc.paceComms) {
+    for (const pace of doc.paceComms) {
+      addMatch(
+        `PACE: ${pace.context}`,
+        'pace-comm',
+        [pace.context, pace.primary, pace.alternate].filter(Boolean),
+        { P: pace.primary, A: pace.alternate, C: pace.contingency, E: pace.emergency },
+      );
+    }
+  }
+
+  // Match SPINS entries (procedures/ROE)
+  if (doc.spinsEntries) {
+    for (const se of doc.spinsEntries) {
+      addMatch(
+        `${se.category || 'PROC'}: ${se.title || se.description?.substring(0, 40)}`,
+        'procedure',
+        [se.title, se.codeWord, se.description?.substring(0, 50)].filter(Boolean),
+        { category: se.category, ...(se.codeWord ? { codeWord: se.codeWord } : {}) },
+      );
+    }
+  }
+
+  // Match comm plans
+  if (doc.commPlans) {
+    for (const cp of doc.commPlans) {
+      addMatch(
+        `Comm: ${cp.netName || cp.frequency || 'Net'}`,
+        'comm-plan',
+        [cp.netName, cp.callsign, cp.frequency].filter(Boolean),
+        { freq: cp.frequency, callsign: cp.callsign, purpose: cp.purpose?.substring(0, 40) },
+      );
+    }
+  }
+
+  // Match coordination measures
+  if (doc.coordinationMeasures) {
+    for (const cm of doc.coordinationMeasures) {
+      addMatch(
+        `Coord: ${cm.measureType} — ${cm.name}`,
+        'coord-measure',
+        [cm.name, cm.measureType, cm.description?.substring(0, 50)].filter(Boolean),
+        { type: cm.measureType },
+      );
+    }
+  }
+
+  // Match force apportionments
+  if (doc.forceApportionments) {
+    for (const fa of doc.forceApportionments) {
+      addMatch(
+        `${fa.missionType}: ${fa.sorties} sorties (${fa.percentAllocation}%)`,
+        'force-apportion',
+        [fa.missionType, fa.rationale?.substring(0, 50)].filter(Boolean),
+        { sorties: fa.sorties, pct: `${fa.percentAllocation}%` },
+      );
+    }
+  }
+
+  // Match weapon-target pairs
+  if (doc.weaponTargetPairs) {
+    for (const wtp of doc.weaponTargetPairs) {
+      addMatch(
+        `WTP: ${wtp.weaponSystem || 'Weapon'} → ${wtp.targetType || wtp.targetName || 'Target'}`,
+        'weapon-target',
+        [wtp.weaponSystem, wtp.targetName, wtp.targetType].filter(Boolean),
+        { weapon: wtp.weaponSystem, target: wtp.targetName },
+      );
+    }
+  }
+
+  // Match fire support measures
+  if (doc.fireSupportMeasures) {
+    for (const fsm of doc.fireSupportMeasures) {
+      addMatch(
+        `FSM: ${fsm.measureType || fsm.name || 'Measure'}`,
+        'fire-support',
+        [fsm.name, fsm.measureType, fsm.description?.substring(0, 50)].filter(Boolean),
+        { type: fsm.measureType },
       );
     }
   }
@@ -265,13 +384,16 @@ export function DocumentIntake() {
         items.push({
           id: s.id,
           title: s.title,
-          docType: s.strategyType || 'STRATEGY',
+          docType: s.strategyType || s.docType || 'STRATEGY',
           content: s.content || '',
           effectiveDate: s.effectiveDate,
           category: 'strategy',
-          icon: getDocIcon(s.strategyType || 'NDS'),
+          icon: getDocIcon(s.strategyType || s.docType || 'NDS'),
           ingestedAt: s.ingestedAt,
           priorities: s.priorities,
+          oplanPhases: s.oplanPhases,
+          commandTasks: s.commandTasks,
+          paceComms: s.paceComms,
         });
       }
 
@@ -288,6 +410,12 @@ export function DocumentIntake() {
           icon: getDocIcon(d.docType),
           ingestedAt: d.ingestedAt,
           priorities: d.priorities,
+          spinsEntries: d.spinsEntries,
+          commPlans: d.commPlans,
+          coordinationMeasures: d.coordinationMeasures,
+          forceApportionments: d.forceApportionments,
+          weaponTargetPairs: d.weaponTargetPairs,
+          fireSupportMeasures: d.fireSupportMeasures,
         });
       }
 

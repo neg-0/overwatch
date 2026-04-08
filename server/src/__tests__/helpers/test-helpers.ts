@@ -59,7 +59,18 @@ export async function cleanDatabase(): Promise<void> {
   await prisma.unit.deleteMany();
   await prisma.assetType.deleteMany();
   await prisma.spaceAsset.deleteMany();
+  // Planning doc child entities
+  await prisma.fireSupportMeasure.deleteMany();
+  await prisma.coordinationMeasure.deleteMany();
+  await prisma.weaponTargetPair.deleteMany();
+  await prisma.forceApportionment.deleteMany();
+  await prisma.commPlan.deleteMany();
+  await prisma.sPINSEntry.deleteMany();
   await prisma.priorityEntry.deleteMany();
+  // Strategy doc child entities
+  await prisma.pACEComm.deleteMany();
+  await prisma.commandTask.deleteMany();
+  await prisma.oPLANPhase.deleteMany();
   await prisma.strategyPriority.deleteMany();
   await prisma.planningDocument.deleteMany();
   await prisma.strategyDocument.deleteMany();
@@ -200,8 +211,10 @@ export async function seedTestScenario(): Promise<TestSeedResult> {
     },
   });
 
-  const assetType = await prisma.assetType.create({
-    data: {
+  const assetType = await prisma.assetType.upsert({
+    where: { name: 'F-35A' },
+    update: {},
+    create: {
       name: 'F-35A',
       domain: 'AIR',
       category: 'FIGHTER',
