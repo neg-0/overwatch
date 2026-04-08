@@ -164,12 +164,27 @@ export async function allocateSpaceResources(
         where: { spaceNeedId: entry.need.id },
       });
 
-      const status = hasAsset ? 'FULFILLED' : 'DENIED';
-      const allocatedCapability = hasAsset ? entry.need.capabilityType : null;
-      const rationale = hasAsset
-        ? `Allocated ${matchedAsset!.name} for ${entry.need.capabilityType}`
-        : `No operational ${entry.need.capabilityType} asset with coverage window`;
-      const riskLevel = hasAsset ? 'LOW' : (entry.need.missionCriticality === 'CRITICAL' ? 'CRITICAL' : 'MODERATE');
+      let status: string;
+      let allocatedCapability: string | null;
+      let rationale: string;
+      let riskLevel: string;
+
+      if (hasAsset) {
+        status = 'FULFILLED';
+        allocatedCapability = entry.need.capabilityType;
+        rationale = `Allocated ${matchedAsset!.name} for ${entry.need.capabilityType}`;
+        riskLevel = 'LOW';
+      } else if (entry.need.fallbackCapability) {
+        status = 'DEGRADED';
+        allocatedCapability = entry.need.fallbackCapability;
+        rationale = `No operational ${entry.need.capabilityType} asset with coverage window. Degraded to ${entry.need.fallbackCapability}`;
+        riskLevel = entry.need.missionCriticality === 'CRITICAL' ? 'HIGH' : 'MODERATE';
+      } else {
+        status = 'DENIED';
+        allocatedCapability = null;
+        rationale = `No operational ${entry.need.capabilityType} asset with coverage window`;
+        riskLevel = entry.need.missionCriticality === 'CRITICAL' ? 'CRITICAL' : 'MODERATE';
+      }
 
       const allocation = existingAllocation
         ? await prisma.spaceAllocation.update({
@@ -211,7 +226,9 @@ export async function allocateSpaceResources(
         a.coverageWindows.some(cw =>
           cw.capabilityType === group.capability &&
           cw.startTime <= group.timeEnd &&
-          cw.endTime >= group.timeStart,
+          cw.endTime >= group.timeStart &&
+          // Geographic check: at least one need in the group is within swath
+          group.needs.some(n => isWithinCoverage(n.need, cw)),
         ),
       );
       const hasCoverage = !!coverageAsset;

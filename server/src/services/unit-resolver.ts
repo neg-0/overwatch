@@ -98,13 +98,16 @@ export function resolveUnitForMission(
   // Try exact match first
   let candidates = index.byPlatform.get(normalizePlatform(platformType));
 
-  // Fuzzy match: check if LLM platformType starts with a catalog name or vice versa
+  // Fuzzy match: check if LLM platformType starts with a catalog name or vice versa.
+  // Require minimum 3 chars to avoid spurious matches on short/generic strings like "F".
   if (!candidates) {
     const normalized = normalizePlatform(platformType);
-    for (const catalogName of index.allPlatformNames) {
-      if (normalized.startsWith(catalogName) || catalogName.startsWith(normalized)) {
-        candidates = index.byPlatform.get(catalogName);
-        if (candidates) break;
+    if (normalized.length >= 3) {
+      for (const catalogName of index.allPlatformNames) {
+        if (normalized.startsWith(catalogName) || catalogName.startsWith(normalized)) {
+          candidates = index.byPlatform.get(catalogName);
+          if (candidates) break;
+        }
       }
     }
   }
