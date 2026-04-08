@@ -28,6 +28,7 @@ import { orderRoutes } from './api/orders.js';
 import { scenarioRoutes } from './api/scenarios.js';
 import { createSimulationRoutes } from './api/simulation.js';
 import { spaceAssetRoutes } from './api/space-assets.js';
+import { spaceRequestRoutes } from './api/space-requests.js';
 import { timelineRoutes } from './api/timeline.js';
 import { setupWebSocket } from './websocket/ws-server.js';
 
@@ -83,6 +84,7 @@ app.use('/api/simulation', createSimulationRoutes(io));
 app.use('/api/timeline', timelineRoutes);
 app.use('/api/decisions', createDecisionRoutes(io));
 app.use('/api/space-assets', spaceAssetRoutes);
+app.use('/api/space-requests', spaceRequestRoutes);
 app.use('/api/ingest', createIngestRoutes(io));
 app.use('/api/injects', injectRoutes);
 app.use('/api/events', eventsRoutes);

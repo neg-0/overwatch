@@ -12,6 +12,7 @@ import { OrdersView } from './pages/OrdersView';
 import { ScenarioDetail } from './pages/ScenarioDetail';
 import { ScenarioManager } from './pages/ScenarioManager';
 import { SpaceDashboard } from './pages/SpaceDashboard';
+import { SpaceRequestsView } from './pages/SpaceRequestsView';
 import { useOverwatchStore } from './store/overwatch-store';
 
 const SPEED_PRESETS = [60, 360, 720, 1440, 3600];
@@ -122,6 +123,15 @@ export default function App() {
                 <ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(120 12 12)" />
               </svg>
               Space Assets
+            </NavLink>
+            <NavLink to="/space-requests" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <svg className="nav-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="4" width="14" height="4" rx="1" />
+                <rect x="5" y="10" width="12" height="4" rx="1" />
+                <rect x="7" y="16" width="10" height="4" rx="1" />
+                <circle cx="20" cy="6" r="3" fill="currentColor" stroke="none" opacity="0.6" />
+              </svg>
+              Space Requests
             </NavLink>
             <NavLink to="/orders" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               <svg className="nav-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -280,6 +290,7 @@ export default function App() {
           <Route path="/map" element={<MapView />} />
           <Route path="/gantt" element={<GanttView />} />
           <Route path="/space" element={<SpaceDashboard />} />
+          <Route path="/space-requests" element={<SpaceRequestsView />} />
           <Route path="/orders" element={<OrdersView />} />
           <Route path="/scenario" element={<ScenarioManager />} />
           <Route path="/scenario/:id" element={<ScenarioDetail />} />
