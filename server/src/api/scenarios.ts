@@ -343,6 +343,14 @@ scenarioRoutes.get('/:id', async (req, res) => {
     const scenario = await prisma.scenario.findUnique({
       where: { id: req.params.id },
       include: {
+        _count: {
+          select: {
+            units: true,
+            taskingOrders: true,
+            planningDocs: true,
+            spaceAssets: true,
+          },
+        },
         strategies: {
           orderBy: { effectiveDate: 'asc' },
           include: { priorities: { orderBy: { rank: 'asc' } } },

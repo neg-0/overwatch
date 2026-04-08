@@ -67,6 +67,75 @@ router.get('/', async (req, res) => {
 });
 
 /**
+ * GET /api/space-assets/allocations?scenarioId=X
+ * Returns all space allocations with linked mission and space-asset data.
+ * Used by the map to draw dependency lines between satellites and supported missions.
+ */
+router.get('/allocations', async (req, res) => {
+  const rawId = req.query.scenarioId;
+  const scenarioId = Array.isArray(rawId) ? rawId[0] : rawId;
+
+  if (!scenarioId || typeof scenarioId !== 'string') {
+    return res.status(400).json({ success: false, error: 'scenarioId is required', timestamp: new Date().toISOString() });
+  }
+
+  try {
+    const allocations = await prisma.spaceAllocation.findMany({
+      where: {
+        spaceNeed: {
+          mission: {
+            package: { taskingOrder: { scenarioId } },
+          },
+        },
+      },
+      include: {
+        spaceAsset: {
+          select: {
+            id: true,
+            name: true,
+            constellation: true,
+            capabilities: true,
+            operator: true,
+            status: true,
+            affiliation: true,
+          },
+        },
+        spaceNeed: {
+          select: {
+            id: true,
+            capabilityType: true,
+            role: true,
+            missionCriticality: true,
+            startTime: true,
+            endTime: true,
+            mission: {
+              select: {
+                id: true,
+                missionId: true,
+                callsign: true,
+                domain: true,
+                missionType: true,
+                status: true,
+                affiliation: true,
+                unitId: true,
+                unit: {
+                  select: { id: true, unitDesignation: true, unitName: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return res.json({ success: true, data: allocations, timestamp: new Date().toISOString() });
+  } catch (err) {
+    console.error('[API] Failed to fetch space allocations:', err);
+    return res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
+  }
+});
+
+/**
  * POST /api/space-assets/refresh-tles?scenarioId=X
  * Manually triggers a TLE refresh from UDL for all space assets in a scenario.
  */
