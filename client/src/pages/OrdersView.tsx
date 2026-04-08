@@ -1,85 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useOverwatchStore } from '../store/overwatch-store';
-
-// Basic order (from list endpoint)
-interface Order {
-  id: string;
-  orderId: string;
-  orderType: string;
-  effectiveStart?: string;
-  effectiveEnd?: string;
-  issuingAuthority?: string;
-  atoDayNumber?: number;
-  status?: string;
-}
-
-// Full detail types (from /api/orders/:id)
-interface MissionTarget {
-  id: string;
-  targetName: string;
-  latitude: number;
-  longitude: number;
-  desiredEffect: string;
-  priorityRank?: number;
-  targetCategory?: string;
-}
-
-interface SupportReq {
-  id: string;
-  supportType: string;
-  details?: string;
-}
-
-interface TimeWindow {
-  id: string;
-  windowType: string;
-  startTime?: string;
-  endTime?: string;
-}
-
-interface SpaceNeed {
-  id: string;
-  capabilityType: string;
-  systemName?: string;
-  role: string;
-  commsBand?: string;
-  priority: number;
-  fulfilled: boolean;
-  spaceAsset?: { id: string; name: string; type: string };
-}
-
-interface MissionDetail {
-  id: string;
-  missionId: string;
-  callsign?: string;
-  domain?: string;
-  platformType?: string;
-  platformCount?: number;
-  status?: string;
-  timeWindows: TimeWindow[];
-  targets: MissionTarget[];
-  supportReqs: SupportReq[];
-  spaceNeeds: SpaceNeed[];
-  unit?: { id: string; name: string };
-}
-
-interface MissionPackageDetail {
-  id: string;
-  packageId?: string;
-  priorityRank?: number;
-  missionType?: string;
-  effectDesired?: string;
-  missions: MissionDetail[];
-}
-
-interface OrderDetail extends Order {
-  classification?: string;
-  sourceFormat?: string;
-  confidence?: number | null;
-  rawText?: string | null;
-  rawFormat?: string | null;
-  missionPackages: MissionPackageDetail[];
-}
+import type { OrderSummary, OrderDetail } from '../types/orders';
+import { orderTypeBadge, formatDtg } from '../types/orders';
 
 type OrderFilter = 'ALL' | 'ATO' | 'MTO' | 'STO';
 
@@ -103,18 +25,6 @@ const MISSION_STATUS_COLORS: Record<string, string> = {
   DIVERTED: '#f97316',
   DELAYED: '#ef4444',
 };
-
-/** Format ISO datetime as DTG: "0600Z 15APR" */
-function formatDtg(iso?: string): string {
-  if (!iso) return '--';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return iso;
-  const hh = String(d.getUTCHours()).padStart(2, '0');
-  const mm = String(d.getUTCMinutes()).padStart(2, '0');
-  const day = String(d.getUTCDate()).padStart(2, '0');
-  const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
-  return `${hh}${mm}Z ${day}${months[d.getUTCMonth()]}`;
-}
 
 // ─── Order Detail Panel ──────────────────────────────────────────────────────
 
@@ -145,7 +55,7 @@ function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelProps) {
     return () => { mounted = false; };
   }, [orderId]);
 
-  const typeBadge = order?.orderType === 'ATO' ? 'air' : order?.orderType === 'MTO' ? 'maritime' : 'space';
+  const typeBadge = orderTypeBadge(order?.orderType || '');
   const totalMissions = order?.missionPackages.reduce((sum, p) => sum + p.missions.length, 0) ?? 0;
 
   return (
@@ -466,7 +376,7 @@ export function OrdersView() {
   const activeScenarioId = useOverwatchStore((s) => s.activeScenarioId);
   const socket = useOverwatchStore((s) => s.socket);
 
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<OrderFilter>('ALL');
@@ -537,7 +447,7 @@ export function OrdersView() {
               className={`btn btn-sm ${activeFilter === type ? 'btn-primary' : 'btn-secondary'}`}
               onClick={() => setActiveFilter(activeFilter === type ? 'ALL' : type)}
             >
-              <span className={`badge badge-${type === 'ATO' ? 'air' : type === 'MTO' ? 'maritime' : 'space'}`}>
+              <span className={`badge badge-${orderTypeBadge(type)}`}>
                 {type}
               </span>
             </button>
@@ -608,7 +518,7 @@ export function OrdersView() {
                         </td>
                         <td style={{ padding: '8px 12px' }}>
                           <span
-                            className={`badge badge-${order.orderType === 'ATO' ? 'air' : order.orderType === 'MTO' ? 'maritime' : 'space'}`}
+                            className={`badge badge-${orderTypeBadge(order.orderType)}`}
                             style={{ fontSize: '10px' }}
                           >
                             {order.orderType}

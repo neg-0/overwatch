@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useOverwatchStore } from '../store/overwatch-store';
 import type { IngestCard, BatchStatus } from '../store/overwatch-store';
+import type { OrderDetail as OrderDetailData } from '../types/orders';
+import { orderTypeBadge } from '../types/orders';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -25,82 +27,6 @@ interface EntityMatch {
   charEnd: number;
   meta?: Record<string, any>;
   color: string;
-}
-
-// ─── Order Detail Types (for structured data panel) ────────────────────────
-
-interface OrderMissionTarget {
-  id: string;
-  targetName: string;
-  latitude: number;
-  longitude: number;
-  desiredEffect: string;
-  priorityRank?: number;
-  targetCategory?: string;
-}
-
-interface OrderTimeWindow {
-  id: string;
-  windowType: string;
-  startTime?: string;
-  endTime?: string;
-}
-
-interface OrderSupportReq {
-  id: string;
-  supportType: string;
-  details?: string;
-}
-
-interface OrderSpaceNeed {
-  id: string;
-  capabilityType: string;
-  systemName?: string;
-  role: string;
-  commsBand?: string;
-  priority: number;
-  fulfilled: boolean;
-  spaceAsset?: { id: string; name: string; type: string };
-}
-
-interface OrderMission {
-  id: string;
-  missionId: string;
-  callsign?: string;
-  domain?: string;
-  platformType?: string;
-  platformCount?: number;
-  status?: string;
-  timeWindows: OrderTimeWindow[];
-  targets: OrderMissionTarget[];
-  supportReqs: OrderSupportReq[];
-  spaceNeeds: OrderSpaceNeed[];
-  unit?: { id: string; name: string };
-}
-
-interface OrderMissionPackage {
-  id: string;
-  packageId?: string;
-  priorityRank?: number;
-  missionType?: string;
-  effectDesired?: string;
-  missions: OrderMission[];
-}
-
-interface OrderDetailData {
-  id: string;
-  orderId: string;
-  orderType: string;
-  rawText?: string | null;
-  rawFormat?: string | null;
-  issuingAuthority?: string;
-  effectiveStart?: string;
-  effectiveEnd?: string;
-  atoDayNumber?: number;
-  classification?: string;
-  sourceFormat?: string;
-  confidence?: number | null;
-  missionPackages: OrderMissionPackage[];
 }
 
 interface ReviewFlag {
@@ -448,12 +374,17 @@ export function DocumentIntake() {
     let mounted = true;
     setLoadingOrderDetail(true);
     fetch(`/api/orders/${selectedDoc.id}`)
-      .then(r => r.json())
+      .then(r => {
+        if (!r.ok) throw new Error('Failed to fetch order details');
+        return r.json();
+      })
       .then(json => {
         if (!json.success || !mounted) return;
         setOrderDetails(prev => new Map(prev).set(selectedDoc.id, json.data));
       })
-      .catch(() => {})
+      .catch(err => {
+        if (mounted) console.error('Order fetch error:', err);
+      })
       .finally(() => { if (mounted) setLoadingOrderDetail(false); });
 
     return () => { mounted = false; };
@@ -1275,7 +1206,7 @@ export function DocumentIntake() {
                 border: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                  <span className={`badge badge-${selectedOrderDetail.orderType === 'ATO' ? 'air' : selectedOrderDetail.orderType === 'MTO' ? 'maritime' : 'space'}`} style={{ fontSize: '9px' }}>
+                  <span className={`badge badge-${orderTypeBadge(selectedOrderDetail.orderType)}`} style={{ fontSize: '9px' }}>
                     {selectedOrderDetail.orderType}
                   </span>
                   <span style={{ fontSize: '10px', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--text-bright)' }}>
