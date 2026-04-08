@@ -476,6 +476,29 @@ export function KnowledgeGraph() {
         .theta(0.9));
 
     if (layoutMode === 'radial') {
+      // ── Angular offsets by type within each tier ring ───────────
+      // Types sharing a tier get evenly-spaced angular wedges so they
+      // don't pile on top of each other at the same radius.
+      const tierGroupsRadial = new Map<number, GraphNodeType[]>();
+      for (const [type, tier] of Object.entries(NODE_TIER)) {
+        const t = type as GraphNodeType;
+        if (t === 'DOCUMENT') continue;
+        if (!tierGroupsRadial.has(tier)) tierGroupsRadial.set(tier, []);
+        tierGroupsRadial.get(tier)!.push(t);
+      }
+      // Map each type to an angular offset (radians) within its tier
+      const typeAngleOffset = new Map<GraphNodeType, number>();
+      for (const [, types] of tierGroupsRadial) {
+        if (types.length <= 1) {
+          if (types.length === 1) typeAngleOffset.set(types[0], 0);
+          continue;
+        }
+        const wedge = (Math.PI * 2) / types.length;
+        types.forEach((t, i) => {
+          typeAngleOffset.set(t, wedge * i);
+        });
+      }
+
       simulation
         .force('x', null)
         .force('y', null)
@@ -487,41 +510,68 @@ export function KnowledgeGraph() {
         .force('angular', (alpha: number) => {
           const cx = width / 2;
           const cy = height / 2;
-          
+
           for (const n of mergedNodes) {
              if (n.type === 'DOCUMENT') continue;
-             const parentId = parentOf.get(n.id);
-             if (!parentId) continue;
-             
-             const parent = existingById.get(parentId);
-             if (!parent || typeof parent.x !== 'number' || typeof parent.y !== 'number') continue;
-             
-             const px = parent.x - cx;
-             const py = parent.y - cy;
-             const pAngle = Math.atan2(py, px);
-             
+
              const childX = n.x! - cx;
              const childY = n.y! - cy;
              const currentRadius = Math.sqrt(childX * childX + childY * childY);
              if (currentRadius === 0) continue;
-             
-             const targetX = cx + Math.cos(pAngle) * currentRadius;
-             const targetY = cy + Math.sin(pAngle) * currentRadius;
-             
-             // GENTLER PULL TO PREVENT COLLAPSE (User bugfix)
-             // Increased from 0.05 to 0.1 so they don't get stuck!
+
+             // Start from parent's angle if linked, else current angle
+             let baseAngle = Math.atan2(childY, childX);
+             const parentId = parentOf.get(n.id);
+             if (parentId) {
+               const parent = existingById.get(parentId);
+               if (parent && typeof parent.x === 'number' && typeof parent.y === 'number') {
+                 baseAngle = Math.atan2(parent.y - cy, parent.x - cx);
+               }
+             }
+
+             // Apply type-based angular offset to spread groups apart
+             const offset = typeAngleOffset.get(n.type) ?? 0;
+             const targetAngle = baseAngle + offset;
+
+             const targetX = cx + Math.cos(targetAngle) * currentRadius;
+             const targetY = cy + Math.sin(targetAngle) * currentRadius;
+
              n.vx! += (targetX - n.x!) * alpha * 0.1;
              n.vy! += (targetY - n.y!) * alpha * 0.1;
           }
         });
     } else {
+      // ── Horizontal grouping by type within each tier ──────────────
+      // Group types that share the same tier, then assign each group an
+      // evenly-spaced horizontal lane so they don't pile on the center.
+      const tierGroups = new Map<number, GraphNodeType[]>();
+      for (const [type, tier] of Object.entries(NODE_TIER)) {
+        const t = type as GraphNodeType;
+        if (t === 'DOCUMENT') continue; // documents have their own docXMap
+        if (!tierGroups.has(tier)) tierGroups.set(tier, []);
+        tierGroups.get(tier)!.push(t);
+      }
+      const typeLaneX = new Map<GraphNodeType, number>();
+      for (const [, types] of tierGroups) {
+        const count = types.length;
+        if (count === 1) {
+          typeLaneX.set(types[0], width / 2);
+        } else {
+          const margin = width * 0.15;
+          const span = width - margin * 2;
+          types.forEach((t, i) => {
+            typeLaneX.set(t, margin + (span * (i + 0.5)) / count);
+          });
+        }
+      }
+
       simulation
         .force('radial', null)
         .force('angular', null)
         .force('x', d3.forceX<SimNode>(d => {
           if (d.type === 'DOCUMENT') return docXMap.get(d.id) || width / 2;
-          return width / 2;
-        }).strength(d => d.type === 'DOCUMENT' ? 1.0 : P.centerStrength))
+          return typeLaneX.get(d.type) ?? width / 2;
+        }).strength(d => d.type === 'DOCUMENT' ? 1.0 : 0.08))
         .force('y', d3.forceY<SimNode>(d => tierY(d.type)).strength(P.tierStrength));
     }
 
