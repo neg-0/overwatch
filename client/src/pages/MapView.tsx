@@ -114,6 +114,28 @@ interface SpaceAllocationLink {
   };
 }
 
+/** Return the subset of allocations that should render as link lines on the map. */
+function getVisibleLinks(
+  mode: LinkMode,
+  allocations: SpaceAllocationLink[],
+  selected: SelectedEntity | null,
+): SpaceAllocationLink[] {
+  if (mode === 'OFF') return [];
+  if (mode === 'ON') return allocations;
+
+  // SELECTED — filter to links touching the selected entity
+  if (!selected || (selected.kind !== 'satellite' && selected.kind !== 'track')) return [];
+
+  const mid = selected.missionId;
+  const callsign = selected.kind === 'satellite' ? selected.callsign : null;
+
+  return allocations.filter(a =>
+    a.spaceNeed.mission.id === mid ||
+    a.spaceAsset?.id === mid ||
+    (callsign && a.spaceAsset?.name === callsign),
+  );
+}
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const DOMAIN_COLORS: Record<string, string> = {
@@ -932,23 +954,21 @@ function MapViewInner() {
           .setLngLat([pos.longitude, pos.latitude])
           .addTo(map);
 
-        const capturedMissionId = missionId;
-        const capturedPos = { ...pos };
         attachHoverPopup(el, marker, popup, map, () => {
-          const entityKind = capturedPos.domain === 'SPACE' ? 'satellite' : 'track';
+          const entityKind = pos.domain === 'SPACE' ? 'satellite' : 'track';
           selectEntityRef.current(prev => {
-            if (prev && (prev.kind === 'track' || prev.kind === 'satellite') && prev.missionId === capturedMissionId) return null;
+            if (prev && (prev.kind === 'track' || prev.kind === 'satellite') && prev.missionId === missionId) return null;
             return {
               kind: entityKind,
-              missionId: capturedMissionId,
-              callsign: capturedPos.callsign || capturedMissionId.slice(0, 8),
-              domain: capturedPos.domain,
-              status: capturedPos.status,
-              latitude: capturedPos.latitude,
-              longitude: capturedPos.longitude,
-              altitude_ft: capturedPos.altitude_ft,
-              heading: capturedPos.heading,
-              speed_kts: capturedPos.speed_kts,
+              missionId,
+              callsign: pos.callsign || missionId.slice(0, 8),
+              domain: pos.domain,
+              status: pos.status,
+              latitude: pos.latitude,
+              longitude: pos.longitude,
+              altitude_ft: pos.altitude_ft,
+              heading: pos.heading,
+              speed_kts: pos.speed_kts,
             } as SelectedTrack | SelectedSatellite;
           });
         });
@@ -979,26 +999,7 @@ function MapViewInner() {
     const sourceId = 'space-links';
 
     // Determine which links to show
-    let links: SpaceAllocationLink[] = [];
-    if (linkMode === 'ON') {
-      links = allocations;
-    } else if (linkMode === 'SELECTED' && selectedEntity) {
-      if (selectedEntity.kind === 'satellite' || selectedEntity.kind === 'track') {
-        const mid = selectedEntity.missionId;
-        links = allocations.filter(a =>
-          a.spaceNeed.mission.id === mid ||
-          a.spaceAsset?.id === mid // satellite selected by its position missionId
-        );
-        // Also check by matching the spaceAsset that's associated with the position
-        if (selectedEntity.kind === 'satellite') {
-          const satLinks = allocations.filter(a => {
-            // Find allocations where this satellite's callsign matches the spaceAsset name
-            return a.spaceAsset?.name === selectedEntity.callsign;
-          });
-          if (satLinks.length > 0 && links.length === 0) links = satLinks;
-        }
-      }
-    }
+    const links = getVisibleLinks(linkMode, allocations, selectedEntity);
 
     // Build GeoJSON features
     const features: GeoJSON.Feature[] = [];

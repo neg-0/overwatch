@@ -72,7 +72,8 @@ router.get('/', async (req, res) => {
  * Used by the map to draw dependency lines between satellites and supported missions.
  */
 router.get('/allocations', async (req, res) => {
-  const { scenarioId } = req.query;
+  const rawId = req.query.scenarioId;
+  const scenarioId = Array.isArray(rawId) ? rawId[0] : rawId;
 
   if (!scenarioId || typeof scenarioId !== 'string') {
     return res.status(400).json({ success: false, error: 'scenarioId is required', timestamp: new Date().toISOString() });
