@@ -92,6 +92,7 @@ timelineRoutes.get('/:scenarioId', async (req, res) => {
             criticality: sn.missionCriticality,
             allocatedTo: sn.allocations?.[0]?.spaceAsset?.name ?? null,
             status: sn.allocations?.[0]?.status ?? 'UNALLOCATED',
+            systemName: sn.systemName ?? null,
             startTime: sn.startTime.toISOString(),
             endTime: sn.endTime.toISOString(),
           })),
