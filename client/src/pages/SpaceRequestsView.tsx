@@ -456,24 +456,38 @@ export function SpaceRequestsView() {
 
   // Fetch SSRs
   useEffect(() => {
-    if (!activeScenarioId) return;
-    let mounted = true;
+    if (!activeScenarioId) {
+      setSSRs([]);
+      return;
+    }
+
+    const controller = new AbortController();
+    const { signal } = controller;
+
     const fetchSSRs = async () => {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`/api/space-requests?scenarioId=${activeScenarioId}`);
+        const res = await fetch(`/api/space-requests?scenarioId=${activeScenarioId}`, { signal });
+        if (!res.ok) {
+          const errorJson = await res.json().catch(() => null);
+          throw new Error(errorJson?.error || `HTTP error ${res.status}`);
+        }
         const json = await res.json();
         if (!json.success) throw new Error(json.error);
-        if (mounted) setSSRs(json.data);
-      } catch (err) {
-        if (mounted) setError(String(err));
+        setSSRs(json.data);
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name !== 'AbortError') {
+          setError(String(err));
+        }
       } finally {
-        if (mounted) setLoading(false);
+        setLoading(false);
       }
     };
+
     fetchSSRs();
-    return () => { mounted = false; };
+
+    return () => { controller.abort(); };
   }, [activeScenarioId]);
 
   // Filter

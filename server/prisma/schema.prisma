@@ -560,7 +560,7 @@ model SpaceCoverageWindow {
 
 enum SSRStatus {
   FULFILLED   // Green — asset providing requested capability
-  DEGRADED    // Yellow ��� backup/reduced capability assigned
+  DEGRADED    // Yellow — backup/reduced capability assigned
   DENIED      // Red — no asset available, mission accepts risk
 }
 

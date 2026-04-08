@@ -156,6 +156,8 @@ const DENIED_RATIONALES = [
   'Requested system offline for emergency maintenance; no backup available',
 ];
 
+const DEFAULT_MISSION_DURATION_MS = 4 * 60 * 60 * 1000; // 4 hours
+
 // ─── Generator ───────────────────────────────────────────────────────────────
 
 function pickRandom<T>(arr: T[]): T {
@@ -229,7 +231,7 @@ export async function generateSSRs(scenarioId: string, atoDayNumber: number): Pr
     // Timing from time windows or mission defaults
     const tw = mission.timeWindows?.[0];
     const startTime = tw?.startTime || mission.createdAt;
-    const endTime = tw?.endTime || new Date(new Date(startTime).getTime() + 4 * 3600_000);
+    const endTime = tw?.endTime || new Date(new Date(startTime).getTime() + DEFAULT_MISSION_DURATION_MS);
 
     // Location from waypoints or targets
     const wp = mission.waypoints?.[0];
