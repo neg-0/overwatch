@@ -76,6 +76,8 @@ interface OrderDetail extends Order {
   classification?: string;
   sourceFormat?: string;
   confidence?: number | null;
+  rawText?: string | null;
+  rawFormat?: string | null;
   missionPackages: MissionPackageDetail[];
 }
 
@@ -125,6 +127,7 @@ function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelProps) {
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showRawText, setShowRawText] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -165,6 +168,21 @@ function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelProps) {
             </div>
           )}
         </div>
+        {order?.rawText && (
+          <button
+            onClick={() => setShowRawText(true)}
+            style={{
+              padding: '4px 10px', borderRadius: '4px', border: '1px solid var(--border)',
+              background: 'rgba(255,255,255,0.04)', color: 'var(--text-secondary)',
+              fontSize: '10px', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+              transition: 'all 0.15s', flexShrink: 0,
+            }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent-primary)'; e.currentTarget.style.color = 'var(--accent-primary)'; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+          >
+            📄 View Full Order
+          </button>
+        )}
         <button
           onClick={onClose}
           style={{ marginLeft: '8px', fontSize: '18px', lineHeight: 1, background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px 6px', flexShrink: 0 }}
@@ -385,6 +403,59 @@ function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelProps) {
           </>
         )}
       </div>
+
+      {/* Raw Text Modal */}
+      {showRawText && order?.rawText && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 100,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowRawText(false); }}
+        >
+          <div style={{
+            width: '800px', maxWidth: '90vw', maxHeight: '85vh', borderRadius: '12px',
+            background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+            display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          }}>
+            {/* Modal header */}
+            <div style={{
+              padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)',
+              display: 'flex', alignItems: 'center', gap: '10px',
+            }}>
+              <span className={`badge badge-${typeBadge}`} style={{ fontSize: '10px' }}>
+                {order.orderType}
+              </span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', fontWeight: 700, color: 'var(--text-bright)', flex: 1 }}>
+                {order.orderId}
+              </span>
+              {order.rawFormat && (
+                <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '4px', background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                  {order.rawFormat}
+                </span>
+              )}
+              <button
+                onClick={() => setShowRawText(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '18px', cursor: 'pointer', padding: '2px 6px' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal body */}
+            <div style={{ flex: 1, overflow: 'auto', padding: '16px 20px' }}>
+              <pre style={{
+                whiteSpace: 'pre-wrap', wordWrap: 'break-word', overflowWrap: 'break-word',
+                margin: 0, fontFamily: 'var(--font-mono)', fontSize: '12px',
+                lineHeight: 1.7, color: 'var(--text-secondary)',
+              }}>
+                {order.rawText}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
