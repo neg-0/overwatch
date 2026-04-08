@@ -74,11 +74,20 @@ export function CommandDashboard() {
   // ─── Operational COP ──────────────────────────────────────────────────────
 
   const activeMissions = positions.size;
-  const missionsByDomain = {
-    air: [...positions.values()].filter(p => p.domain === 'AIR').length,
-    maritime: [...positions.values()].filter(p => p.domain === 'MARITIME').length,
-    space: [...positions.values()].filter(p => p.domain === 'SPACE').length,
-  };
+  const missionsByDomain = isSimActive
+    ? {
+        air: [...positions.values()].filter(p => p.domain === 'AIR').length,
+        maritime: [...positions.values()].filter(p => p.domain === 'MARITIME').length,
+        land: [...positions.values()].filter(p => p.domain === 'LAND').length,
+        space: [...positions.values()].filter(p => p.domain === 'SPACE').length,
+      }
+    : {
+        air: (scenarioStats?.units || []).filter((u: any) => u.domain === 'AIR').length,
+        maritime: (scenarioStats?.units || []).filter((u: any) => u.domain === 'MARITIME').length,
+        land: (scenarioStats?.units || []).filter((u: any) => u.domain === 'LAND').length,
+        space: (scenarioStats?.units || []).filter((u: any) => u.domain === 'SPACE').length,
+      };
+  const totalDomainUnits = missionsByDomain.air + missionsByDomain.maritime + missionsByDomain.land + missionsByDomain.space;
 
   const criticalGaps = isSimActive
     ? spaceGaps.filter(g => g.severity === 'CRITICAL').length
@@ -196,19 +205,21 @@ export function CommandDashboard() {
               <h3 className="card-title">Domain Activity</h3>
             </div>
             <div className="card-body">
-              {isSimActive ? (
+              {totalDomainUnits > 0 ? (
                 <>
-                  <DomainBar label="AIR" count={missionsByDomain.air} total={activeMissions} color="#00d4ff" />
-                  <DomainBar label="MARITIME" count={missionsByDomain.maritime} total={activeMissions} color="#0090ff" />
-                  <DomainBar label="SPACE" count={missionsByDomain.space} total={activeMissions} color="#a855f7" />
+                  <DomainBar label="AIR" count={missionsByDomain.air} total={totalDomainUnits} color="#00d4ff" />
+                  <DomainBar label="MARITIME" count={missionsByDomain.maritime} total={totalDomainUnits} color="#0090ff" />
+                  <DomainBar label="LAND" count={missionsByDomain.land} total={totalDomainUnits} color="#22c55e" />
+                  <DomainBar label="SPACE" count={missionsByDomain.space} total={totalDomainUnits} color="#a855f7" />
+                  {!isSimActive && (
+                    <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '8px', textAlign: 'center' }}>
+                      Showing ORBAT composition. Start simulation for live activity.
+                    </div>
+                  )}
                 </>
               ) : (
                 <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '24px', fontSize: '13px' }}>
-                  Domain activity will populate when the simulation is running.
-                  <br />
-                  <span style={{ fontSize: '11px', marginTop: '8px', display: 'block' }}>
-                    Use the playback controls in the sidebar to start the simulation.
-                  </span>
+                  No units in ORBAT. Generate a scenario to populate domain activity.
                 </div>
               )}
             </div>

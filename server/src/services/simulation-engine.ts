@@ -5,6 +5,7 @@ import { type CoverageWindow, type GapDetection, checkCoverage, checkFulfillment
 import { assessBDA, generateATO } from './game-master.js';
 import { generateDayOrders } from './scenario-generator.js';
 import { allocateSpaceResources } from './space-allocator.js';
+import { generateSSRs } from './ssr-generator.js';
 import { SpacePosition, approximateGeoPosition, propagateFromTLE } from './space-propagator.js';
 import { refreshTLEsForScenario } from './udl-client.js';
 
@@ -413,6 +414,23 @@ async function runGameMasterCycle(scenarioId: string, io: Server, newDay: number
       usedGameMaster = true;
       currentSim.lastAtoDayGenerated = newDay;
 
+      // Generate Space Support Requests for ~10-20% of new day's missions
+      console.log(`[SIM] Generating Space Support Requests for Day ${newDay}...`);
+      io.to(`scenario:${scenarioId}`).emit('gameMaster:generating', {
+        event: 'gameMaster:generating',
+        phase: 'ssr',
+        day: newDay,
+        timestamp: new Date().toISOString(),
+      });
+      try {
+        const ssrCount = await generateSSRs(scenarioId, newDay);
+        if (!activeSims.has(scenarioId)) return;
+        console.log(`[SIM] SSR generation complete: ${ssrCount} requests for Day ${newDay}`);
+      } catch (err) {
+        console.error(`[SIM] SSR generation failed for Day ${newDay}:`, err);
+        // Non-fatal: continue to allocation
+      }
+
       // Now allocate space resources for the new day (needs ATO missions to exist first)
       console.log(`[SIM] Allocating space resources for Day ${newDay}...`);
       io.to(`scenario:${scenarioId}`).emit('gameMaster:generating', {
@@ -459,6 +477,13 @@ async function runGameMasterCycle(scenarioId: string, io: Server, newDay: number
       await generateDayOrders(scenarioId, newDay);
       if (!activeSims.has(scenarioId)) return;
       currentSim.lastAtoDayGenerated = newDay;
+
+      // Generate SSRs for the fallback path too
+      try {
+        await generateSSRs(scenarioId, newDay);
+      } catch (ssrErr) {
+        console.error(`[SIM] SSR generation failed in fallback for Day ${newDay}:`, ssrErr);
+      }
 
       io.to(`scenario:${scenarioId}`).emit('order:published', {
         event: 'order:published',
