@@ -353,9 +353,10 @@ export function KnowledgeGraph() {
       (NODE_TIER[a.type] ?? 9) - (NODE_TIER[b.type] ?? 9)
     );
 
-    // Tier-based Y-band: scale layout height with node count so tiers don't compress
+    // Tier-based Y-band: use viewport height so all tiers stay on-screen,
+    // with modest scaling for very large graphs (sqrt dampens vertical blow-out)
     const maxTier = 5; // ALLOCATION/SPACE_ASSET
-    const layoutHeight = Math.max(height, sortedNodes.length * 6); // ~6px per node minimum
+    const layoutHeight = Math.max(height, height + Math.sqrt(sortedNodes.length) * 12);
     const bandHeight = layoutHeight / (maxTier + 2);
     const tierY = (type: string) => bandHeight * ((NODE_TIER[type] ?? 9) + 1);
 
@@ -453,9 +454,9 @@ export function KnowledgeGraph() {
       .force('link', d3.forceLink<SimNode, SimLink>(mergedLinks)
         .id(d => d.id)
         .distance(d => {
-          const sTier = NODE_TIER[(d.source as SimNode).type] ?? 9;
-          const tTier = NODE_TIER[(d.target as SimNode).type] ?? 9;
-          return Math.abs(sTier - tTier) * 120 * P.linkDistScale;
+          const rel = d.relationship;
+          const baseDist = LINK_DISTANCE[rel] ?? DEFAULT_LINK_DISTANCE;
+          return baseDist * P.linkDistScale;
         })
         .strength(d => {
           const baseStrength = d.weight ? Math.min(0.2, d.weight * 0.05) : 0.05;
@@ -571,7 +572,7 @@ export function KnowledgeGraph() {
         .force('x', d3.forceX<SimNode>(d => {
           if (d.type === 'DOCUMENT') return docXMap.get(d.id) || width / 2;
           return typeLaneX.get(d.type) ?? width / 2;
-        }).strength(d => d.type === 'DOCUMENT' ? 1.0 : 0.08))
+        }).strength(d => d.type === 'DOCUMENT' ? 1.0 : 0.3))
         .force('y', d3.forceY<SimNode>(d => tierY(d.type)).strength(P.tierStrength));
     }
 
