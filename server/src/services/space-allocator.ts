@@ -4,9 +4,44 @@
  * Evaluates all SpaceNeeds for a given ATO day against available SpaceCoverageWindows,
  * detects contention (multiple needs competing for the same capability/time/area),
  * and resolves allocations based on traced priority rank and mission criticality.
+ *
+ * Capabilities are classified into three categories:
+ * - BROADCAST: Serve unlimited receivers (GPS, PNT, WEATHER, OPIR, etc.) — denied only
+ *   by environmental/threat conditions, never by user contention.
+ * - EXCLUSIVE: Finite capacity (SATCOM transponders, ISR tasking, SIGINT passes) —
+ *   real contention with priority-based resolution.
+ * - NON_SPACE: Not space-dependent (LINK16, CYBER_SPACE) — auto-fulfilled.
  */
 
 import prisma from '../db/prisma-client.js';
+
+// ─── Capability classification ──────────────────────────────────────────────
+
+export const CAPABILITY_CLASS: Record<string, 'BROADCAST' | 'EXCLUSIVE' | 'NON_SPACE'> = {
+  GPS: 'BROADCAST',
+  GPS_MILITARY: 'BROADCAST',
+  PNT: 'BROADCAST',
+  WEATHER: 'BROADCAST',
+  OPIR: 'BROADCAST',
+  LAUNCH_DETECT: 'BROADCAST',
+  SSA: 'BROADCAST',
+  SDA: 'BROADCAST',
+  SATCOM: 'EXCLUSIVE',
+  SATCOM_PROTECTED: 'EXCLUSIVE',
+  SATCOM_WIDEBAND: 'EXCLUSIVE',
+  SATCOM_TACTICAL: 'EXCLUSIVE',
+  ISR_SPACE: 'EXCLUSIVE',
+  SIGINT_SPACE: 'EXCLUSIVE',
+  EW_SPACE: 'EXCLUSIVE',
+  DATALINK: 'EXCLUSIVE',
+  LINK16: 'NON_SPACE',
+  CYBER_SPACE: 'NON_SPACE',
+};
+
+/** Degraded-match map: if primary capability unavailable, try this as fallback match */
+const DEGRADED_CAPABILITY_MATCH: Record<string, string> = {
+  GPS_MILITARY: 'GPS', // GPS IIF/IIR-M provide civil GPS, not M-code
+};
 
 // ─── Geographic coverage validation ──────────────────────────────────────────
 
@@ -138,10 +173,123 @@ export async function allocateSpaceResources(
     include: { coverageWindows: true },
   });
 
-  // Group needs by capability + overlapping time to detect contention
-  const contentionGroups = detectContentionGroups(allNeeds);
+  // ─── Partition needs by capability class ──────────────────────────────────
+  const nonSpaceNeeds = allNeeds.filter(e => CAPABILITY_CLASS[e.need.capabilityType] === 'NON_SPACE');
+  const broadcastNeeds = allNeeds.filter(e => CAPABILITY_CLASS[e.need.capabilityType] === 'BROADCAST');
+  const exclusiveNeeds = allNeeds.filter(e => {
+    const cls = CAPABILITY_CLASS[e.need.capabilityType];
+    return cls === 'EXCLUSIVE' || cls === undefined; // Unknown defaults to exclusive (safe)
+  });
+
   const contentionEvents: ContentionEvent[] = [];
   const allocationResults: AllocationReport['allocations'] = [];
+
+  // ─── NON_SPACE: auto-fulfilled (LINK16, CYBER_SPACE — not space-dependent) ─
+  for (const entry of nonSpaceNeeds) {
+    const existing = await prisma.spaceAllocation.findFirst({ where: { spaceNeedId: entry.need.id } });
+    const allocation = existing
+      ? await prisma.spaceAllocation.update({
+          where: { id: existing.id },
+          data: { status: 'FULFILLED' as any, allocatedCapability: entry.need.capabilityType as any, rationale: 'Not space-dependent; no satellite allocation required', riskLevel: 'LOW' },
+        })
+      : await prisma.spaceAllocation.create({
+          data: { spaceNeedId: entry.need.id, status: 'FULFILLED' as any, allocatedCapability: entry.need.capabilityType as any, rationale: 'Not space-dependent; no satellite allocation required', riskLevel: 'LOW' },
+        });
+    allocationResults.push({ id: allocation.id, spaceNeedId: allocation.spaceNeedId, status: allocation.status, allocatedCapability: allocation.allocatedCapability, rationale: allocation.rationale, riskLevel: allocation.riskLevel, contentionGroup: null });
+  }
+
+  // ─── BROADCAST: coverage-only check, no contention ────────────────────────
+  // Broadcast services (GPS, PNT, WEATHER, OPIR, etc.) serve unlimited receivers.
+  // Denial can only come from no coverage (satellite not overhead, or asset degraded/lost).
+  for (const entry of broadcastNeeds) {
+    const capType = entry.need.capabilityType;
+
+    // Primary match: any asset with matching capability + coverage window
+    let matchedAsset = spaceAssets.find(a =>
+      a.capabilities.includes(capType as any) &&
+      a.coverageWindows.some(cw =>
+        cw.capabilityType === capType &&
+        cw.startTime <= entry.need.endTime &&
+        cw.endTime >= entry.need.startTime &&
+        isWithinCoverage(entry.need, cw),
+      ),
+    );
+
+    // Degraded match: e.g. GPS_MILITARY → GPS (civil signal, no M-code)
+    let isDegradedMatch = false;
+    if (!matchedAsset && DEGRADED_CAPABILITY_MATCH[capType]) {
+      const fallbackCap = DEGRADED_CAPABILITY_MATCH[capType];
+      matchedAsset = spaceAssets.find(a =>
+        a.capabilities.includes(fallbackCap as any) &&
+        a.coverageWindows.some(cw =>
+          cw.capabilityType === fallbackCap &&
+          cw.startTime <= entry.need.endTime &&
+          cw.endTime >= entry.need.startTime &&
+          isWithinCoverage(entry.need, cw),
+        ),
+      );
+      if (matchedAsset) isDegradedMatch = true;
+    }
+
+    let status: string;
+    let allocatedCapability: string | null;
+    let rationale: string;
+    let riskLevel: string;
+
+    if (matchedAsset && !isDegradedMatch) {
+      status = 'FULFILLED';
+      allocatedCapability = capType;
+      rationale = `${capType} coverage provided by ${matchedAsset.name} (broadcast — serves all users)`;
+      riskLevel = 'LOW';
+    } else if (matchedAsset && isDegradedMatch) {
+      status = 'DEGRADED';
+      allocatedCapability = DEGRADED_CAPABILITY_MATCH[capType] ?? capType;
+      rationale = `No ${capType} asset available. Degraded to ${allocatedCapability} via ${matchedAsset.name}`;
+      riskLevel = entry.need.missionCriticality === 'CRITICAL' ? 'HIGH' : 'MODERATE';
+    } else if (entry.need.fallbackCapability) {
+      // No coverage at all — try the need's own fallback
+      const fallbackAsset = spaceAssets.find(a =>
+        a.capabilities.includes(entry.need.fallbackCapability as any) &&
+        a.coverageWindows.some(cw =>
+          cw.capabilityType === entry.need.fallbackCapability &&
+          cw.startTime <= entry.need.endTime &&
+          cw.endTime >= entry.need.startTime &&
+          isWithinCoverage(entry.need, cw),
+        ),
+      );
+      if (fallbackAsset) {
+        status = 'DEGRADED';
+        allocatedCapability = entry.need.fallbackCapability;
+        rationale = `No ${capType} coverage available. Degraded to ${entry.need.fallbackCapability} via ${fallbackAsset.name}`;
+        riskLevel = entry.need.missionCriticality === 'CRITICAL' ? 'HIGH' : 'MODERATE';
+      } else {
+        status = 'DENIED';
+        allocatedCapability = null;
+        rationale = `No ${capType} or fallback ${entry.need.fallbackCapability} coverage available`;
+        riskLevel = entry.need.missionCriticality === 'CRITICAL' ? 'CRITICAL' : 'MODERATE';
+      }
+    } else {
+      status = 'DENIED';
+      allocatedCapability = null;
+      rationale = `No operational ${capType} asset with coverage window`;
+      riskLevel = entry.need.missionCriticality === 'CRITICAL' ? 'CRITICAL' : 'MODERATE';
+    }
+
+    const existing = await prisma.spaceAllocation.findFirst({ where: { spaceNeedId: entry.need.id } });
+    const allocation = existing
+      ? await prisma.spaceAllocation.update({
+          where: { id: existing.id },
+          data: { status: status as any, allocatedCapability: allocatedCapability as any, spaceAssetId: matchedAsset?.id ?? null, rationale, riskLevel },
+        })
+      : await prisma.spaceAllocation.create({
+          data: { spaceNeedId: entry.need.id, status: status as any, allocatedCapability: allocatedCapability as any, spaceAssetId: matchedAsset?.id ?? null, rationale, riskLevel },
+        });
+    allocationResults.push({ id: allocation.id, spaceNeedId: allocation.spaceNeedId, status: allocation.status, allocatedCapability: allocation.allocatedCapability, rationale: allocation.rationale, riskLevel: allocation.riskLevel, contentionGroup: null });
+  }
+
+  // ─── EXCLUSIVE: contention detection + priority-based resolution ───────────
+  // SATCOM, ISR, SIGINT, EW, DATALINK — finite capacity, real contention applies.
+  const contentionGroups = detectContentionGroups(exclusiveNeeds);
 
   for (const group of contentionGroups) {
     const groupId = `CONT-${group.capability}-${group.needs.map(n => n.need.id.slice(0, 8)).sort().join('-')}`;
