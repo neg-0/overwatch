@@ -1114,16 +1114,17 @@ describe('Document Ingestion — Planning Sub-Types', () => {
       content: 'SPINS content...',
       effectiveDate: '2026-03-01T00:00:00Z',
       codeWords: [
-        { word: 'BRIGHT STAR', meaning: 'Initiate air defense', category: 'TACTICAL' },
+        { word: 'BRIGHT STAR', meaning: 'Initiate air defense', conditions: null },
       ],
       procedures: [
-        { category: 'ROE', title: 'Weapons Release Authority', description: 'Weapons release authority procedures', applicableTo: ['ALL'] },
-        { category: 'EMCON', title: 'EMCON Procedures', description: 'Emission control procedures', applicableTo: ['AIR'] },
+        { category: 'ROE', title: 'Weapons Release Authority', description: 'Weapons release authority procedures', conditions: null, authority: null, applicableTo: ['ALL'] },
+        { category: 'EMCON', title: 'EMCON Procedures', description: 'Emission control procedures', conditions: null, authority: null, applicableTo: ['AIR'] },
       ],
       commPlans: [
-        { netName: 'BLUE-7', frequency: '305.6 MHz', band: 'UHF', callsign: 'MAGIC', purpose: 'AWACS Control', applicableTo: ['DCA', 'OCA'] },
-        { netName: 'RED CROWN', frequency: '243.0 MHz', band: 'UHF', callsign: 'RED CROWN', purpose: 'Guard', applicableTo: ['ALL'] },
+        { netName: 'BLUE-7', frequency: '305.6 MHz', band: 'UHF', callsign: 'MAGIC', purpose: 'AWACS Control', paceOrder: 'PRIMARY', applicableTo: ['DCA', 'OCA'] },
+        { netName: 'RED CROWN', frequency: '243.0 MHz', band: 'UHF', callsign: 'RED CROWN', purpose: 'Guard', paceOrder: 'PRIMARY', applicableTo: ['ALL'] },
       ],
+      reviewFlags: [],
     });
 
     const prisma = (await import('../../db/prisma-client.js')).default;
