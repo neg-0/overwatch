@@ -354,7 +354,7 @@ export const US_SPACE_CONSTELLATIONS: { constellation: string; assets: SpaceAsse
       noradId,
       constellation: 'GPS III',
       affiliation: 'FRIENDLY' as const,
-      capabilities: ['GPS' as const, 'PNT' as const],
+      capabilities: ['GPS' as const, 'GPS_MILITARY' as const, 'PNT' as const],
       status: 'OPERATIONAL',
       inclination: 55.0, eccentricity: 0.001, periodMin: 717.97,
       apogeeKm: 20200, perigeeKm: 20200,

@@ -1,4 +1,4 @@
-import { GenerationStatus, OrderType } from '../generated/prisma/client.js';
+import { GenerationStatus, OrderType, type SpaceCapabilityType } from '../generated/prisma/client.js';
 import type OpenAI from 'openai';
 import { v4 as uuid } from 'uuid';
 import { config } from '../config.js';
@@ -1617,7 +1617,26 @@ async function generateOrder(
 
             // Space needs (AI-generated, supplementary)
             if (msn.spaceNeeds) {
+              // Import-free: inline the non-space capability set
+              const NON_SPACE_CAPS = new Set(['LINK16', 'CYBER_SPACE']);
+              const spaceNeedData: {
+                missionId: string;
+                capabilityType: SpaceCapabilityType;
+                priority: number;
+                startTime: Date;
+                endTime: Date;
+                fulfilled: boolean;
+                coverageLat: number | null;
+                coverageLon: number | null;
+              }[] = [];
+
               for (const sn of msn.spaceNeeds) {
+                let capType: SpaceCapabilityType = (sn.capabilityType || 'GPS') as SpaceCapabilityType;
+                // Normalize legacy 'SATCOM' → 'SATCOM_WIDEBAND' (no asset carries plain SATCOM)
+                if (capType === 'SATCOM') capType = 'SATCOM_WIDEBAND';
+                // Skip non-space capabilities
+                if (NON_SPACE_CAPS.has(capType)) continue;
+
                 const twForSpace = msn.timeWindows?.[0];
                 const snStart = new Date(dayDate);
                 if (twForSpace) {
@@ -1626,18 +1645,20 @@ async function generateOrder(
                 }
                 const snEnd = new Date(snStart.getTime() + 4 * 3600000);
 
-                await prisma.spaceNeed.create({
-                  data: {
-                    missionId: dbMission.id,
-                    capabilityType: sn.capabilityType || 'GPS',
-                    priority: sn.priority || 3,
-                    startTime: snStart,
-                    endTime: snEnd,
-                    fulfilled: false,
-                    coverageLat,
-                    coverageLon,
-                  },
+                spaceNeedData.push({
+                  missionId: dbMission.id,
+                  capabilityType: capType,
+                  priority: sn.priority || 3,
+                  startTime: snStart,
+                  endTime: snEnd,
+                  fulfilled: false,
+                  coverageLat,
+                  coverageLon,
                 });
+              }
+
+              if (spaceNeedData.length > 0) {
+                await prisma.spaceNeed.createMany({ data: spaceNeedData });
               }
             }
 
@@ -1662,7 +1683,13 @@ async function generateOrder(
                   'LEGACY_UHF': 'SATCOM_TACTICAL',
                   'WGS': 'SATCOM_WIDEBAND',
                   'AEHF': 'SATCOM_PROTECTED',
-                } as const;
+                } as const satisfies Record<string, SpaceCapabilityType>;
+                // Degradation fallbacks for SATCOM subtypes
+                const satcomFallback: Partial<Record<SpaceCapabilityType, SpaceCapabilityType>> = {
+                  'SATCOM_PROTECTED': 'SATCOM_WIDEBAND',  // Lose jam-resistance, keep connectivity
+                  'SATCOM_WIDEBAND': 'SATCOM_TACTICAL',   // Lose bandwidth, keep connectivity
+                  'SATCOM_TACTICAL': 'SATCOM_WIDEBAND',   // Lose UHF mobility, use SHF
+                };
                 const roleToSpacePriority: Record<string, number> = {
                   'primary': 1, 'backup': 2, 'secondary': 3, 'protected': 2,
                 };
@@ -1682,6 +1709,7 @@ async function generateOrder(
                           role: comm.role,
                           commsBand: comm.band,
                           systemName: comm.system,
+                          fallbackCapability: satcomFallback[capability] || null,
                           coverageLat,
                           coverageLon,
                         },
@@ -1692,39 +1720,25 @@ async function generateOrder(
 
                 // GPS need (every platform needs GPS)
                 if (missionAssetType.gpsType) {
+                  const isMCode = missionAssetType.gpsType === 'M-CODE';
                   await prisma.spaceNeed.create({
                     data: {
                       missionId: dbMission.id,
-                      capabilityType: 'GPS',
-                      priority: missionAssetType.gpsType === 'M-CODE' ? 1 : 2,
+                      capabilityType: isMCode ? 'GPS_MILITARY' : 'GPS',
+                      priority: isMCode ? 1 : 2,
                       startTime: missionStart,
                       endTime: missionEnd,
                       fulfilled: false,
                       role: 'primary',
                       systemName: `GPS-${missionAssetType.gpsType}`,
+                      fallbackCapability: isMCode ? 'GPS' : null,
                       coverageLat,
                       coverageLon,
                     },
                   });
                 }
 
-                // Data link needs (LINK16 → LINK16 SpaceCapabilityType)
-                if (missionAssetType.dataLinks?.includes('LINK16')) {
-                  await prisma.spaceNeed.create({
-                    data: {
-                      missionId: dbMission.id,
-                      capabilityType: 'LINK16',
-                      priority: 1,
-                      startTime: missionStart,
-                      endTime: missionEnd,
-                      fulfilled: false,
-                      role: 'primary',
-                      systemName: 'LINK16',
-                      coverageLat,
-                      coverageLon,
-                    },
-                  });
-                }
+                // LINK16 is not space-dependent — no SpaceNeed created
               }
             }
           }

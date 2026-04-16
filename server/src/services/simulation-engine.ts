@@ -1,7 +1,7 @@
 import { Server } from 'socket.io';
 import { config } from '../config.js';
 import prisma from '../db/prisma-client.js';
-import { type CoverageWindow, type GapDetection, checkCoverage, checkFulfillment, detectGaps } from './coverage-calculator.js';
+import { type CoverageWindow, type GapDetection, checkCoverage, checkFulfillment, computeCoverageWindows, detectGaps } from './coverage-calculator.js';
 import { assessBDA, generateATO } from './game-master.js';
 import { generateDayOrders } from './scenario-generator.js';
 import { allocateSpaceResources } from './space-allocator.js';
@@ -431,6 +431,15 @@ async function runGameMasterCycle(scenarioId: string, io: Server, newDay: number
         // Non-fatal: continue to allocation
       }
 
+      // Pre-seed coverage windows so the allocator has data to work with
+      console.log(`[SIM] Pre-seeding coverage windows for Day ${newDay}...`);
+      try {
+        await preseedCoverageWindows(scenarioId, newDay);
+      } catch (err) {
+        console.error(`[SIM] Coverage pre-seed failed for Day ${newDay}:`, err);
+        // Non-fatal: allocator will still run but may have fewer coverage matches
+      }
+
       // Now allocate space resources for the new day (needs ATO missions to exist first)
       console.log(`[SIM] Allocating space resources for Day ${newDay}...`);
       io.to(`scenario:${scenarioId}`).emit('gameMaster:generating', {
@@ -619,6 +628,107 @@ function startPositionLoop(scenarioId: string, io: Server) {
       console.error('[SIM] Space asset propagation error:', err);
     }
   }, config.sim.positionUpdateIntervalMs);
+}
+
+// ─── Coverage Pre-Seeding ───────────────────────────────────────────────────
+
+/**
+ * Pre-compute coverage windows for the new ATO day's missions BEFORE allocation runs.
+ * Solves the chicken-and-egg problem where allocation needs coverage windows but the
+ * position loop hasn't run yet.
+ *
+ * Uses computeCoverageWindows() from coverage-calculator.ts (batch AOS/LOS computation)
+ * with a 2-minute step size for each unique ground point from the day's missions.
+ */
+async function preseedCoverageWindows(scenarioId: string, atoDayNumber: number): Promise<void> {
+  // Load space needs for this day to get coverage points + time bounds
+  const needs = await prisma.spaceNeed.findMany({
+    where: {
+      mission: {
+        package: {
+          taskingOrder: { scenarioId, atoDayNumber },
+        },
+      },
+      coverageLat: { not: null },
+      coverageLon: { not: null },
+    },
+    select: { coverageLat: true, coverageLon: true, startTime: true, endTime: true },
+  });
+
+  if (needs.length === 0) return;
+
+  // Deduplicate ground points (round to 0.5 degree grid to reduce computation)
+  const pointMap = new Map<string, { lat: number; lon: number; startTime: Date; endTime: Date }>();
+  for (const n of needs) {
+    const lat = Math.round(n.coverageLat! * 2) / 2;
+    const lon = Math.round(n.coverageLon! * 2) / 2;
+    const key = `${lat},${lon}`;
+    const existing = pointMap.get(key);
+    if (!existing) {
+      pointMap.set(key, { lat, lon, startTime: n.startTime, endTime: n.endTime });
+    } else {
+      if (n.startTime < existing.startTime) existing.startTime = n.startTime;
+      if (n.endTime > existing.endTime) existing.endTime = n.endTime;
+    }
+  }
+
+  // Load OPERATIONAL space assets with TLE data
+  const assets = await prisma.spaceAsset.findMany({
+    where: { scenarioId, status: 'OPERATIONAL' },
+    select: {
+      id: true, name: true, tleLine1: true, tleLine2: true,
+      capabilities: true, inclination: true, periodMin: true, eccentricity: true,
+    },
+  });
+
+  const windowsToInsert: {
+    spaceAssetId: string;
+    capabilityType: string;
+    startTime: Date;
+    endTime: Date;
+    centerLat: number;
+    centerLon: number;
+    swathWidthKm: number;
+    maxElevation: number;
+    maxElevationTime: Date;
+  }[] = [];
+
+  for (const [, point] of pointMap) {
+    for (const asset of assets) {
+      if (!asset.tleLine1 && !asset.tleLine2 && asset.inclination == null) continue;
+
+      const windows = computeCoverageWindows(
+        asset as any,
+        point.lat,
+        point.lon,
+        point.startTime,
+        point.endTime,
+        2, // 2-minute step for reasonable performance
+      );
+
+      for (const w of windows) {
+        windowsToInsert.push({
+          spaceAssetId: asset.id,
+          capabilityType: w.capabilityType,
+          startTime: w.startTime,
+          endTime: w.endTime,
+          centerLat: point.lat,
+          centerLon: point.lon,
+          swathWidthKm: w.swathWidthKm,
+          maxElevation: w.maxElevation,
+          maxElevationTime: w.maxElevationTime,
+        });
+      }
+    }
+  }
+
+  if (windowsToInsert.length > 0) {
+    await prisma.spaceCoverageWindow.createMany({
+      data: windowsToInsert as any,
+      skipDuplicates: true,
+    });
+    console.log(`[SIM] Pre-seeded ${windowsToInsert.length} coverage windows for ${pointMap.size} ground points`);
+  }
 }
 
 // ─── Coverage Computation ────────────────────────────────────────────────────

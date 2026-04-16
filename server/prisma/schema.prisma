@@ -626,6 +626,7 @@ model SpaceCoverageWindow {
   capabilityType    SpaceCapabilityType
   createdAt         DateTime            @default(now())
 
+  @@unique([spaceAssetId, capabilityType, startTime, endTime, centerLat, centerLon], map: "space_coverage_windows_preseed_unique")
   @@map("space_coverage_windows")
 }
 
