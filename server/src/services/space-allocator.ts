@@ -186,7 +186,7 @@ export async function allocateSpaceResources(
 
   // ─── NON_SPACE: auto-fulfilled (LINK16, CYBER_SPACE — not space-dependent) ─
   for (const entry of nonSpaceNeeds) {
-    const existing = await prisma.spaceAllocation.findFirst({ where: { spaceNeedId: entry.need.id } });
+    const existing = entry.need.allocations[0];
     const allocation = existing
       ? await prisma.spaceAllocation.update({
           where: { id: existing.id },
@@ -258,6 +258,7 @@ export async function allocateSpaceResources(
         ),
       );
       if (fallbackAsset) {
+        matchedAsset = fallbackAsset;
         status = 'DEGRADED';
         allocatedCapability = entry.need.fallbackCapability;
         rationale = `No ${capType} coverage available. Degraded to ${entry.need.fallbackCapability} via ${fallbackAsset.name}`;
@@ -275,7 +276,7 @@ export async function allocateSpaceResources(
       riskLevel = entry.need.missionCriticality === 'CRITICAL' ? 'CRITICAL' : 'MODERATE';
     }
 
-    const existing = await prisma.spaceAllocation.findFirst({ where: { spaceNeedId: entry.need.id } });
+    const existing = entry.need.allocations[0];
     const allocation = existing
       ? await prisma.spaceAllocation.update({
           where: { id: existing.id },
@@ -308,9 +309,7 @@ export async function allocateSpaceResources(
       );
       const hasAsset = !!matchedAsset;
 
-      const existingAllocation = await prisma.spaceAllocation.findFirst({
-        where: { spaceNeedId: entry.need.id },
-      });
+      const existingAllocation = entry.need.allocations?.[0];
 
       let status: string;
       let allocatedCapability: string | null;
@@ -433,9 +432,7 @@ export async function allocateSpaceResources(
           riskLevel = entry.need.missionCriticality === 'CRITICAL' ? 'CRITICAL' : 'HIGH';
         }
 
-        const existingContAlloc = await prisma.spaceAllocation.findFirst({
-          where: { spaceNeedId: entry.need.id },
-        });
+        const existingContAlloc = entry.need.allocations?.[0];
 
         // Only the contention winner gets the matched asset; losers stay unassigned
         const winnerAssetId = isWinner ? (coverageAsset?.id ?? null) : null;
@@ -540,6 +537,7 @@ export function detectContentionGroups(
       fallbackCapability?: string | null;
       riskIfDenied?: string | null;
       priorityEntry?: { strategyPriority?: { rank: number } | null } | null;
+      allocations?: { id: string }[];
     };
     mission: { id: string; missionId: string; callsign?: string | null };
     packagePriority: number;

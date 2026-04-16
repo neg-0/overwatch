@@ -1619,6 +1619,17 @@ async function generateOrder(
             if (msn.spaceNeeds) {
               // Import-free: inline the non-space capability set
               const NON_SPACE_CAPS = new Set(['LINK16', 'CYBER_SPACE']);
+              const spaceNeedData: {
+                missionId: string;
+                capabilityType: SpaceCapabilityType;
+                priority: number;
+                startTime: Date;
+                endTime: Date;
+                fulfilled: boolean;
+                coverageLat: number | null;
+                coverageLon: number | null;
+              }[] = [];
+
               for (const sn of msn.spaceNeeds) {
                 let capType: SpaceCapabilityType = (sn.capabilityType || 'GPS') as SpaceCapabilityType;
                 // Normalize legacy 'SATCOM' → 'SATCOM_WIDEBAND' (no asset carries plain SATCOM)
@@ -1634,18 +1645,20 @@ async function generateOrder(
                 }
                 const snEnd = new Date(snStart.getTime() + 4 * 3600000);
 
-                await prisma.spaceNeed.create({
-                  data: {
-                    missionId: dbMission.id,
-                    capabilityType: capType,
-                    priority: sn.priority || 3,
-                    startTime: snStart,
-                    endTime: snEnd,
-                    fulfilled: false,
-                    coverageLat,
-                    coverageLon,
-                  },
+                spaceNeedData.push({
+                  missionId: dbMission.id,
+                  capabilityType: capType,
+                  priority: sn.priority || 3,
+                  startTime: snStart,
+                  endTime: snEnd,
+                  fulfilled: false,
+                  coverageLat,
+                  coverageLon,
                 });
+              }
+
+              if (spaceNeedData.length > 0) {
+                await prisma.spaceNeed.createMany({ data: spaceNeedData });
               }
             }
 

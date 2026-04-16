@@ -48,6 +48,7 @@ const { mockCreate, mockPrisma, mockBroadcastProgress, mockBroadcastArtifact } =
     },
     spaceNeed: {
       create: vi.fn().mockResolvedValue({ id: 'sn-001' }),
+      createMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     mselInject: {
       create: vi.fn().mockResolvedValue({ id: 'msel-001' }),
