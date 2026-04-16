@@ -47,6 +47,8 @@ vi.mock('../../db/prisma-client.js', () => {
       create: vi.fn().mockResolvedValue({ id: 'strat-001', title: 'Test Strategy' }),
       findMany: vi.fn().mockResolvedValue([]),
       findFirst: vi.fn().mockResolvedValue(null),
+      findUnique: vi.fn().mockResolvedValue(null),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     strategyPriority: {
       create: vi.fn().mockResolvedValue({ id: 'sp-001' }),
@@ -64,6 +66,8 @@ vi.mock('../../db/prisma-client.js', () => {
     planningDocument: {
       create: vi.fn().mockResolvedValue({ id: 'plan-001', title: 'Test Planning Doc' }),
       findMany: vi.fn().mockResolvedValue([]),
+      findUnique: vi.fn().mockResolvedValue(null),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     priorityEntry: {
       create: vi.fn().mockResolvedValue({ id: 'prio-001' }),
@@ -92,8 +96,16 @@ vi.mock('../../db/prisma-client.js', () => {
     scenarioInject: {
       create: vi.fn().mockResolvedValue({ id: 'inj-001' }),
     },
+    scenario: {
+      findUnique: vi.fn().mockResolvedValue({ startDate: new Date('2026-03-01T00:00:00Z') }),
+    },
+    unit: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     taskingOrder: {
       create: vi.fn().mockResolvedValue({ id: 'order-001', orderId: 'ATO-TEST-001' }),
+      findUnique: vi.fn().mockResolvedValue(null),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     missionPackage: {
       create: vi.fn().mockResolvedValue({ id: 'pkg-001' }),
@@ -118,6 +130,11 @@ vi.mock('../../db/prisma-client.js', () => {
     },
     ingestLog: {
       create: vi.fn().mockResolvedValue({ id: 'log-001' }),
+    },
+    llmCache: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      update: vi.fn().mockResolvedValue({ id: 'cache-001' }),
+      upsert: vi.fn().mockResolvedValue({ id: 'cache-001' }),
     },
     $transaction: vi.fn().mockImplementation(async (fn: (tx: any) => Promise<any>) => {
       // The transaction callback receives the same mock prisma as `tx`
@@ -1097,13 +1114,13 @@ describe('Document Ingestion — Planning Sub-Types', () => {
       content: 'SPINS content...',
       effectiveDate: '2026-03-01T00:00:00Z',
       codeWords: [
-        { codeWord: 'BRIGHT STAR', meaning: 'Initiate air defense', category: 'TACTICAL' },
+        { word: 'BRIGHT STAR', meaning: 'Initiate air defense', category: 'TACTICAL' },
       ],
       procedures: [
         { category: 'ROE', title: 'Weapons Release Authority', description: 'Weapons release authority procedures', applicableTo: ['ALL'] },
         { category: 'EMCON', title: 'EMCON Procedures', description: 'Emission control procedures', applicableTo: ['AIR'] },
       ],
-      commNets: [
+      commPlans: [
         { netName: 'BLUE-7', frequency: '305.6 MHz', band: 'UHF', callsign: 'MAGIC', purpose: 'AWACS Control', applicableTo: ['DCA', 'OCA'] },
         { netName: 'RED CROWN', frequency: '243.0 MHz', band: 'UHF', callsign: 'RED CROWN', purpose: 'Guard', applicableTo: ['ALL'] },
       ],
@@ -1228,10 +1245,7 @@ describe('Document Ingestion — Planning Sub-Types', () => {
         { title: 'Diplomatic Incident', injectType: 'POLITICAL', triggerDay: 3, triggerHour: 9, description: 'Third party territorial dispute', severity: 'MEDIUM' },
       ],
     });
-
     const prisma = (await import('../../db/prisma-client.js')).default;
-    // MSEL's persistMSEL needs prisma.scenario.findUnique for date parsing
-    prisma.scenario = { findUnique: vi.fn().mockResolvedValue({ startDate: new Date('2026-03-01T00:00:00Z') }) };
     const result = await ingestDocument('scenario-123', 'MSEL raw text');
 
     expect(result.success).toBe(true);
