@@ -35,22 +35,15 @@ interface GraphEdge {
   confidence?: number;
 }
 
-// D3-compatible versions (d3-force mutates source/target to node refs)
-interface SimNode extends d3.SimulationNodeDatum {
-  id: string;
-  type: GraphNodeType;
-  label: string;
-  sublabel?: string;
-  meta?: Record<string, unknown>;
+interface PositionedNode extends GraphNode {
+  x: number;       // rendered position (interpolated toward target)
+  y: number;
+  tx: number;      // layout target position
+  ty: number;
+  pinned: boolean; // true while being dragged or held
 }
 
-interface SimLink extends d3.SimulationLinkDatum<SimNode> {
-  relationship: string;
-  weight?: number;
-  confidence?: number;
-}
-
-// ─── Color + Shape Config ─────────────────────────────────────────────────────
+// ─── Style Config ─────────────────────────────────────────────────────────────
 
 const NODE_CONFIG: Record<GraphNodeType, { color: string; icon: string }> = {
   DOCUMENT: { color: '#60a5fa', icon: '📄' },
@@ -58,79 +51,42 @@ const NODE_CONFIG: Record<GraphNodeType, { color: string; icon: string }> = {
   UNIT: { color: '#34d399', icon: '⚔️' },
   BASE: { color: '#a78bfa', icon: '🏗' },
   TARGET: { color: '#f87171', icon: '💥' },
-  SPACE_ASSET: { color: '#38bdf8', icon: '✦' },  // simple vector glyph (🛰 emoji kills zoom perf)
+  SPACE_ASSET: { color: '#38bdf8', icon: '✦' },
   SPACE_NEED: { color: '#c084fc', icon: '📡' },
   MISSION: { color: '#fbbf24', icon: '✈️' },
   ASSET: { color: '#4ade80', icon: '🔧' },
   PACKAGE: { color: '#fb923c', icon: '📦' },
-  ALLOCATION: { color: '#94a3b8', icon: '⬡' },  // default gray; overridden by status
+  ALLOCATION: { color: '#94a3b8', icon: '⬡' },
 };
 
-// Status-based coloring for ALLOCATION nodes (space allocation health)
 const ALLOCATION_STATUS_COLORS: Record<string, string> = {
-  FULFILLED:  '#4ade80',  // green — healthy
-  PARTIAL:    '#fbbf24',  // amber — degraded coverage
-  CONTENTION: '#fb923c',  // orange — multiple needs competing
-  DEGRADED:   '#f97316',  // dark orange — capability reduced
-  PENDING:    '#94a3b8',  // gray — not yet resolved
-  DENIED:     '#ef4444',  // red — no coverage available
+  FULFILLED:  '#4ade80',
+  PARTIAL:    '#fbbf24',
+  CONTENTION: '#fb923c',
+  DEGRADED:   '#f97316',
+  PENDING:    '#94a3b8',
+  DENIED:     '#ef4444',
 };
 
 const NODE_RADIUS = 24;
 
-// Type-aware charge strengths — heavier repulsion for documents, lighter for derived nodes
-const NODE_CHARGE: Record<string, number> = {
-  DOCUMENT:    -400,
-  PRIORITY:    -150,
-  UNIT:        -120,
-  BASE:        -100,
-  TARGET:      -100,
-  SPACE_ASSET: -120,
-  SPACE_NEED:  -100,
-  MISSION:     -100,
-  ASSET:       -80,
-  PACKAGE:     -200,
-  ALLOCATION:  -80,
+// Hierarchy tier map — documents at top (tier 0), allocations at bottom (tier 5)
+const NODE_TIER: Record<GraphNodeType, number> = {
+  DOCUMENT: 0,
+  PRIORITY: 1,
+  PACKAGE: 2,
+  UNIT: 2,
+  MISSION: 3,
+  TARGET: 3,
+  BASE: 3,
+  ASSET: 3,
+  SPACE_NEED: 4,
+  ALLOCATION: 5,
+  SPACE_ASSET: 5,
 };
 
-// Hierarchy tier map — used for vertical band layout (top → bottom)
-const NODE_TIER: Record<string, number> = {
-  DOCUMENT: 0,      // Strategy/Planning/Order docs — top of hierarchy
-  PRIORITY: 1,      // Priorities derived from documents
-  PACKAGE: 2,       // Mission packages from orders
-  UNIT: 2,          // Units — peer to packages
-  MISSION: 3,       // Individual missions within packages
-  TARGET: 3,        // Targets assigned to missions (same tier)
-  BASE: 3,          // Bases — peer to missions
-  ASSET: 3,         // Assets — peer to missions
-  SPACE_NEED: 4,    // Space needs from missions
-  ALLOCATION: 5,    // Space allocations resolving needs
-  SPACE_ASSET: 5,   // Space assets (same tier as allocations)
-};
+const MAX_TIER = 5;
 
-// Link distance by relationship — hierarchy levels push apart, operational links stay tight
-const LINK_DISTANCE: Record<string, number> = {
-  DERIVES_FROM:          200,
-  DIRECTS:               180,
-  ESTABLISHES_PRIORITY:  120,
-  ALLOCATED_TO:           90,
-  RESOLVED_BY:            60,
-  TARGETS:                80,
-  SUPPORTS_MISSION:       80,
-  AUTHORIZES:            160,
-  ASSIGNS_MISSION:       100,
-  CONTAINS_PACKAGE:      100,
-  EXECUTES:              100,
-  STATIONED_AT:          120,
-  REQUIRES:               90,
-  PROVIDES_COVERAGE:      80,
-  HAS_ASSET:              60,
-  PREFERS:                90,
-  NEEDS_BAND:            150,
-};
-const DEFAULT_LINK_DISTANCE = 120;
-
-// Semantic edge type colors
 const EDGE_COLORS: Record<string, string> = {
   DERIVES_FROM:         '#60a5fa',
   DIRECTS:              '#34d399',
@@ -151,10 +107,291 @@ const EDGE_COLORS: Record<string, string> = {
   NEEDS_BAND:           '#e879f9',
 };
 
-// Types that are always visible (relationship graph)
 const CORE_TYPES: Set<GraphNodeType> = new Set(['DOCUMENT', 'PRIORITY', 'MISSION', 'TARGET', 'SPACE_NEED', 'PACKAGE', 'ALLOCATION']);
-// Types hidden by default (raw ORBAT data — too many disconnected nodes)
 const ORBAT_TYPES: Set<GraphNodeType> = new Set(['UNIT', 'BASE', 'SPACE_ASSET', 'ASSET']);
+
+// ─── Layout: Sugiyama with Barycenter Crossing Minimization ──────────────────
+//
+// Deterministic, O(N·E + iter·N log N) layered graph drawing:
+//   1. Group nodes by NODE_TIER (predetermined layers)
+//   2. Initialize stable within-layer order (by type, label, id)
+//   3. Iterate barycenter sweep (down, up) to minimize edge crossings
+//   4. Project to either hierarchy (cartesian layers) or radial (concentric rings)
+//
+// This is the Sugiyama framework (1981), the same algorithm backing dagre,
+// ELK.js, and d3-dag. It gives a stable, crossing-minimized layout in one pass.
+
+interface LayoutOpts {
+  width: number;
+  height: number;
+  mode: 'hierarchy' | 'radial';
+}
+
+// Place an ordered list of nodes onto concentric sub-rings starting at `startR`.
+// Each sub-ring's capacity is proportional to its circumference, so a dense
+// tier uses just enough sub-rings to fit collision-free.
+//
+// Nodes are distributed so each sub-ring spans the full 360°, and barycenter-
+// ordered neighbors land at angularly close positions across sub-rings (greedy
+// closest-slot assignment).
+function placeLayerInSubRings(
+  layer: GraphNode[],
+  startR: number,
+  collisionDiameter: number,
+  subRingGap: number,
+): { assignments: Map<string, { angle: number; r: number }>; outerR: number } {
+  const assignments = new Map<string, { angle: number; r: number }>();
+  if (layer.length === 0) return { assignments, outerR: startR };
+  if (layer.length === 1) {
+    assignments.set(layer[0].id, { angle: -Math.PI / 2, r: startR });
+    return { assignments, outerR: startR };
+  }
+
+  // 1. Stack sub-rings outward until total capacity fits all nodes
+  let K = 1;
+  let subRadii: number[] = [];
+  let capacities: number[] = [];
+  while (K < 50) {
+    subRadii = Array.from({ length: K }, (_, i) => startR + i * subRingGap);
+    capacities = subRadii.map(r => Math.max(1, Math.floor((2 * Math.PI * r) / collisionDiameter)));
+    const total = capacities.reduce((a, b) => a + b, 0);
+    if (total >= layer.length) break;
+    K++;
+  }
+
+  // 2. Proportional counts per ring: ring j gets ~count * cap[j] / totalCap nodes
+  const totalCap = capacities.reduce((a, b) => a + b, 0);
+  const ringCounts = capacities.map(c => Math.floor(c * layer.length / totalCap));
+  let remainder = layer.length - ringCounts.reduce((a, b) => a + b, 0);
+  // Distribute remainder to rings with most spare capacity
+  while (remainder > 0) {
+    let bestJ = 0, bestSpare = -1;
+    for (let j = 0; j < K; j++) {
+      const spare = capacities[j] - ringCounts[j];
+      if (spare > bestSpare) { bestSpare = spare; bestJ = j; }
+    }
+    ringCounts[bestJ]++;
+    remainder--;
+  }
+
+  // 3. Greedy slot assignment: for each ordered node, pick the sub-ring whose
+  //    next slot is angularly closest to this node's fractional position.
+  //    This keeps ordered-neighbors angularly adjacent across sub-rings.
+  const subRingMembers: GraphNode[][] = Array.from({ length: K }, () => []);
+  const used: number[] = new Array(K).fill(0);
+  for (let i = 0; i < layer.length; i++) {
+    const fraction = (i + 0.5) / layer.length;
+    let bestJ = -1, bestDiff = Infinity;
+    for (let j = 0; j < K; j++) {
+      if (used[j] >= ringCounts[j]) continue;
+      const slotFraction = (used[j] + 0.5) / ringCounts[j];
+      const diff = Math.abs(slotFraction - fraction);
+      if (diff < bestDiff) { bestDiff = diff; bestJ = j; }
+    }
+    if (bestJ === -1) { // safety fallback (shouldn't happen)
+      for (let j = 0; j < K; j++) if (used[j] < ringCounts[j]) { bestJ = j; break; }
+    }
+    subRingMembers[bestJ].push(layer[i]);
+    used[bestJ]++;
+  }
+
+  // 4. Compute angles per sub-ring, inserting angular gaps at type boundaries
+  //    so clusters of like-type nodes read as distinct groups on each ring.
+  const typeGapUnits = 0.6; // extra "slot width" to insert between type clusters
+  for (let j = 0; j < K; j++) {
+    const members = subRingMembers[j];
+    const r = subRadii[j];
+    const n = members.length;
+    if (n === 0) continue;
+    if (n === 1) { assignments.set(members[0].id, { angle: -Math.PI / 2, r }); continue; }
+
+    const offsets: number[] = [];
+    let cum = 0;
+    for (let i = 0; i < n; i++) {
+      if (i > 0 && members[i].type !== members[i - 1].type) cum += typeGapUnits;
+      offsets.push(cum);
+      cum += 1;
+    }
+    // Close-the-ring gap if first and last are different types
+    const wrapGap = members[0].type !== members[n - 1].type ? typeGapUnits : 0;
+    const totalUnits = cum + wrapGap;
+
+    for (let i = 0; i < n; i++) {
+      const angle = (offsets[i] / totalUnits) * 2 * Math.PI - Math.PI / 2;
+      assignments.set(members[i].id, { angle, r });
+    }
+  }
+
+  return { assignments, outerR: subRadii[K - 1] };
+}
+
+function computeLayout(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  opts: LayoutOpts,
+): Map<string, { x: number; y: number }> {
+  // 1. Layer assignment
+  const layers: GraphNode[][] = Array.from({ length: MAX_TIER + 1 }, () => []);
+  const tierOf = new Map<string, number>();
+  for (const n of nodes) {
+    const t = NODE_TIER[n.type] ?? MAX_TIER;
+    tierOf.set(n.id, t);
+    layers[t].push(n);
+  }
+
+  // 2. Build adjacency restricted to inter-layer edges
+  const neighborsUp = new Map<string, string[]>();   // node → neighbors one layer up
+  const neighborsDown = new Map<string, string[]>(); // node → neighbors one layer down
+  const push = (m: Map<string, string[]>, k: string, v: string) => {
+    const arr = m.get(k); if (arr) arr.push(v); else m.set(k, [v]);
+  };
+  for (const e of edges) {
+    const ts = tierOf.get(e.source);
+    const tt = tierOf.get(e.target);
+    if (ts === undefined || tt === undefined || ts === tt) continue;
+    if (ts < tt) { push(neighborsUp, e.target, e.source); push(neighborsDown, e.source, e.target); }
+    else         { push(neighborsUp, e.source, e.target); push(neighborsDown, e.target, e.source); }
+  }
+
+  // 3. Initial within-layer order: stable by (type, label, id)
+  for (const layer of layers) {
+    layer.sort((a, b) =>
+      a.type.localeCompare(b.type) ||
+      a.label.localeCompare(b.label) ||
+      a.id.localeCompare(b.id));
+  }
+  const pos = new Map<string, number>();
+  const reindex = () => {
+    for (const layer of layers) layer.forEach((n, i) => pos.set(n.id, i));
+  };
+  reindex();
+
+  // 4. Barycenter sweeps — alternating down/up until stable (or 24 iterations)
+  const ITER = 24;
+  for (let it = 0; it < ITER; it++) {
+    const down = it % 2 === 0;
+    const order = down
+      ? layers.map((_, i) => i).slice(1)
+      : layers.map((_, i) => i).slice(0, -1).reverse();
+    let changed = false;
+    for (const li of order) {
+      const layer = layers[li];
+      if (layer.length < 2) continue;
+      const source = down ? neighborsUp : neighborsDown;
+      const bary = new Map<string, number>();
+      for (const n of layer) {
+        const ns = source.get(n.id);
+        if (!ns || ns.length === 0) { bary.set(n.id, pos.get(n.id)!); continue; }
+        let sum = 0, count = 0;
+        for (const id of ns) { const p = pos.get(id); if (p !== undefined) { sum += p; count++; } }
+        bary.set(n.id, count ? sum / count : pos.get(n.id)!);
+      }
+      const before = layer.map(n => n.id).join(',');
+      layer.sort((a, b) =>
+        (bary.get(a.id)! - bary.get(b.id)!) || a.id.localeCompare(b.id));
+      const after = layer.map(n => n.id).join(',');
+      if (before !== after) changed = true;
+    }
+    reindex();
+    if (!changed) break;
+  }
+
+  // 5. Project ordered layers to concrete coordinates
+  const positions = new Map<string, { x: number; y: number }>();
+
+  if (opts.mode === 'hierarchy') {
+    // Adaptive sub-rows per tier — dense tiers wrap into multiple horizontal
+    // rows instead of stretching into a single long strip. Row width is capped
+    // to the viewport so the overall layout stays readable; zoom-to-fit scales
+    // the stacked result.
+    const marginTop = 80;
+    const marginX = 80;
+    const tierGapY = 100;
+    const subRowGapY = 52;
+    const nodeSpacingX = 72;
+    const cx = opts.width / 2;
+    const availableWidth = Math.max(opts.width - 2 * marginX, 600);
+    const maxNodesPerRow = Math.max(1, Math.floor(availableWidth / nodeSpacingX));
+
+    let currentY = marginTop;
+    for (let tier = 0; tier <= MAX_TIER; tier++) {
+      const layer = layers[tier];
+      if (layer.length === 0) { currentY += tierGapY; continue; }
+
+      // Interleave barycenter-ordered nodes across K sub-rows so ordered
+      // neighbors land vertically adjacent at the same column (stays close
+      // visually, keeps crossings low for edges into adjacent tiers).
+      const K = Math.max(1, Math.ceil(layer.length / maxNodesPerRow));
+      const subRows: GraphNode[][] = Array.from({ length: K }, () => []);
+      layer.forEach((n, i) => subRows[i % K].push(n));
+
+      // Extra horizontal space inserted at type-cluster boundaries
+      const typeGapX = nodeSpacingX * 0.9;
+
+      subRows.forEach((rowNodes, rowIdx) => {
+        if (rowNodes.length === 0) return;
+        const rowY = currentY + rowIdx * subRowGapY;
+        // Precompute cumulative x-offsets with type-boundary gaps
+        const xs: number[] = [];
+        let x = 0;
+        for (let i = 0; i < rowNodes.length; i++) {
+          if (i > 0) {
+            x += nodeSpacingX;
+            if (rowNodes[i].type !== rowNodes[i - 1].type) x += typeGapX;
+          }
+          xs.push(x);
+        }
+        const totalWidth = xs[xs.length - 1];
+        // Stagger every other row by half a slot for a tighter, honeycomb feel
+        const stagger = (rowIdx % 2) * (nodeSpacingX / 2);
+        const startX = cx - totalWidth / 2 + stagger;
+        rowNodes.forEach((n, slotIdx) => {
+          positions.set(n.id, { x: startX + xs[slotIdx], y: rowY });
+        });
+      });
+
+      currentY += Math.max(0, K - 1) * subRowGapY + tierGapY;
+    }
+  } else {
+    // Radial — adaptive concentric sub-rings per tier.
+    //
+    // Problem: inner rings have less circumference than outer. A tier with 100
+    // nodes can't fit on a tight inner circle. Solution: give each tier as many
+    // concentric sub-rings as it needs, with per-ring capacity proportional to
+    // that sub-ring's radius. Stacks tiers outward with enough radial gap so
+    // they never overlap their neighbors.
+    const cx = opts.width / 2;
+    const cy = opts.height / 2;
+    const collisionDiameter = NODE_RADIUS * 2 + 20;
+    const subRingGap = collisionDiameter;
+    const tierGap = collisionDiameter * 1.4;
+
+    // Tier 0 (documents) — cluster at the center, fan outward if needed
+    const docLayer = layers[0];
+    let currentR: number;
+    if (docLayer.length <= 1) {
+      if (docLayer.length === 1) positions.set(docLayer[0].id, { x: cx, y: cy });
+      currentR = 70;
+    } else {
+      const { assignments, outerR } = placeLayerInSubRings(docLayer, 40, collisionDiameter, subRingGap);
+      assignments.forEach(({ angle, r }, id) =>
+        positions.set(id, { x: cx + Math.cos(angle) * r, y: cy + Math.sin(angle) * r }));
+      currentR = Math.max(70, outerR + tierGap);
+    }
+
+    // Outer tiers stack outward adaptively
+    for (let tier = 1; tier <= MAX_TIER; tier++) {
+      const layer = layers[tier];
+      if (layer.length === 0) { currentR += tierGap; continue; }
+      const { assignments, outerR } = placeLayerInSubRings(layer, currentR, collisionDiameter, subRingGap);
+      assignments.forEach(({ angle, r }, id) =>
+        positions.set(id, { x: cx + Math.cos(angle) * r, y: cy + Math.sin(angle) * r }));
+      currentR = outerR + tierGap;
+    }
+  }
+
+  return positions;
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -163,9 +400,12 @@ export function KnowledgeGraph() {
   const socket = useOverwatchStore(s => s.socket);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
+  const positionedRef = useRef<PositionedNode[]>([]);
+  const linksRef = useRef<GraphEdge[]>([]);
   const isDraggingRef = useRef(false);
   const hoveredNodeIdRef = useRef<string | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const initialFitDoneRef = useRef(false);
 
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
@@ -175,29 +415,15 @@ export function KnowledgeGraph() {
   const [stats, setStats] = useState({ nodes: 0, edges: 0 });
   const [orbatMode, setOrbatMode] = useState<'off' | 'active' | 'all'>('off');
   const [layoutMode, setLayoutMode] = useState<'hierarchy' | 'radial'>('hierarchy');
-  const layoutModeRef = useRef<'hierarchy' | 'radial'>('hierarchy');
   const [atoDay, setAtoDay] = useState<number | null>(null);
   const [overlayExpanded, setOverlayExpanded] = useState(true);
-  const newNodeIdsRef = useRef<Set<string>>(new Set());
+  const [layoutVersion, setLayoutVersion] = useState(0);
   const nodesRef = useRef<GraphNode[]>([]);
 
-  // ─── Physics Constants ───────────────────────────────────────────────
-  const PHYSICS = useMemo(() => ({
-    distanceMin: 20,
-    centerStrength: 0.015,    // even weaker horizontal centering so nodes can unpack
-    tierStrength: 0.5,        // strong vertical tier enforcement
-    velocityDecay: 0.75,
-    alphaDecay: 0.04,
-    collisionRadius: 36,      // NODE_RADIUS + padding
-    linkDistScale: 1.0,
-    chargeStrength: -200,     // fallback charge
-  }), []);
-
-  // Ingest state from Zustand (persists across page navigation)
   const ingestCards = useOverwatchStore(s => s.ingestCards);
   const activeCards = ingestCards.filter(c => !c.completedAt || Date.now() - c.completedAt < 8000);
 
-  // ─── Fetch Graph Data ────────────────────────────────────────────────────
+  // ─── Fetch Graph Data ──────────────────────────────────────────────────
 
   const fetchGraph = useCallback(async () => {
     if (!activeScenarioId) return;
@@ -223,36 +449,23 @@ export function KnowledgeGraph() {
     }
   }, [activeScenarioId, atoDay]);
 
-  useEffect(() => {
-    fetchGraph();
-  }, [fetchGraph, atoDay]);
+  useEffect(() => { fetchGraph(); }, [fetchGraph, atoDay]);
 
-  // ─── WebSocket: Real-time Graph Updates ────────────────────────────────
+  // ─── WebSocket: Real-time Graph Updates ──────────────────────────────
 
   useEffect(() => {
     if (!socket) return;
 
-    const handleGraphUpdate = (data: {
-      addedNodes: GraphNode[];
-      addedEdges: GraphEdge[];
-    }) => {
-      // Track newly added node IDs for entrance animation
-      const incomingIds = new Set(data.addedNodes.map(n => n.id));
-      incomingIds.forEach(id => newNodeIdsRef.current.add(id));
-      // Clear the "new" flag after animation completes
-      setTimeout(() => {
-        incomingIds.forEach(id => newNodeIdsRef.current.delete(id));
-      }, 2000);
-
+    const handleGraphUpdate = (data: { addedNodes: GraphNode[]; addedEdges: GraphEdge[] }) => {
       setNodes(prev => {
         const existing = new Set(prev.map(n => n.id));
         const newNodes = data.addedNodes.filter(n => !existing.has(n.id));
-        return [...prev, ...newNodes];
+        return newNodes.length ? [...prev, ...newNodes] : prev;
       });
       setEdges(prev => {
         const existingKeys = new Set(prev.map(e => `${e.source}::${e.target}::${e.relationship}`));
         const newEdges = data.addedEdges.filter(e => !existingKeys.has(`${e.source}::${e.target}::${e.relationship}`));
-        return [...prev, ...newEdges];
+        return newEdges.length ? [...prev, ...newEdges] : prev;
       });
       setStats(prev => ({
         nodes: prev.nodes + data.addedNodes.length,
@@ -261,40 +474,27 @@ export function KnowledgeGraph() {
     };
 
     socket.on('graph:update', handleGraphUpdate);
-    return () => {
-      socket.off('graph:update', handleGraphUpdate);
-    };
+    return () => { socket.off('graph:update', handleGraphUpdate); };
   }, [socket]);
 
-  // Keep nodesRef in sync
-  useEffect(() => {
-    nodesRef.current = nodes;
-  }, [nodes]);
+  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
 
-  // ─── Filtered Data ──────────────────────────────────────────────────────
+  // ─── Filtered Data ──────────────────────────────────────────────────
 
   const filteredNodes = useMemo(() => {
     if (orbatMode === 'all') return nodes;
-
     const coreNodes = nodes.filter(n => CORE_TYPES.has(n.type));
     if (orbatMode === 'off') return coreNodes;
-
-    // ACTIVE mode: Core Nodes + ORBAT nodes attached to operations
     const coreNodeIds = new Set(coreNodes.map(n => n.id));
     const activeOrbatIds = new Set<string>();
-
-    // Pass 1: Direct connection to CORE node
     edges.forEach(e => {
       if (coreNodeIds.has(e.source) && !coreNodeIds.has(e.target)) activeOrbatIds.add(e.target);
       if (coreNodeIds.has(e.target) && !coreNodeIds.has(e.source)) activeOrbatIds.add(e.source);
     });
-
-    // Pass 2: Second hop (e.g. Asset attached to Unit assigned to Mission)
     edges.forEach(e => {
       if (activeOrbatIds.has(e.source) && !coreNodeIds.has(e.target)) activeOrbatIds.add(e.target);
       if (activeOrbatIds.has(e.target) && !coreNodeIds.has(e.source)) activeOrbatIds.add(e.source);
     });
-
     return nodes.filter(n => coreNodeIds.has(n.id) || activeOrbatIds.has(n.id));
   }, [nodes, edges, orbatMode]);
 
@@ -303,23 +503,16 @@ export function KnowledgeGraph() {
     return edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
   }, [edges, filteredNodes]);
 
-  // (batching system removed — all filtered nodes render directly)
-
-  const orbatCount = useMemo(() =>
-    nodes.filter(n => ORBAT_TYPES.has(n.type)).length,
-    [nodes]
+  const orbatCount = useMemo(
+    () => nodes.filter(n => ORBAT_TYPES.has(n.type)).length,
+    [nodes],
   );
 
-  // ─── D3 Force Simulation (Incremental) ─────────────────────────────────
+  // ─── Deterministic Layout + Canvas Render ──────────────────────────────
 
-  // Refs to persist D3 state across React renders
   const zoomRef = useRef<d3.ZoomBehavior<HTMLCanvasElement, unknown> | null>(null);
   const zoomTransformRef = useRef<d3.ZoomTransform>(d3.zoomIdentity);
-  const simNodesRef = useRef<SimNode[]>([]);
-  const simLinksRef = useRef<SimLink[]>([]);
-  const initialFitDoneRef = useRef(false);
 
-  // ── Pre-computed layout + render ─────────────────────────────────────
   useEffect(() => {
     if (!canvasRef.current || !containerRef.current || filteredNodes.length === 0) return;
 
@@ -329,293 +522,44 @@ export function KnowledgeGraph() {
     const container = containerRef.current;
     const width = container.clientWidth || 1000;
     const height = container.clientHeight || 800;
-    const P = PHYSICS;
-
     const dpr = window.devicePixelRatio || 1;
     canvas.width = width * dpr;
     canvas.height = height * dpr;
     canvas.style.width = width + 'px';
     canvas.style.height = height + 'px';
 
-    // ── Build node + link arrays ──────────────────────────────────
-    const existingById = new Map(simNodesRef.current.map(n => [n.id, n]));
-    const mergedNodes: SimNode[] = [];
-    const seenNodeIds = new Set<string>();
-
-    // Build adjacency lookup so new nodes can be placed near parents
-    const parentOf = new Map<string, string>();
-    for (const e of filteredEdges) {
-      if (!parentOf.has(e.target)) parentOf.set(e.target, e.source);
-    }
-
-    // Sort nodes by tier so hierarchy places parents before children
-    const sortedNodes = [...filteredNodes].sort((a, b) =>
-      (NODE_TIER[a.type] ?? 9) - (NODE_TIER[b.type] ?? 9)
-    );
-
-    // Tier-based Y-band: use viewport height so all tiers stay on-screen,
-    // with modest scaling for very large graphs (sqrt dampens vertical blow-out)
-    const maxTier = 5; // ALLOCATION/SPACE_ASSET
-    const layoutHeight = Math.max(height, height + Math.sqrt(sortedNodes.length) * 12);
-    const bandHeight = layoutHeight / (maxTier + 2);
-    const tierY = (type: string) => bandHeight * ((NODE_TIER[type] ?? 9) + 1);
-
-    for (const n of sortedNodes) {
-      if (seenNodeIds.has(n.id)) continue;
-      seenNodeIds.add(n.id);
-
-      const existing = existingById.get(n.id);
-      if (existing) {
-        Object.assign(existing, { type: n.type, label: n.label, sublabel: n.sublabel, meta: n.meta });
-        if (!Number.isFinite(existing.x!)) existing.x = width / 2;
-        if (!Number.isFinite(existing.y!)) existing.y = tierY(n.type);
-        if (!Number.isFinite(existing.vx!)) existing.vx = 0;
-        if (!Number.isFinite(existing.vy!)) existing.vy = 0;
-        mergedNodes.push(existing);
-      } else {
-        // New node — place near parent if linked, else scatter within tier band
-        const parentId = parentOf.get(n.id);
-        const parentNode = parentId ? existingById.get(parentId) : null;
-        let initX: number;
-        let initY: number;
-
-        if (parentNode && Number.isFinite(parentNode.x!) && Number.isFinite(parentNode.y!)) {
-          const angle = Math.random() * Math.PI * 2;
-          const dist = 60 + Math.random() * 40;
-          initX = parentNode.x! + Math.cos(angle) * dist;
-          initY = parentNode.y! + Math.sin(angle) * dist;
-        } else {
-          initX = width * (0.15 + Math.random() * 0.7);
-          initY = tierY(n.type) + (Math.random() - 0.5) * bandHeight * 0.4;
-        }
-
-        mergedNodes.push({
-          ...n,
-          x: initX, y: initY,
-          vx: 0, vy: 0,
-          fx: null, fy: null,
-        });
-      }
-    }
-
-    const nodeIdSet = new Set(mergedNodes.map(n => n.id));
-    const mergedLinks: SimLink[] = filteredEdges
-      .filter(e => nodeIdSet.has(e.source) && nodeIdSet.has(e.target))
-      .map(e => ({
-        source: e.source, target: e.target,
-        relationship: e.relationship, weight: e.weight, confidence: e.confidence,
-      }));
-
-    simNodesRef.current = mergedNodes;
-    simLinksRef.current = mergedLinks;
-
-    // ── Phase 3: Topological Layout Prep ──────────────────────────────
-    const nodeDegrees = new Map<string, number>();
-    mergedLinks.forEach(link => {
-      const srcId = typeof link.source === 'object' ? (link.source as any).id : link.source;
-      const tgtId = typeof link.target === 'object' ? (link.target as any).id : link.target;
-      nodeDegrees.set(srcId, (nodeDegrees.get(srcId) || 0) + 1);
-      nodeDegrees.set(tgtId, (nodeDegrees.get(tgtId) || 0) + 1);
+    // ── Compute layout deterministically ─────────────────────────────
+    const targetPositions = computeLayout(filteredNodes, filteredEdges, {
+      width, height, mode: layoutMode,
     });
 
-    const docNodes = mergedNodes.filter(n => n.type === 'DOCUMENT');
-    const docXMap = new Map<string, number>();
-    if (docNodes.length > 0) {
-      const spacing = Math.max(150, width / docNodes.length);
-      const totalWidth = spacing * docNodes.length;
-      const startX = (width - totalWidth) / 2;
-      docNodes.forEach((n, idx) => {
-        docXMap.set(n.id, startX + (idx + 0.5) * spacing);
-      });
-    }
-
-    // ── Create or reuse simulation ────────────────────────────────
-    let simulation = simulationRef.current;
-
-    if (!simulation) {
-      // Create fresh simulation and link the main alpha loop
-      simulation = d3.forceSimulation<SimNode>(mergedNodes);
-      simulationRef.current = simulation;
-    } else {
-      if (layoutModeRef.current !== layoutMode) {
-        layoutModeRef.current = layoutMode;
-      }
-      simulation.nodes(mergedNodes);
-      simulation.alpha(1).restart();
-    }
-
-    // ── Configure forces ──────────────────────────────────────────
-    const nodeCount = mergedNodes.length;
-    const chargeScale = nodeCount > 50 ? Math.sqrt(50 / nodeCount) : 1;
-
-    simulation
-      .velocityDecay(P.velocityDecay)
-      .alphaDecay(P.alphaDecay)
-      .force('link', d3.forceLink<SimNode, SimLink>(mergedLinks)
-        .id(d => d.id)
-        .distance(d => {
-          const rel = d.relationship;
-          const baseDist = LINK_DISTANCE[rel] ?? DEFAULT_LINK_DISTANCE;
-          return baseDist * P.linkDistScale;
-        })
-        .strength(d => {
-          const baseStrength = d.weight ? Math.min(0.2, d.weight * 0.05) : 0.05;
-          const srcId = typeof d.source === 'object' ? (d.source as any).id : d.source;
-          const tgtId = typeof d.target === 'object' ? (d.target as any).id : d.target;
-          const srcDeg = nodeDegrees.get(srcId) || 1;
-          const tgtDeg = nodeDegrees.get(tgtId) || 1;
-          return baseStrength / Math.max(1, srcDeg, tgtDeg);
-        }))
-      .force('charge', d3.forceManyBody<SimNode>()
-        .strength(d => {
-          const deg = nodeDegrees.get(d.id) || 1;
-          const baseCharge = (NODE_CHARGE[d.type] || P.chargeStrength) * chargeScale;
-          return baseCharge * (1 + Math.log2(deg));
-        })
-        .distanceMin(P.distanceMin)
-        .distanceMax(400)
-        .theta(0.9));
-
-    if (layoutMode === 'radial') {
-      // ── Angular offsets by type within each tier ring ───────────
-      // Types sharing a tier get evenly-spaced angular wedges so they
-      // don't pile on top of each other at the same radius.
-      const tierGroupsRadial = new Map<number, GraphNodeType[]>();
-      for (const [type, tier] of Object.entries(NODE_TIER)) {
-        const t = type as GraphNodeType;
-        if (t === 'DOCUMENT') continue;
-        if (!tierGroupsRadial.has(tier)) tierGroupsRadial.set(tier, []);
-        tierGroupsRadial.get(tier)!.push(t);
-      }
-      // Map each type to an angular offset (radians) within its tier
-      const typeAngleOffset = new Map<GraphNodeType, number>();
-      for (const [, types] of tierGroupsRadial) {
-        if (types.length <= 1) {
-          if (types.length === 1) typeAngleOffset.set(types[0], 0);
-          continue;
-        }
-        const wedge = (Math.PI * 2) / types.length;
-        types.forEach((t, i) => {
-          typeAngleOffset.set(t, wedge * i);
+    // ── Reconcile positioned nodes with new layout ──────────────────
+    const existing = new Map(positionedRef.current.map(n => [n.id, n]));
+    const next: PositionedNode[] = [];
+    for (const n of filteredNodes) {
+      const t = targetPositions.get(n.id) ?? { x: width / 2, y: height / 2 };
+      const prev = existing.get(n.id);
+      if (prev) {
+        next.push({
+          ...prev,
+          type: n.type, label: n.label, sublabel: n.sublabel, meta: n.meta,
+          tx: t.x, ty: t.y,
+          // If pinned (user dragged), keep current x,y unchanged; layout retarget waits for unpin
+        });
+      } else {
+        // New node — start near target (no long fly-in)
+        next.push({
+          ...n,
+          x: t.x, y: t.y,
+          tx: t.x, ty: t.y,
+          pinned: false,
         });
       }
-
-      simulation
-        .force('x', null)
-        .force('y', null)
-        .force('radial', d3.forceRadial<SimNode>(
-            d => Math.max(0, (bandHeight * ((NODE_TIER[d.type] ?? 9) + 1.5)) - 50),
-            width / 2,
-            height / 2
-          ).strength(P.tierStrength))
-        .force('angular', (alpha: number) => {
-          const cx = width / 2;
-          const cy = height / 2;
-
-          for (const n of mergedNodes) {
-             if (n.type === 'DOCUMENT') continue;
-
-             const childX = n.x! - cx;
-             const childY = n.y! - cy;
-             const currentRadius = Math.sqrt(childX * childX + childY * childY);
-             if (currentRadius === 0) continue;
-
-             // Start from parent's angle if linked, else current angle
-             let baseAngle = Math.atan2(childY, childX);
-             const parentId = parentOf.get(n.id);
-             if (parentId) {
-               const parent = existingById.get(parentId);
-               if (parent && typeof parent.x === 'number' && typeof parent.y === 'number') {
-                 baseAngle = Math.atan2(parent.y - cy, parent.x - cx);
-               }
-             }
-
-             // Apply type-based angular offset to spread groups apart
-             const offset = typeAngleOffset.get(n.type) ?? 0;
-             const targetAngle = baseAngle + offset;
-
-             const targetX = cx + Math.cos(targetAngle) * currentRadius;
-             const targetY = cy + Math.sin(targetAngle) * currentRadius;
-
-             n.vx! += (targetX - n.x!) * alpha * 0.1;
-             n.vy! += (targetY - n.y!) * alpha * 0.1;
-          }
-        });
-    } else {
-      // ── Horizontal grouping by type within each tier ──────────────
-      // Group types that share the same tier, then assign each group an
-      // evenly-spaced horizontal lane so they don't pile on the center.
-      const tierGroups = new Map<number, GraphNodeType[]>();
-      for (const [type, tier] of Object.entries(NODE_TIER)) {
-        const t = type as GraphNodeType;
-        if (t === 'DOCUMENT') continue; // documents have their own docXMap
-        if (!tierGroups.has(tier)) tierGroups.set(tier, []);
-        tierGroups.get(tier)!.push(t);
-      }
-      const typeLaneX = new Map<GraphNodeType, number>();
-      for (const [, types] of tierGroups) {
-        const count = types.length;
-        if (count === 1) {
-          typeLaneX.set(types[0], width / 2);
-        } else {
-          const margin = width * 0.15;
-          const span = width - margin * 2;
-          types.forEach((t, i) => {
-            typeLaneX.set(t, margin + (span * (i + 0.5)) / count);
-          });
-        }
-      }
-
-      simulation
-        .force('radial', null)
-        .force('angular', null)
-        .force('x', d3.forceX<SimNode>(d => {
-          if (d.type === 'DOCUMENT') return docXMap.get(d.id) || width / 2;
-          return typeLaneX.get(d.type) ?? width / 2;
-        }).strength(d => d.type === 'DOCUMENT' ? 1.0 : 0.3))
-        .force('y', d3.forceY<SimNode>(d => tierY(d.type)).strength(P.tierStrength));
     }
+    positionedRef.current = next;
+    linksRef.current = filteredEdges;
 
-    simulation.force('collision', d3.forceCollide<SimNode>(P.collisionRadius).iterations(1));
-
-    // ── Zoom-to-fit Camera Frame ────────────────────────
-    const runZoomToFit = () => {
-      if (initialFitDoneRef.current) return;
-      initialFitDoneRef.current = true;
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      mergedNodes.forEach(n => {
-        if (Number.isFinite(n.x) && Number.isFinite(n.y)) {
-          minX = Math.min(minX, n.x!); maxX = Math.max(maxX, n.x!);
-          minY = Math.min(minY, n.y!); maxY = Math.max(maxY, n.y!);
-        }
-      });
-      
-      const padding = 100;
-      const contentWidth = maxX - minX;
-      const contentHeight = maxY - minY;
-      
-      if (contentWidth > 0 && contentHeight > 0 && contentWidth < 100000) {
-        const scale = Math.max(0.05, Math.min(
-          width / (contentWidth + padding * 2),
-          height / (contentHeight + padding * 2),
-          1.5
-        ));
-        const cx = minX + contentWidth / 2;
-        const cy = minY + contentHeight / 2;
-        
-        const transform = d3.zoomIdentity
-          .translate(width / 2, height / 2)
-          .scale(scale)
-          .translate(-cx, -cy);
-          
-        d3.select(canvas).transition().duration(1200)
-          .call(zoom.transform, transform);
-      }
-    };
-
-    simulation.on('end', runZoomToFit);
-
-    // ── Canvas Render Loop ──────────────────────────────────────────
+    // ── Canvas render ───────────────────────────────────────────────
     const draw = () => {
       ctx.save();
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -627,49 +571,51 @@ export function KnowledgeGraph() {
 
       const isZoomedOut = transform.k < 0.4;
       const hoveredId = hoveredNodeIdRef.current;
+      const nodeById = new Map(positionedRef.current.map(n => [n.id, n]));
 
-      // Draw Edges
-      for (const link of mergedLinks) {
-        const source = link.source as SimNode;
-        const target = link.target as SimNode;
-        if (!source || !target || !Number.isFinite(source.x) || !Number.isFinite(target.x)) continue;
+      // Edges
+      for (const link of linksRef.current) {
+        const source = nodeById.get(link.source);
+        const target = nodeById.get(link.target);
+        if (!source || !target) continue;
 
         const isHighlighted = hoveredId && (source.id === hoveredId || target.id === hoveredId);
 
         ctx.beginPath();
-        ctx.moveTo(source.x!, source.y!);
-        ctx.lineTo(target.x!, target.y!);
+        ctx.moveTo(source.x, source.y);
+        ctx.lineTo(target.x, target.y);
 
         ctx.strokeStyle = (isHighlighted && hoveredId)
-          ? (source.id === hoveredId ? (NODE_CONFIG[source.type]?.color || '#fff') : (NODE_CONFIG[target.type]?.color || '#fff'))
+          ? (source.id === hoveredId
+              ? (NODE_CONFIG[source.type]?.color || '#fff')
+              : (NODE_CONFIG[target.type]?.color || '#fff'))
           : (EDGE_COLORS[link.relationship] || 'rgba(255,255,255,0.15)');
 
         ctx.lineWidth = isHighlighted ? 3 : Math.max(1, Math.min(3, (link.weight ?? 0.5) * 2));
         ctx.globalAlpha = isHighlighted ? 1 : Math.max(0.2, (link.confidence ?? 0.5));
         ctx.stroke();
 
-        // Arrowhead (simple triangle)
-        const dx = target.x! - source.x!;
-        const dy = target.y! - source.y!;
+        // Arrowhead
+        const dx = target.x - source.x;
+        const dy = target.y - source.y;
         const angle = Math.atan2(dy, dx);
         const dist = Math.sqrt(dx * dx + dy * dy);
-        
         if (dist > NODE_RADIUS) {
-          const targetX = target.x! - Math.cos(angle) * (NODE_RADIUS + 4);
-          const targetY = target.y! - Math.sin(angle) * (NODE_RADIUS + 4);
+          const ax = target.x - Math.cos(angle) * (NODE_RADIUS + 4);
+          const ay = target.y - Math.sin(angle) * (NODE_RADIUS + 4);
           ctx.beginPath();
-          ctx.moveTo(targetX, targetY);
-          ctx.lineTo(targetX - 7 * Math.cos(angle - Math.PI / 6), targetY - 7 * Math.sin(angle - Math.PI / 6));
-          ctx.lineTo(targetX - 7 * Math.cos(angle + Math.PI / 6), targetY - 7 * Math.sin(angle + Math.PI / 6));
+          ctx.moveTo(ax, ay);
+          ctx.lineTo(ax - 7 * Math.cos(angle - Math.PI / 6), ay - 7 * Math.sin(angle - Math.PI / 6));
+          ctx.lineTo(ax - 7 * Math.cos(angle + Math.PI / 6), ay - 7 * Math.sin(angle + Math.PI / 6));
           ctx.fillStyle = ctx.strokeStyle;
           ctx.globalAlpha = isHighlighted ? 1 : 0.4;
           ctx.fill();
         }
 
-        // Link Label
+        // Link label
         if ((!isZoomedOut || isHighlighted) && dist > 40) {
-          const midX = (source.x! + target.x!) / 2;
-          const midY = (source.y! + target.y!) / 2;
+          const midX = (source.x + target.x) / 2;
+          const midY = (source.y + target.y) / 2;
           ctx.font = '9px var(--font-mono, monospace)';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
@@ -679,36 +625,32 @@ export function KnowledgeGraph() {
         }
       }
 
-      // Draw Nodes
-      for (const node of mergedNodes) {
-        if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) continue;
+      // Nodes
+      for (const node of positionedRef.current) {
         const isHovered = node.id === hoveredId;
 
-        // Base color
         let color = NODE_CONFIG[node.type]?.color || '#666';
         if (node.type === 'ALLOCATION' && node.meta?.status) {
           color = ALLOCATION_STATUS_COLORS[node.meta.status as string] || color;
         }
 
-        const currentRadius = isHovered ? NODE_RADIUS + 4 : NODE_RADIUS;
+        const r = isHovered ? NODE_RADIUS + 4 : NODE_RADIUS;
 
-        // Circle fill
         ctx.beginPath();
-        ctx.arc(node.x!, node.y!, currentRadius, 0, 2 * Math.PI);
+        ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
         ctx.fillStyle = color;
         ctx.globalAlpha = isHovered ? 0.6 : 0.2;
         ctx.fill();
 
-        // Circle stroke
         ctx.globalAlpha = 1;
         ctx.lineWidth = 2;
         ctx.strokeStyle = color;
         ctx.stroke();
 
         // Pin ring
-        if (node.fx != null && node.fy != null) {
+        if (node.pinned) {
           ctx.beginPath();
-          ctx.arc(node.x!, node.y!, currentRadius + 5, 0, 2 * Math.PI);
+          ctx.arc(node.x, node.y, r + 5, 0, 2 * Math.PI);
           ctx.setLineDash([3, 3]);
           ctx.strokeStyle = 'rgba(255,255,255,0.4)';
           ctx.lineWidth = 1.5;
@@ -721,18 +663,17 @@ export function KnowledgeGraph() {
         ctx.font = '16px system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(NODE_CONFIG[node.type]?.icon || '●', node.x!, node.y!);
+        ctx.fillText(NODE_CONFIG[node.type]?.icon || '●', node.x, node.y);
 
-        // Text Labels (LOD)
+        // Labels (LOD)
         if (!isZoomedOut || isHovered) {
           ctx.fillStyle = 'rgba(255,255,255,0.9)';
           ctx.font = '500 11px system-ui, sans-serif';
-          ctx.fillText(truncateLabel(node.label, 20), node.x!, node.y! + NODE_RADIUS + 14);
-
+          ctx.fillText(truncateLabel(node.label, 20), node.x, node.y + NODE_RADIUS + 14);
           if (node.sublabel) {
             ctx.fillStyle = 'rgba(255,255,255,0.5)';
             ctx.font = '9px system-ui, sans-serif';
-            ctx.fillText(node.sublabel, node.x!, node.y! + NODE_RADIUS + 26);
+            ctx.fillText(node.sublabel, node.x, node.y + NODE_RADIUS + 26);
           }
         }
       }
@@ -740,64 +681,132 @@ export function KnowledgeGraph() {
       ctx.restore();
     };
 
-    simulation.on('tick', draw);
-    draw();
+    // ── Animation: lerp current → target until settled ──────────────
+    const EASING = 0.18;
+    const SETTLED_EPSILON = 0.3;
+    const tick = () => {
+      let moving = false;
+      for (const n of positionedRef.current) {
+        if (n.pinned) continue;
+        const dx = n.tx - n.x;
+        const dy = n.ty - n.y;
+        if (Math.abs(dx) < SETTLED_EPSILON && Math.abs(dy) < SETTLED_EPSILON) {
+          n.x = n.tx; n.y = n.ty;
+          continue;
+        }
+        n.x += dx * EASING;
+        n.y += dy * EASING;
+        moving = true;
+      }
+      draw();
+      if (moving || isDraggingRef.current) {
+        rafRef.current = requestAnimationFrame(tick);
+      } else {
+        rafRef.current = null;
+      }
+    };
+    const ensureTicking = () => {
+      if (rafRef.current == null) rafRef.current = requestAnimationFrame(tick);
+    };
+    ensureTicking();
 
-    // ── Setup Interactivity (Zoom, Pan, Drag, Hover) ───────────────
-    
+    // ── Zoom-to-fit on first non-empty render ──────────────────────
+    const fit = () => {
+      if (initialFitDoneRef.current) return;
+      if (positionedRef.current.length === 0) return;
+      initialFitDoneRef.current = true;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const n of positionedRef.current) {
+        minX = Math.min(minX, n.tx); maxX = Math.max(maxX, n.tx);
+        minY = Math.min(minY, n.ty); maxY = Math.max(maxY, n.ty);
+      }
+      const padding = 80;
+      const cw = maxX - minX;
+      const ch = maxY - minY;
+      if (cw > 0 && ch > 0) {
+        const scale = Math.max(0.05, Math.min(
+          width / (cw + padding * 2),
+          height / (ch + padding * 2),
+          1.5,
+        ));
+        const cx = minX + cw / 2;
+        const cy = minY + ch / 2;
+        const t = d3.zoomIdentity.translate(width / 2, height / 2).scale(scale).translate(-cx, -cy);
+        d3.select(canvas).transition().duration(600).call(zoom.transform, t);
+      }
+    };
+    // Fit once the first real layout has been computed
+    requestAnimationFrame(fit);
+
+    // ── Interactivity: zoom, drag, hover, click ────────────────────
     const d3Canvas = d3.select(canvas);
 
-    // 1. Drag Behavior (MUST BE REGISTERED BEFORE ZOOM TO CATCH POINTER EVENTS)
+    const findNodeAt = (mx: number, my: number): PositionedNode | null => {
+      const x = zoomTransformRef.current.invertX(mx);
+      const y = zoomTransformRef.current.invertY(my);
+      const threshold = NODE_RADIUS * 1.5;
+      let best: PositionedNode | null = null;
+      let bestDist = threshold;
+      for (const n of positionedRef.current) {
+        const dx = n.x - x;
+        const dy = n.y - y;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d < bestDist) { best = n; bestDist = d; }
+      }
+      return best;
+    };
+
+    let dragTarget: PositionedNode | null = null;
+    let wasDragged = false;
+
     d3Canvas.call(d3.drag<HTMLCanvasElement, unknown>()
       .subject((e) => {
         const [mx, my] = d3.pointer(e, canvas);
-        const x = zoomTransformRef.current.invertX(mx);
-        const y = zoomTransformRef.current.invertY(my);
-        return simulation.find(x, y, NODE_RADIUS * 1.5);
+        dragTarget = findNodeAt(mx, my);
+        return dragTarget ?? undefined;
       })
-      .on('start', (e) => {
-        if (!e.active) simulation.alphaTarget(0.05).restart();
-        e.subject.fx = e.subject.x;
-        e.subject.fy = e.subject.y;
+      .on('start', () => {
+        if (!dragTarget) return;
+        dragTarget.pinned = true;
         isDraggingRef.current = true;
+        ensureTicking();
       })
       .on('drag', (e) => {
+        if (!dragTarget) return;
         wasDragged = true;
-        e.subject.fx = e.x;
-        e.subject.fy = e.y;
+        // Read the pointer directly in canvas (screen) space, then invert once
+        // through the zoom transform to get world coords. Using e.x/e.y mixes
+        // coordinate systems because the subject returned world coords.
+        const [mx, my] = d3.pointer(e, canvas);
+        const x = zoomTransformRef.current.invertX(mx);
+        const y = zoomTransformRef.current.invertY(my);
+        dragTarget.x = x; dragTarget.y = y;
+        // Intentionally DO NOT change tx/ty — that way unpinning snaps back to layout.
         draw();
       })
-      .on('end', (e) => {
-        if (!e.active) simulation.alphaTarget(0);
+      .on('end', () => {
         isDraggingRef.current = false;
-      })
+        dragTarget = null;
+      }),
     );
 
-    // 2. Zoom
     const zoom = d3.zoom<HTMLCanvasElement, unknown>()
-      .scaleExtent([0.1, 4])
+      .scaleExtent([0.05, 4])
       .on('zoom', (e) => {
         zoomTransformRef.current = e.transform;
         draw();
       });
-    
+    zoomRef.current = zoom;
     d3Canvas.call(zoom);
 
-    // Initial Zoom-to-fit was moved to run *after* tickChunk finishes
-
-    // 3. Mouse Hit-Testing
     d3Canvas.on('mousemove', (e) => {
       if (isDraggingRef.current) return;
       const [mx, my] = d3.pointer(e, canvas);
-      const x = zoomTransformRef.current.invertX(mx);
-      const y = zoomTransformRef.current.invertY(my);
-      
-      const node = simulation.find(x, y, NODE_RADIUS * 1.5);
-      const newHoverId = node ? node.id : null;
-      
-      if (newHoverId !== hoveredNodeIdRef.current) {
-        hoveredNodeIdRef.current = newHoverId;
-        canvas.style.cursor = newHoverId ? 'pointer' : 'grab';
+      const node = findNodeAt(mx, my);
+      const newId = node?.id ?? null;
+      if (newId !== hoveredNodeIdRef.current) {
+        hoveredNodeIdRef.current = newId;
+        canvas.style.cursor = newId ? 'pointer' : 'grab';
         draw();
       }
     });
@@ -810,44 +819,45 @@ export function KnowledgeGraph() {
       }
     });
 
-    // 4. Click / Double-Click
     let clickTimeout: ReturnType<typeof setTimeout> | null = null;
-    let wasDragged = false;
-    
-    d3Canvas.on('click', (e) => {
+    d3Canvas.on('click', () => {
       if (wasDragged) { wasDragged = false; return; }
       const hoveredId = hoveredNodeIdRef.current;
       const node = nodesRef.current.find(n => n.id === hoveredId) || null;
-      
       if (clickTimeout) clearTimeout(clickTimeout);
       clickTimeout = setTimeout(() => {
         requestAnimationFrame(() => setSelectedNode(node));
-      }, 250); 
+      }, 250);
     });
 
-    d3Canvas.on('dblclick', (e) => {
+    d3Canvas.on('dblclick', () => {
       if (clickTimeout) clearTimeout(clickTimeout);
       const hoveredId = hoveredNodeIdRef.current;
-      const node = mergedNodes.find(n => n.id === hoveredId);
-      if (node) {
-        node.fx = null;
-        node.fy = null;
-        simulation.alpha(0.1).restart();
-        draw();
+      const n = positionedRef.current.find(nn => nn.id === hoveredId);
+      if (n) {
+        // Unpin: snap back to layout target via animation
+        n.pinned = false;
+        ensureTicking();
       }
     });
 
-    // No teardown — simulation persists across re-renders
-  }, [filteredNodes, filteredEdges, layoutMode, atoDay]);
-
-  // ── Cleanup simulation on unmount ───────────────────────────────────
-  useEffect(() => {
     return () => {
-      simulationRef.current?.stop();
+      if (rafRef.current != null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
     };
+  }, [filteredNodes, filteredEdges, layoutMode, atoDay, layoutVersion]);
+
+  // Reset initial-fit flag when the scenario or layout mode changes
+  useEffect(() => { initialFitDoneRef.current = false; }, [activeScenarioId, layoutMode]);
+
+  const relayout = useCallback(() => {
+    for (const n of positionedRef.current) n.pinned = false;
+    setLayoutVersion(v => v + 1);
   }, []);
 
-  // ─── Empty States ──────────────────────────────────────────────────────
+  // ─── Empty States ────────────────────────────────────────────────────
 
   if (!activeScenarioId) {
     return (
@@ -859,7 +869,6 @@ export function KnowledgeGraph() {
     );
   }
 
-  // No document/priority/mission nodes — only raw ORBAT data
   const hasRelationshipNodes = nodes.some(n => CORE_TYPES.has(n.type));
 
   if (!loading && nodes.length > 0 && !hasRelationshipNodes) {
@@ -878,11 +887,11 @@ export function KnowledgeGraph() {
     );
   }
 
-  // ─── Render ──────────────────────────────────────────────────────────────
+  // ─── Render ──────────────────────────────────────────────────────────
 
   return (
     <div className="kg-page">
-      {/* ─── Header Bar ─────────────────────────────────────────────── */}
+      {/* Header */}
       <div className="kg-header">
         <div className="kg-header__title">
           <span className="kg-header__icon">🔬</span>
@@ -896,62 +905,41 @@ export function KnowledgeGraph() {
               <button
                 className={`kg-refresh-btn ${orbatMode === 'off' ? 'active' : ''}`}
                 onClick={() => setOrbatMode('off')}
-                title="Only show Core Nodes (Documents, Missions, Targets)"
+                title="Only show Core Nodes"
                 style={orbatMode === 'off' ? { background: 'var(--accent-primary)', color: '#000' } : { border: 'none' }}
-              >
-                ORBAT: Off
-              </button>
+              >ORBAT: Off</button>
               <button
                 className={`kg-refresh-btn ${orbatMode === 'active' ? 'active' : ''}`}
                 onClick={() => setOrbatMode('active')}
                 title="Show ORBAT units attached to active operations"
                 style={orbatMode === 'active' ? { background: 'var(--accent-primary)', color: '#000' } : { border: 'none' }}
-              >
-                Active
-              </button>
+              >Active</button>
               <button
                 className={`kg-refresh-btn ${orbatMode === 'all' ? 'active' : ''}`}
                 onClick={() => setOrbatMode('all')}
-                title={`Show all ${orbatCount} ORBAT nodes in database`}
+                title={`Show all ${orbatCount} ORBAT nodes`}
                 style={orbatMode === 'all' ? { background: 'var(--accent-primary)', color: '#000' } : { border: 'none' }}
-              >
-                All
-              </button>
+              >All</button>
             </div>
           )}
           <div style={{ display: 'flex', gap: '2px', background: 'var(--bg-tertiary)', padding: '2px', borderRadius: '4px', marginLeft: '8px' }}>
             <button
-               className={`kg-refresh-btn ${layoutMode === 'hierarchy' ? 'active' : ''}`}
-               onClick={() => setLayoutMode('hierarchy')}
-               style={layoutMode === 'hierarchy' ? { background: 'var(--accent-primary)', color: '#000' } : { border: 'none' }}
-            >
-              Hierarchy
-            </button>
-             <button
-               className={`kg-refresh-btn ${layoutMode === 'radial' ? 'active' : ''}`}
-               onClick={() => setLayoutMode('radial')}
-               style={layoutMode === 'radial' ? { background: 'var(--accent-primary)', color: '#000' } : { border: 'none' }}
-            >
-              Radial
-            </button>
+              className={`kg-refresh-btn ${layoutMode === 'hierarchy' ? 'active' : ''}`}
+              onClick={() => setLayoutMode('hierarchy')}
+              style={layoutMode === 'hierarchy' ? { background: 'var(--accent-primary)', color: '#000' } : { border: 'none' }}
+            >Hierarchy</button>
+            <button
+              className={`kg-refresh-btn ${layoutMode === 'radial' ? 'active' : ''}`}
+              onClick={() => setLayoutMode('radial')}
+              style={layoutMode === 'radial' ? { background: 'var(--accent-primary)', color: '#000' } : { border: 'none' }}
+            >Radial</button>
           </div>
-          <button 
+          <button
             className="kg-refresh-btn"
-            onPointerDown={() => {
-              if (simulationRef.current) {
-                // User asked to unpin nodes on settle
-                simulationRef.current.nodes().forEach(n => { n.fx = null; n.fy = null; });
-                simulationRef.current.alphaTarget(0.15).restart();
-              }
-            }}
-            onPointerUp={() => simulationRef.current?.alphaTarget(0)}
-            onPointerLeave={() => simulationRef.current?.alphaTarget(0)}
-            onPointerCancel={() => simulationRef.current?.alphaTarget(0)}
-            title="Hold to actively bounce and settle the graph physics. Automatically unpins nodes."
+            onClick={relayout}
+            title="Unpin dragged nodes and snap back to layout"
             style={{ marginLeft: '8px', border: '1px solid var(--border)' }}
-          >
-            ✧ Settle
-          </button>
+          >↺ Relayout</button>
           <button className="kg-refresh-btn" onClick={fetchGraph} disabled={loading}>
             {loading ? '⟳' : '↻'} Refresh
           </button>
@@ -976,7 +964,7 @@ export function KnowledgeGraph() {
         </div>
       </div>
 
-      {/* ─── Legend ──────────────────────────────────────────────────── */}
+      {/* Legend */}
       <div className="kg-legend">
         {Object.entries(NODE_CONFIG)
           .filter(([type]) => orbatMode !== 'off' || CORE_TYPES.has(type as GraphNodeType))
@@ -989,7 +977,7 @@ export function KnowledgeGraph() {
           ))}
       </div>
 
-      {/* ─── Graph Canvas ───────────────────────────────────────────── */}
+      {/* Canvas */}
       <div className="kg-canvas" ref={containerRef}>
         {error && (
           <div className="kg-error">
@@ -1004,32 +992,20 @@ export function KnowledgeGraph() {
           </div>
         )}
         <canvas ref={canvasRef} className="kg-canvas-element" style={{ display: 'block', width: '100%', height: '100%' }} />
-
-
       </div>
 
-      {/* ─── Detail Sidebar ─────────────────────────────────────────── */}
+      {/* Sidebar */}
       {selectedNode && (
         <div className="kg-sidebar">
           <div className="kg-sidebar__header">
-            <span className="kg-sidebar__icon">
-              {NODE_CONFIG[selectedNode.type]?.icon || '●'}
-            </span>
+            <span className="kg-sidebar__icon">{NODE_CONFIG[selectedNode.type]?.icon || '●'}</span>
             <h3>{selectedNode.label}</h3>
-            <button
-              className="kg-sidebar__close"
-              onClick={() => setSelectedNode(null)}
-            >
-              ✕
-            </button>
+            <button className="kg-sidebar__close" onClick={() => setSelectedNode(null)}>✕</button>
           </div>
           <div className="kg-sidebar__body">
             <div className="kg-detail-row">
               <span className="kg-detail-label">Type</span>
-              <span
-                className="kg-detail-badge"
-                style={{ backgroundColor: NODE_CONFIG[selectedNode.type]?.color }}
-              >
+              <span className="kg-detail-badge" style={{ backgroundColor: NODE_CONFIG[selectedNode.type]?.color }}>
                 {formatType(selectedNode.type)}
               </span>
             </div>
@@ -1047,7 +1023,6 @@ export function KnowledgeGraph() {
                 </span>
               </div>
             ))}
-            {/* Connected edges */}
             <div className="kg-detail-section">
               <h4>Connections</h4>
               {edges
@@ -1058,9 +1033,7 @@ export function KnowledgeGraph() {
                   const otherNode = nodes.find(n => n.id === otherId);
                   return (
                     <div key={i} className="kg-connection">
-                      <span className="kg-connection__dir">
-                        {isSource ? '→' : '←'}
-                      </span>
+                      <span className="kg-connection__dir">{isSource ? '→' : '←'}</span>
                       <span className="kg-connection__rel">{e.relationship}</span>
                       <span className="kg-connection__target">
                         {otherNode?.label || otherId.slice(0, 8)}
@@ -1073,13 +1046,10 @@ export function KnowledgeGraph() {
         </div>
       )}
 
-      {/* ─── Ingest Activity Overlay ────────────────────────────────── */}
+      {/* Ingest Overlay */}
       {activeCards.length > 0 && (
         <div className="kg-ingest-overlay">
-          <div
-            className="kg-ingest-pill"
-            onClick={() => setOverlayExpanded(!overlayExpanded)}
-          >
+          <div className="kg-ingest-pill" onClick={() => setOverlayExpanded(!overlayExpanded)}>
             <span className="kg-ingest-pill__dot" />
             📥 Processing {activeCards.length} doc{activeCards.length !== 1 ? 's' : ''}
             <span className={`kg-ingest-pill__chevron ${overlayExpanded ? 'expanded' : ''}`}>▼</span>
@@ -1097,7 +1067,7 @@ export function KnowledgeGraph() {
   );
 }
 
-// ─── Ingest Card Mini ─────────────────────────────────────────────────────────
+// ─── Ingest Card Mini ──────────────────────────────────────────────────────
 
 const DOC_TYPE_ICONS: Record<string, string> = {
   FRAGORD: '⚡', ATO: '✈️', MTO: '🚢', STO: '🛰️',
@@ -1133,7 +1103,7 @@ function IngestCardMini({ card }: { card: IngestCard }) {
   );
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────
 
 function truncateLabel(label: string | undefined | null, max: number): string {
   if (!label) return '';
@@ -1146,8 +1116,5 @@ function formatType(type: string): string {
 }
 
 function formatMetaKey(key: string): string {
-  return key
-    .replace(/([A-Z])/g, ' $1')
-    .replace(/^./, s => s.toUpperCase())
-    .trim();
+  return key.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()).trim();
 }
