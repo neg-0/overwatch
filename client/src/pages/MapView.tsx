@@ -1,5 +1,5 @@
 import mapboxgl from 'mapbox-gl';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useOverwatchStore } from '../store/overwatch-store';
 import type { BaseData, UnitPosition } from '../store/overwatch-store';
 
@@ -288,6 +288,17 @@ function MapViewInner() {
   const animFrameRef = useRef<number>(0);
 
   const { positions, activeScenarioId, simulation, bases, coverageWindows, unitPositions } = useOverwatchStore();
+
+  // Pre-parse coverage window timestamps so the per-tick filter does numeric
+  // compares instead of constructing Date objects N times every scrub.
+  const parsedCoverageWindows = useMemo(
+    () => coverageWindows.map(cw => ({
+      cw,
+      startMs: new Date(cw.start).getTime(),
+      endMs: new Date(cw.end).getTime(),
+    })),
+    [coverageWindows],
+  );
   const [activeDomains, setActiveDomains] = useState<Set<string>>(new Set(['AIR', 'MARITIME', 'LAND', 'SPACE']));
   const [affiliation, setAffiliation] = useState<'ALL' | 'FRIENDLY' | 'HOSTILE'>('ALL');
   const [routes, setRoutes] = useState<MissionRoute[]>([]);
@@ -750,10 +761,22 @@ function MapViewInner() {
       return;
     }
 
+    // Only render coverage windows whose AOS/LOS span the current sim time —
+    // otherwise old/future windows accumulate and obscure the map. When sim
+    // is idle (no simTime), hide all footprints rather than show stale data.
+    const nowMs = simulation.simTime ? new Date(simulation.simTime).getTime() : null;
+    if (nowMs == null) {
+      if (map.getLayer(`${sourceId}-fill`)) map.removeLayer(`${sourceId}-fill`);
+      if (map.getLayer(`${sourceId}-outline`)) map.removeLayer(`${sourceId}-outline`);
+      if (map.getSource(sourceId)) map.removeSource(sourceId);
+      return;
+    }
+
     // Build GeoJSON circles from coverage windows
-    const features: GeoJSON.Feature[] = coverageWindows
-      .filter(cw => cw.lat != null && cw.lon != null)
-      .map(cw => {
+    const features: GeoJSON.Feature[] = parsedCoverageWindows
+      .filter(({ cw }) => cw.lat != null && cw.lon != null)
+      .filter(({ startMs, endMs }) => startMs <= nowMs && nowMs <= endMs)
+      .map(({ cw }) => {
         const color = COVERAGE_COLORS[cw.capability] || '#6366f1';
         // Create a circle polygon (approximation with 32 points)
         const radiusDeg = 5; // ~5 degrees ≈ 550 km visual footprint
@@ -793,7 +816,7 @@ function MapViewInner() {
         source: sourceId,
         paint: {
           'fill-color': ['get', 'color'],
-          'fill-opacity': 0.08,
+          'fill-opacity': 0.04,
         },
       });
       map.addLayer({
@@ -803,12 +826,12 @@ function MapViewInner() {
         paint: {
           'line-color': ['get', 'color'],
           'line-width': 1,
-          'line-opacity': 0.3,
+          'line-opacity': 0.18,
           'line-dasharray': [2, 2],
         },
       });
     }
-  }, [coverageWindows, showCoverage]);
+  }, [parsedCoverageWindows, showCoverage, simulation.simTime]);
 
   // ─── Update Breadcrumb Trails ───────────────────────────────────────────────
 
@@ -837,11 +860,22 @@ function MapViewInner() {
 
       if (!isValidCoord) return;
 
-      // Accumulate trail points with sim-time timestamps
-      const posSimMs = (pos as any).timestamp ? new Date((pos as any).timestamp).getTime() : Date.now();
-      const trail = trailsRef.current.get(missionId) || [];
+      // Accumulate trail points with sim-time timestamps. Fall back to the
+      // current sim clock (NOT Date.now()) so we never mix wall-clock and
+      // simulation time in the same comparison.
+      const posTs = (pos as any).timestamp;
+      const fallbackSimMs = simulation.simTime ? new Date(simulation.simTime).getTime() : null;
+      const posSimMs = posTs ? new Date(posTs).getTime() : fallbackSimMs;
+      if (posSimMs == null) return;
+      let trail = trailsRef.current.get(missionId) || [];
       const lastPoint = trail[trail.length - 1];
-      if (!lastPoint || lastPoint.lon !== pos.longitude || lastPoint.lat !== pos.latitude) {
+      // Drop the trail if sim-time moved backward (user scrubbed back) — otherwise
+      // the trail would render a phantom "future" tail attached to the new position.
+      if (lastPoint && posSimMs < lastPoint.simMs) {
+        trail = [];
+      }
+      const newLast = trail[trail.length - 1];
+      if (!newLast || newLast.lon !== pos.longitude || newLast.lat !== pos.latitude) {
         trail.push({ lon: pos.longitude, lat: pos.latitude, simMs: posSimMs });
       }
 
@@ -888,7 +922,7 @@ function MapViewInner() {
         });
       }
     });
-  }, [positions, activeDomains, showTracks]);
+  }, [positions, activeDomains, showTracks, simulation.simTime]);
 
   // ─── Update Markers + Trails from Positions ─────────────────────────────────
 
