@@ -965,6 +965,10 @@ function TimeAxisHeader({ periodStartMs, periodDurMs, maxAtoDay, atoPeriod }: Ti
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 16;
+const SIDEBAR_PX = 280;
+
 export function GanttView() {
   const activeScenarioId = useOverwatchStore((s) => s.activeScenarioId);
   const simulation = useOverwatchStore((s) => s.simulation);
@@ -983,16 +987,12 @@ export function GanttView() {
   const [viewportWidth, setViewportWidth] = useState(900);
   const [zoomLevel, setZoomLevel] = useState(1);
 
-  const MIN_ZOOM = 1;
-  const MAX_ZOOM = 16;
-  const SIDEBAR_PX = 280;
-
   // Measure the available width (outer wrapper, no overflow → no scrollbar feedback)
   useEffect(() => {
     const el = wrapperRef.current;
     if (!el) return;
     const ro = new ResizeObserver(entries => {
-      for (const entry of entries) setViewportWidth(entry.contentRect.width);
+      if (entries[0]) setViewportWidth(entries[0].contentRect.width);
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -1025,7 +1025,7 @@ export function GanttView() {
 
       setZoomLevel(newZoom);
       requestAnimationFrame(() => {
-        el.scrollLeft = Math.max(0, newScrollLeft);
+        if (el) el.scrollLeft = Math.max(0, newScrollLeft);
       });
     };
     el.addEventListener('wheel', handler, { passive: false });
@@ -1053,7 +1053,7 @@ export function GanttView() {
 
     setZoomLevel(newZoom);
     requestAnimationFrame(() => {
-      el.scrollLeft = Math.max(0, newScrollLeft);
+      if (el) el.scrollLeft = Math.max(0, newScrollLeft);
     });
   }, [viewportWidth, zoomLevel]);
 
