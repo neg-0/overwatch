@@ -465,8 +465,62 @@ describe('allocateSpaceResources', () => {
     expect(report.contentions).toHaveLength(1);
     expect(report.contentions[0].competitors).toHaveLength(2);
 
-    expect(report.allocations.find(a => a.spaceNeedId === 'sn-high')?.status).toBe('FULFILLED');
-    expect(report.allocations.find(a => a.spaceNeedId === 'sn-low')?.status).toBe('FULFILLED');
+    const highAlloc = report.allocations.find(a => a.spaceNeedId === 'sn-high');
+    const lowAlloc = report.allocations.find(a => a.spaceNeedId === 'sn-low');
+    expect(highAlloc?.status).toBe('FULFILLED');
+    expect(lowAlloc?.status).toBe('FULFILLED');
+
+    // Both allocations should carry the contention group ID so downstream
+    // analysis can link them back to the contention event.
+    const groupId = report.contentions[0].contentionGroup;
+    expect(highAlloc?.contentionGroup).toBe(groupId);
+    expect(lowAlloc?.contentionGroup).toBe(groupId);
+
+    // And the persisted rows must include the contentionGroup field too.
+    const writes = [
+      ...mockSpaceAllocationCreate.mock.calls.map(c => c[0].data),
+      ...mockSpaceAllocationUpdate.mock.calls.map(c => c[0].data),
+    ];
+    expect(writes.every(w => w.contentionGroup === groupId)).toBe(true);
+  });
+
+  it('skip-when-current: re-running with up-to-date allocations does not issue DB writes', async () => {
+    // First pass: no existing allocations — should create.
+    mockTaskingOrderFindMany.mockResolvedValue(makeOrder([
+      makeNeed({ id: 'sn-1', capabilityType: 'SATCOM_WIDEBAND' }),
+    ]));
+    mockSpaceAssetFindMany.mockResolvedValue([
+      { id: 'sat-wgs-1', name: 'WGS-7', constellation: 'WGS', capabilities: ['SATCOM_WIDEBAND'], status: 'OPERATIONAL' },
+    ]);
+
+    await allocateSpaceResources('scn-1', 1);
+    expect(mockSpaceAllocationCreate).toHaveBeenCalledTimes(1);
+    expect(mockSpaceAllocationUpdate).toHaveBeenCalledTimes(0);
+
+    // Second pass: pretend the previous allocation is now persisted on the need.
+    // The decision is identical, so neither create nor update should fire.
+    mockSpaceAllocationCreate.mockClear();
+    mockSpaceAllocationUpdate.mockClear();
+    mockTaskingOrderFindMany.mockResolvedValue(makeOrder([
+      {
+        ...makeNeed({ id: 'sn-1', capabilityType: 'SATCOM_WIDEBAND' }),
+        allocations: [{
+          id: 'alloc-existing',
+          spaceNeedId: 'sn-1',
+          status: 'FULFILLED',
+          allocatedCapability: 'SATCOM_WIDEBAND',
+          spaceAssetId: 'sat-wgs-1',
+          rationale: 'Allocated WGS-7 (SATCOM_WIDEBAND, operational)',
+          riskLevel: 'LOW',
+          contentionGroup: null,
+        }],
+      },
+    ]));
+
+    const report = await allocateSpaceResources('scn-1', 1);
+    expect(mockSpaceAllocationCreate).toHaveBeenCalledTimes(0);
+    expect(mockSpaceAllocationUpdate).toHaveBeenCalledTimes(0);
+    expect(report.summary.fulfilled).toBe(1);
   });
 
   it('exclusive: both needs DENIED when no operational asset has the capability', async () => {

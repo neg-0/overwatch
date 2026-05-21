@@ -319,6 +319,36 @@ export async function allocateSpaceResources(
     status: a.status,
   }));
 
+  // ─── Contention groups: compute first so each allocation can carry the group ID ─
+  // For EXCLUSIVE capabilities, surface where multiple missions are sharing the
+  // same capability/time so planners can see asset load. Does not deny.
+  const exclusiveNeeds = allNeeds.filter(e => CAPABILITY_CLASS[e.need.capabilityType] === 'EXCLUSIVE');
+  const contentionGroups = detectContentionGroups(exclusiveNeeds);
+  const needToContentionGroup = new Map<string, string>();
+  const contentionEvents: ContentionEvent[] = [];
+  for (const group of contentionGroups) {
+    if (group.needs.length < 2) continue;
+    const groupId = `CONT-${group.capability}-${group.needs.map(n => n.need.id.slice(0, 8)).sort().join('-')}`;
+    for (const e of group.needs) needToContentionGroup.set(e.need.id, groupId);
+    contentionEvents.push({
+      contentionGroup: groupId,
+      capability: group.capability,
+      timeStart: group.timeStart.toISOString(),
+      timeEnd: group.timeEnd.toISOString(),
+      competitors: group.needs.map(e => ({
+        spaceNeedId: e.need.id,
+        missionId: e.mission.missionId,
+        callsign: e.mission.callsign ?? null,
+        priority: e.need.priority,
+        missionCriticality: e.need.missionCriticality ?? 'ESSENTIAL',
+        tracedPriorityRank: e.need.priorityEntry?.strategyPriority?.rank ?? null,
+        fallbackCapability: e.need.fallbackCapability ?? null,
+        riskIfDenied: e.need.riskIfDenied ?? null,
+      })),
+      resolution: `${group.needs.length} missions sharing ${group.capability} during overlapping window`,
+    });
+  }
+
   const allocationResults: AllocationReport['allocations'] = [];
 
   // ─── Per-need allocation ──────────────────────────────────────────────────
@@ -340,7 +370,32 @@ export async function allocateSpaceResources(
       decision = decide(need, match);
     }
 
+    const contentionGroup = needToContentionGroup.get(need.id) ?? null;
     const existing = need.allocations[0];
+
+    // Skip the DB write when the existing row is already current — keeps
+    // the auto-heal path in the timeline endpoint cheap (no-op on warm reads).
+    if (
+      existing &&
+      existing.status === decision.status &&
+      existing.allocatedCapability === decision.allocatedCapability &&
+      existing.spaceAssetId === decision.spaceAssetId &&
+      existing.rationale === decision.rationale &&
+      existing.riskLevel === decision.riskLevel &&
+      (existing.contentionGroup ?? null) === contentionGroup
+    ) {
+      allocationResults.push({
+        id: existing.id,
+        spaceNeedId: existing.spaceNeedId,
+        status: existing.status,
+        allocatedCapability: existing.allocatedCapability,
+        rationale: existing.rationale,
+        riskLevel: existing.riskLevel,
+        contentionGroup,
+      });
+      continue;
+    }
+
     const allocation = existing
       ? await prisma.spaceAllocation.update({
           where: { id: existing.id },
@@ -350,6 +405,7 @@ export async function allocateSpaceResources(
             spaceAssetId: decision.spaceAssetId,
             rationale: decision.rationale,
             riskLevel: decision.riskLevel,
+            contentionGroup,
           },
         })
       : await prisma.spaceAllocation.create({
@@ -360,6 +416,7 @@ export async function allocateSpaceResources(
             spaceAssetId: decision.spaceAssetId,
             rationale: decision.rationale,
             riskLevel: decision.riskLevel,
+            contentionGroup,
           },
         });
 
@@ -370,35 +427,7 @@ export async function allocateSpaceResources(
       allocatedCapability: allocation.allocatedCapability,
       rationale: allocation.rationale,
       riskLevel: allocation.riskLevel,
-      contentionGroup: null,
-    });
-  }
-
-  // ─── Contention reporting (informational only) ────────────────────────────
-  // For EXCLUSIVE capabilities, surface where multiple missions are sharing the
-  // same capability/time so planners can see asset load. Does not deny.
-  const exclusiveNeeds = allNeeds.filter(e => CAPABILITY_CLASS[e.need.capabilityType] === 'EXCLUSIVE');
-  const contentionGroups = detectContentionGroups(exclusiveNeeds);
-  const contentionEvents: ContentionEvent[] = [];
-  for (const group of contentionGroups) {
-    if (group.needs.length < 2) continue;
-    const groupId = `CONT-${group.capability}-${group.needs.map(n => n.need.id.slice(0, 8)).sort().join('-')}`;
-    contentionEvents.push({
-      contentionGroup: groupId,
-      capability: group.capability,
-      timeStart: group.timeStart.toISOString(),
-      timeEnd: group.timeEnd.toISOString(),
-      competitors: group.needs.map(e => ({
-        spaceNeedId: e.need.id,
-        missionId: e.mission.missionId,
-        callsign: e.mission.callsign ?? null,
-        priority: e.need.priority,
-        missionCriticality: e.need.missionCriticality ?? 'ESSENTIAL',
-        tracedPriorityRank: e.need.priorityEntry?.strategyPriority?.rank ?? null,
-        fallbackCapability: e.need.fallbackCapability ?? null,
-        riskIfDenied: e.need.riskIfDenied ?? null,
-      })),
-      resolution: `${group.needs.length} missions sharing ${group.capability} during overlapping window`,
+      contentionGroup: allocation.contentionGroup,
     });
   }
 
