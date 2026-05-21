@@ -194,10 +194,13 @@ function computeHeatmapForAsset(
     const activeMissions: TimelineMission[] = [];
 
     for (const m of missions) {
-      // Match by direct allocation name OR by systemName matching constellation
+      // When a dep has been allocated to a specific asset, only that asset row should
+      // reflect it. Fall back to constellation-level systemName matching only for
+      // unallocated deps, so a single mission doesn't light up an entire constellation.
       const deps = m.spaceDependencies.filter(d =>
-        d.allocatedTo === asset.name ||
-        (d.systemName && d.systemName === asset.constellation)
+        d.allocatedTo
+          ? d.allocatedTo === asset.name
+          : (d.systemName && d.systemName === asset.constellation)
       );
       if (deps.length === 0) continue;
       const isActive = deps.some(d => {

@@ -7,35 +7,36 @@ timelineRoutes.get('/:scenarioId', async (req, res) => {
   try {
     const { scenarioId } = req.params;
 
-    const missions = await prisma.mission.findMany({
-      where: { package: { taskingOrder: { scenarioId } } },
-      include: {
-        unit: true,
-        timeWindows: { orderBy: { startTime: 'asc' } },
-        targets: true,
-        package: {
-          include: { taskingOrder: true }
-        },
-        spaceNeeds: {
-          include: {
-            allocations: {
-              include: { spaceAsset: true }
+    const [scenario, missions] = await Promise.all([
+      prisma.scenario.findUnique({
+        where: { id: scenarioId },
+        select: { startDate: true, endDate: true },
+      }),
+      prisma.mission.findMany({
+        where: { package: { taskingOrder: { scenarioId } } },
+        include: {
+          unit: true,
+          timeWindows: { orderBy: { startTime: 'asc' } },
+          targets: true,
+          package: {
+            include: { taskingOrder: true }
+          },
+          spaceNeeds: {
+            include: {
+              allocations: {
+                include: { spaceAsset: true }
+              }
             }
           }
-        }
-      },
-      orderBy: { missionId: 'asc' }
-    });
+        },
+        orderBy: { missionId: 'asc' }
+      }),
+    ]);
 
-    // Compute ATO period bounds across all tasking orders
-    let periodStart: Date | null = null;
-    let periodEnd: Date | null = null;
-    for (const m of missions) {
-      const to = m.package?.taskingOrder;
-      if (!to) continue;
-      if (!periodStart || to.effectiveStart < periodStart) periodStart = to.effectiveStart;
-      if (!periodEnd || to.effectiveEnd > periodEnd) periodEnd = to.effectiveEnd;
-    }
+    // Use the scenario's authoritative start/end. Falling back to tasking-order
+    // min/max made the axis stretch whenever a stray TO had a bad effective date.
+    const periodStart = scenario?.startDate ?? null;
+    const periodEnd = scenario?.endDate ?? null;
 
     const timelineData = {
       scenarioId,
