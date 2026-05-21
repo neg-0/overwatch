@@ -79,6 +79,7 @@ function makeNeed(overrides: Record<string, any> = {}) {
     endTime: overrides.endTime ?? new Date(now.getTime() + 3600000),
     missionCriticality: overrides.missionCriticality ?? 'ESSENTIAL',
     fallbackCapability: overrides.fallbackCapability ?? null,
+    systemName: overrides.systemName ?? null,
     riskIfDenied: overrides.riskIfDenied ?? null,
     priorityEntry: overrides.priorityEntry ?? null,
     allocations: [],
@@ -237,73 +238,68 @@ describe('allocateSpaceResources', () => {
 
   // ─── Broadcast capability tests ──────────────────────────────────────────
 
-  it('fulfills a broadcast GPS need when matching asset has coverage', async () => {
-    const now = new Date();
-    const start = now;
-    const end = new Date(now.getTime() + 3600000);
-
+  it('fulfills a broadcast GPS need when an operational asset has the capability', async () => {
     mockTaskingOrderFindMany.mockResolvedValue(makeOrder([
-      makeNeed({ id: 'sn-1', capabilityType: 'GPS', startTime: start, endTime: end }),
+      makeNeed({ id: 'sn-1', capabilityType: 'GPS' }),
     ]));
 
     mockSpaceAssetFindMany.mockResolvedValue([{
       id: 'sat-gps-1',
       name: 'GPS III SV01',
+      constellation: 'GPS III',
       capabilities: ['GPS', 'GPS_MILITARY', 'PNT'],
-      coverageWindows: [{
-        capabilityType: 'GPS',
-        startTime: start,
-        endTime: end,
-        centerLat: 0, centerLon: 0, swathWidthKm: 12000,
-      }],
+      status: 'OPERATIONAL',
     }]);
 
     const report = await allocateSpaceResources('scn-1', 1);
     expect(report.summary.fulfilled).toBe(1);
     expect(report.summary.denied).toBe(0);
     expect(report.allocations[0].status).toBe('FULFILLED');
-    expect(report.allocations[0].rationale).toContain('broadcast');
+    expect(report.allocations[0].rationale).toContain('operational');
   });
 
-  it('broadcast: multiple GPS needs all FULFILLED when coverage exists — no contention', async () => {
-    const now = new Date();
-    const start = now;
-    const end = new Date(now.getTime() + 3600000);
-
+  it('broadcast: multiple GPS needs all FULFILLED — single operational asset supports all', async () => {
     mockTaskingOrderFindMany.mockResolvedValue(makeOrder([
-      makeNeed({ id: 'sn-1', capabilityType: 'GPS', startTime: start, endTime: end, missionId: 'MSN-1' }),
-      makeNeed({ id: 'sn-2', capabilityType: 'GPS', startTime: start, endTime: end, missionId: 'MSN-2' }),
-      makeNeed({ id: 'sn-3', capabilityType: 'GPS', startTime: start, endTime: end, missionId: 'MSN-3' }),
+      makeNeed({ id: 'sn-1', capabilityType: 'GPS', missionId: 'MSN-1' }),
+      makeNeed({ id: 'sn-2', capabilityType: 'GPS', missionId: 'MSN-2' }),
+      makeNeed({ id: 'sn-3', capabilityType: 'GPS', missionId: 'MSN-3' }),
     ]));
 
     mockSpaceAssetFindMany.mockResolvedValue([{
       id: 'sat-gps-1',
       name: 'GPS III SV01',
+      constellation: 'GPS III',
       capabilities: ['GPS', 'PNT'],
-      coverageWindows: [{
-        capabilityType: 'GPS',
-        startTime: start,
-        endTime: end,
-        centerLat: 0, centerLon: 0, swathWidthKm: 12000,
-      }],
+      status: 'OPERATIONAL',
     }]);
 
     const report = await allocateSpaceResources('scn-1', 1);
     expect(report.summary.fulfilled).toBe(3);
     expect(report.summary.denied).toBe(0);
-    expect(report.contentions).toHaveLength(0); // No contention for broadcast
   });
 
-  it('broadcast: GPS DENIED when no coverage window exists', async () => {
-    const now = new Date();
+  it('broadcast: GPS FULFILLED whenever an operational asset has the capability (no per-window check)', async () => {
     mockTaskingOrderFindMany.mockResolvedValue(makeOrder([
       makeNeed({ id: 'sn-1', capabilityType: 'GPS', missionCriticality: 'CRITICAL' }),
     ]));
     mockSpaceAssetFindMany.mockResolvedValue([{
       id: 'sat-gps-1',
+      name: 'GPS III SV01',
+      constellation: 'GPS III',
       capabilities: ['GPS'],
-      coverageWindows: [], // No coverage
+      status: 'OPERATIONAL',
     }]);
+
+    const report = await allocateSpaceResources('scn-1', 1);
+    expect(report.summary.fulfilled).toBe(1);
+    expect(report.summary.denied).toBe(0);
+  });
+
+  it('broadcast: GPS DENIED when there is no asset with the capability at all', async () => {
+    mockTaskingOrderFindMany.mockResolvedValue(makeOrder([
+      makeNeed({ id: 'sn-1', capabilityType: 'GPS', missionCriticality: 'CRITICAL' }),
+    ]));
+    mockSpaceAssetFindMany.mockResolvedValue([]);
 
     const report = await allocateSpaceResources('scn-1', 1);
     expect(report.summary.denied).toBe(1);
@@ -311,10 +307,6 @@ describe('allocateSpaceResources', () => {
   });
 
   it('broadcast: GPS_MILITARY degrades to GPS when only civil GPS asset available', async () => {
-    const now = new Date();
-    const start = now;
-    const end = new Date(now.getTime() + 3600000);
-
     mockTaskingOrderFindMany.mockResolvedValue(makeOrder([
       makeNeed({ id: 'sn-1', capabilityType: 'GPS_MILITARY' }),
     ]));
@@ -323,19 +315,58 @@ describe('allocateSpaceResources', () => {
     mockSpaceAssetFindMany.mockResolvedValue([{
       id: 'sat-gps-iif',
       name: 'GPS IIF-04',
+      constellation: 'GPS IIF',
       capabilities: ['GPS', 'PNT'],
-      coverageWindows: [{
-        capabilityType: 'GPS',
-        startTime: start,
-        endTime: end,
-        centerLat: 0, centerLon: 0, swathWidthKm: 12000,
-      }],
+      status: 'OPERATIONAL',
     }]);
 
     const report = await allocateSpaceResources('scn-1', 1);
     expect(report.summary.degraded).toBe(1);
     expect(report.allocations[0].status).toBe('DEGRADED');
     expect(report.allocations[0].allocatedCapability).toBe('GPS');
+  });
+
+  it('prefers OPERATIONAL over DEGRADED when both have the capability — result is FULFILLED', async () => {
+    mockTaskingOrderFindMany.mockResolvedValue(makeOrder([
+      makeNeed({ id: 'sn-1', capabilityType: 'SATCOM_PROTECTED' }),
+    ]));
+    mockSpaceAssetFindMany.mockResolvedValue([
+      { id: 'sat-aehf-deg', name: 'AEHF-1', constellation: 'AEHF', capabilities: ['SATCOM_PROTECTED'], status: 'DEGRADED' },
+      { id: 'sat-aehf-op', name: 'AEHF-6', constellation: 'AEHF', capabilities: ['SATCOM_PROTECTED'], status: 'OPERATIONAL' },
+    ]);
+
+    const report = await allocateSpaceResources('scn-1', 1);
+    expect(report.summary.fulfilled).toBe(1);
+    expect(report.summary.degraded).toBe(0);
+    expect(report.allocations[0].rationale).toContain('AEHF-6');
+  });
+
+  it('honors systemName: pins allocation to the named asset when available', async () => {
+    mockTaskingOrderFindMany.mockResolvedValue(makeOrder([
+      makeNeed({ id: 'sn-1', capabilityType: 'SATCOM_PROTECTED', systemName: 'AEHF-6' }),
+    ]));
+    mockSpaceAssetFindMany.mockResolvedValue([
+      { id: 'sat-other', name: 'AEHF-1', constellation: 'AEHF', capabilities: ['SATCOM_PROTECTED'], status: 'OPERATIONAL' },
+      { id: 'sat-target', name: 'AEHF-6', constellation: 'AEHF', capabilities: ['SATCOM_PROTECTED'], status: 'OPERATIONAL' },
+    ]);
+
+    const report = await allocateSpaceResources('scn-1', 1);
+    expect(report.allocations[0].status).toBe('FULFILLED');
+    expect(report.allocations[0].rationale).toContain('AEHF-6');
+  });
+
+  it('honors systemName by constellation prefix when no exact name match', async () => {
+    mockTaskingOrderFindMany.mockResolvedValue(makeOrder([
+      makeNeed({ id: 'sn-1', capabilityType: 'SATCOM_PROTECTED', systemName: 'AEHF' }),
+    ]));
+    mockSpaceAssetFindMany.mockResolvedValue([
+      { id: 'sat-wgs', name: 'WGS-7', constellation: 'WGS', capabilities: ['SATCOM_PROTECTED'], status: 'OPERATIONAL' },
+      { id: 'sat-aehf', name: 'AEHF-6', constellation: 'AEHF', capabilities: ['SATCOM_PROTECTED'], status: 'OPERATIONAL' },
+    ]);
+
+    const report = await allocateSpaceResources('scn-1', 1);
+    expect(report.allocations[0].status).toBe('FULFILLED');
+    expect(report.allocations[0].rationale).toContain('AEHF-6');
   });
 
   // ─── NON_SPACE capability tests ──────────────────────────────────────────
@@ -356,24 +387,16 @@ describe('allocateSpaceResources', () => {
   // ─── Exclusive capability tests (contention) ────────────────────────────
 
   it('fulfills a single exclusive need when matching asset exists', async () => {
-    const now = new Date();
-    const start = now;
-    const end = new Date(now.getTime() + 3600000);
-
     mockTaskingOrderFindMany.mockResolvedValue(makeOrder([
-      makeNeed({ id: 'sn-1', capabilityType: 'SATCOM_WIDEBAND', startTime: start, endTime: end }),
+      makeNeed({ id: 'sn-1', capabilityType: 'SATCOM_WIDEBAND' }),
     ]));
 
     mockSpaceAssetFindMany.mockResolvedValue([{
       id: 'sat-wgs-1',
       name: 'WGS-7',
+      constellation: 'WGS',
       capabilities: ['SATCOM_WIDEBAND'],
-      coverageWindows: [{
-        capabilityType: 'SATCOM_WIDEBAND',
-        startTime: start,
-        endTime: end,
-        centerLat: 0, centerLon: 0, swathWidthKm: 8000,
-      }],
+      status: 'OPERATIONAL',
     }]);
 
     const report = await allocateSpaceResources('scn-1', 1);
@@ -394,7 +417,7 @@ describe('allocateSpaceResources', () => {
     expect(report.allocations[0].status).toBe('DENIED');
   });
 
-  it('resolves exclusive contention: highest traced priority rank wins, loser with fallback DEGRADED', async () => {
+  it('exclusive contention: both needs FULFILLED from same asset; contention reported informationally', async () => {
     const now = new Date();
     const start = now;
     const end = new Date(now.getTime() + 3600000);
@@ -432,26 +455,21 @@ describe('allocateSpaceResources', () => {
       }],
     }]);
 
-    // Provide a WGS asset with coverage so the winner can be FULFILLED
     mockSpaceAssetFindMany.mockResolvedValue([{
-      id: 'sat-wgs-1', name: 'WGS-7', capabilities: ['SATCOM_WIDEBAND'],
-      coverageWindows: [{ capabilityType: 'SATCOM_WIDEBAND', startTime: start, endTime: end, centerLat: 0, centerLon: 0, swathWidthKm: 8000 }],
+      id: 'sat-wgs-1', name: 'WGS-7', constellation: 'WGS', capabilities: ['SATCOM_WIDEBAND'], status: 'OPERATIONAL',
     }]);
 
     const report = await allocateSpaceResources('scn-1', 1);
 
+    // Contention is reported but does not deny — the satellite supports both missions.
     expect(report.contentions).toHaveLength(1);
     expect(report.contentions[0].competitors).toHaveLength(2);
 
-    const winner = report.allocations.find(a => a.spaceNeedId === 'sn-high');
-    expect(winner?.status).toBe('FULFILLED');
-
-    const loser = report.allocations.find(a => a.spaceNeedId === 'sn-low');
-    expect(loser?.status).toBe('DEGRADED');
-    expect(loser?.allocatedCapability).toBe('SATCOM_TACTICAL');
+    expect(report.allocations.find(a => a.spaceNeedId === 'sn-high')?.status).toBe('FULFILLED');
+    expect(report.allocations.find(a => a.spaceNeedId === 'sn-low')?.status).toBe('FULFILLED');
   });
 
-  it('resolves exclusive contention: loser without fallback gets DENIED', async () => {
+  it('exclusive: both needs DENIED when no operational asset has the capability', async () => {
     const now = new Date();
     const start = now;
     const end = new Date(now.getTime() + 3600000);
@@ -491,13 +509,10 @@ describe('allocateSpaceResources', () => {
     mockSpaceAssetFindMany.mockResolvedValue([]);
 
     const report = await allocateSpaceResources('scn-1', 1);
-
-    const loser = report.allocations.find(a => a.spaceNeedId === 'sn-low');
-    expect(loser?.status).toBe('DENIED');
-    expect(loser?.allocatedCapability).toBeNull();
+    expect(report.summary.denied).toBe(2);
   });
 
-  it('criticality tiebreaker: CRITICAL beats ESSENTIAL at same priority rank (exclusive)', async () => {
+  it('exclusive: both needs FULFILLED when an operational asset exists, even at same priority rank', async () => {
     const now = new Date();
     const start = now;
     const end = new Date(now.getTime() + 3600000);
@@ -532,42 +547,27 @@ describe('allocateSpaceResources', () => {
       }],
     }]);
 
-    // Provide asset with coverage so the winner can be FULFILLED
     mockSpaceAssetFindMany.mockResolvedValue([{
-      id: 'sat-wgs-1', name: 'WGS-7', capabilities: ['SATCOM_WIDEBAND'],
-      coverageWindows: [{ capabilityType: 'SATCOM_WIDEBAND', startTime: start, endTime: end, centerLat: 0, centerLon: 0, swathWidthKm: 8000 }],
+      id: 'sat-wgs-1', name: 'WGS-7', constellation: 'WGS', capabilities: ['SATCOM_WIDEBAND'], status: 'OPERATIONAL',
     }]);
 
     const report = await allocateSpaceResources('scn-1', 1);
-
-    const crit = report.allocations.find(a => a.spaceNeedId === 'sn-crit');
-    const ess = report.allocations.find(a => a.spaceNeedId === 'sn-ess');
-    expect(crit?.status).toBe('FULFILLED');
-    expect(ess?.status).toBe('DENIED');
+    expect(report.allocations.find(a => a.spaceNeedId === 'sn-crit')?.status).toBe('FULFILLED');
+    expect(report.allocations.find(a => a.spaceNeedId === 'sn-ess')?.status).toBe('FULFILLED');
   });
 
   // ─── Mixed capability tests ──────────────────────────────────────────────
 
   it('handles mixed broadcast + exclusive + non-space needs correctly', async () => {
-    const now = new Date();
-    const start = now;
-    const end = new Date(now.getTime() + 3600000);
-
     mockTaskingOrderFindMany.mockResolvedValue(makeOrder([
-      makeNeed({ id: 'sn-gps', capabilityType: 'GPS', startTime: start, endTime: end }),
-      makeNeed({ id: 'sn-wgs', capabilityType: 'SATCOM_WIDEBAND', startTime: start, endTime: end }),
-      makeNeed({ id: 'sn-link', capabilityType: 'LINK16', startTime: start, endTime: end }),
+      makeNeed({ id: 'sn-gps', capabilityType: 'GPS' }),
+      makeNeed({ id: 'sn-wgs', capabilityType: 'SATCOM_WIDEBAND' }),
+      makeNeed({ id: 'sn-link', capabilityType: 'LINK16' }),
     ]));
 
     mockSpaceAssetFindMany.mockResolvedValue([
-      {
-        id: 'sat-gps', name: 'GPS III', capabilities: ['GPS', 'PNT'],
-        coverageWindows: [{ capabilityType: 'GPS', startTime: start, endTime: end, centerLat: 0, centerLon: 0, swathWidthKm: 12000 }],
-      },
-      {
-        id: 'sat-wgs', name: 'WGS-7', capabilities: ['SATCOM_WIDEBAND'],
-        coverageWindows: [{ capabilityType: 'SATCOM_WIDEBAND', startTime: start, endTime: end, centerLat: 0, centerLon: 0, swathWidthKm: 8000 }],
-      },
+      { id: 'sat-gps', name: 'GPS III', constellation: 'GPS III', capabilities: ['GPS', 'PNT'], status: 'OPERATIONAL' },
+      { id: 'sat-wgs', name: 'WGS-7', constellation: 'WGS', capabilities: ['SATCOM_WIDEBAND'], status: 'OPERATIONAL' },
     ]);
 
     const report = await allocateSpaceResources('scn-1', 1);
@@ -589,46 +589,12 @@ describe('allocateSpaceResources', () => {
     expect(report.summary.riskLevel).toBe('CRITICAL');
   });
 
-  it('summary risk is MODERATE when needs are degraded but none denied', async () => {
-    const now = new Date();
-    const start = now;
-    const end = new Date(now.getTime() + 3600000);
-
-    mockTaskingOrderFindMany.mockResolvedValue([{
-      missionPackages: [{
-        priorityRank: 1,
-        missions: [
-          {
-            missionId: 'MSN-W',
-            callsign: 'W1',
-            spaceNeeds: [makeNeed({
-              id: 'sn-w',
-              capabilityType: 'SATCOM_WIDEBAND',
-              startTime: start, endTime: end,
-              missionCriticality: 'CRITICAL',
-              priorityEntry: { strategyPriority: { rank: 1 } },
-            })],
-          },
-          {
-            missionId: 'MSN-L',
-            callsign: 'L1',
-            spaceNeeds: [makeNeed({
-              id: 'sn-l',
-              capabilityType: 'SATCOM_WIDEBAND',
-              priority: 2,
-              startTime: start, endTime: end,
-              missionCriticality: 'ESSENTIAL',
-              fallbackCapability: 'SATCOM_TACTICAL',
-              priorityEntry: { strategyPriority: { rank: 3 } },
-            })],
-          },
-        ],
-      }],
-    }]);
-    // Provide asset so winner gets FULFILLED, loser gets DEGRADED (not DENIED)
+  it('summary risk is MODERATE when only DEGRADED assets are available', async () => {
+    mockTaskingOrderFindMany.mockResolvedValue(makeOrder([
+      makeNeed({ id: 'sn-1', capabilityType: 'SATCOM_WIDEBAND', missionCriticality: 'ESSENTIAL' }),
+    ]));
     mockSpaceAssetFindMany.mockResolvedValue([{
-      id: 'sat-wgs-1', name: 'WGS-7', capabilities: ['SATCOM_WIDEBAND'],
-      coverageWindows: [{ capabilityType: 'SATCOM_WIDEBAND', startTime: start, endTime: end, centerLat: 0, centerLon: 0, swathWidthKm: 8000 }],
+      id: 'sat-wgs-1', name: 'WGS-7', constellation: 'WGS', capabilities: ['SATCOM_WIDEBAND'], status: 'DEGRADED',
     }]);
 
     const report = await allocateSpaceResources('scn-1', 1);

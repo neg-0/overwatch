@@ -1,11 +1,34 @@
 import { Router } from 'express';
 import prisma from '../db/prisma-client.js';
+import { allocateSpaceResources } from '../services/space-allocator.js';
 
 export const timelineRoutes = Router();
 
 timelineRoutes.get('/:scenarioId', async (req, res) => {
   try {
     const { scenarioId } = req.params;
+
+    // Auto-heal: run optimistic allocation for any ATO day whose space needs
+    // have no allocation row yet. Idempotent — finishes quickly when up to date.
+    const unallocatedDays = await prisma.spaceNeed.findMany({
+      where: {
+        allocations: { none: {} },
+        mission: { package: { taskingOrder: { scenarioId } } },
+      },
+      select: { mission: { select: { package: { select: { taskingOrder: { select: { atoDayNumber: true } } } } } } },
+    });
+    const daysToAllocate = new Set<number>();
+    for (const row of unallocatedDays) {
+      const day = row.mission?.package?.taskingOrder?.atoDayNumber;
+      if (typeof day === 'number') daysToAllocate.add(day);
+    }
+    for (const day of daysToAllocate) {
+      try {
+        await allocateSpaceResources(scenarioId, day);
+      } catch (err) {
+        console.warn(`[TIMELINE] Allocation for Day ${day} failed (non-fatal):`, err);
+      }
+    }
 
     const missions = await prisma.mission.findMany({
       where: { package: { taskingOrder: { scenarioId } } },

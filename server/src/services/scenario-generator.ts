@@ -1384,6 +1384,15 @@ export async function generateDayOrders(scenarioId: string, atoDay: number, mode
     ...sharedContext,
     spaceNeeds: spaceNeedsSummary,
   }, planningDocId, unitIndex, modelOverride);
+
+  // Compute optimistic space allocations for this day so planned missions don't
+  // display as "Unallocated" in the timeline until the sim reaches the day.
+  try {
+    const { allocateSpaceResources } = await import('./space-allocator.js');
+    await allocateSpaceResources(scenarioId, atoDay);
+  } catch (err) {
+    console.warn(`[ORDERS] Space allocation for Day ${atoDay} failed (non-fatal):`, err);
+  }
 }
 
 // ─── Enum normalizers: LLM output → Prisma enum ─────────────────────
