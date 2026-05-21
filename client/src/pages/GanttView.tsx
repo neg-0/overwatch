@@ -979,6 +979,90 @@ export function GanttView() {
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
   const [heatmapTooltip, setHeatmapTooltip] = useState<HeatmapTooltipData | null>(null);
   const ganttContainerRef = useRef<HTMLDivElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [viewportWidth, setViewportWidth] = useState(900);
+  const [zoomLevel, setZoomLevel] = useState(1);
+
+  const MIN_ZOOM = 1;
+  const MAX_ZOOM = 16;
+  const SIDEBAR_PX = 280;
+
+  // Measure the available width (outer wrapper, no overflow → no scrollbar feedback)
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) setViewportWidth(entry.contentRect.width);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const innerWidth = Math.max(viewportWidth * zoomLevel, 900);
+
+  // Ctrl/Cmd + wheel → cursor-anchored zoom
+  useEffect(() => {
+    const el = ganttContainerRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const cursorXInContainer = e.clientX - rect.left;
+      const cursorXInner = cursorXInContainer + el.scrollLeft;
+      const oldInner = Math.max(viewportWidth * zoomLevel, 900);
+      const oldTimelineW = oldInner - SIDEBAR_PX;
+      if (oldTimelineW <= 0) return;
+      const ratio = (cursorXInner - SIDEBAR_PX) / oldTimelineW;
+
+      const factor = e.deltaY < 0 ? 1.25 : 1 / 1.25;
+      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoomLevel * factor));
+      if (Math.abs(newZoom - zoomLevel) < 0.001) return;
+
+      const newInner = Math.max(viewportWidth * newZoom, 900);
+      const newTimelineW = newInner - SIDEBAR_PX;
+      const newScrollLeft = SIDEBAR_PX + ratio * newTimelineW - cursorXInContainer;
+
+      setZoomLevel(newZoom);
+      requestAnimationFrame(() => {
+        el.scrollLeft = Math.max(0, newScrollLeft);
+      });
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, [zoomLevel, viewportWidth]);
+
+  const zoomBy = useCallback((factor: number) => {
+    const el = ganttContainerRef.current;
+    if (!el) {
+      setZoomLevel(z => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z * factor)));
+      return;
+    }
+    // Anchor on viewport center
+    const rect = el.getBoundingClientRect();
+    const centerX = rect.width / 2;
+    const oldInner = Math.max(viewportWidth * zoomLevel, 900);
+    const oldTimelineW = oldInner - SIDEBAR_PX;
+    if (oldTimelineW <= 0) return;
+    const ratio = (centerX + el.scrollLeft - SIDEBAR_PX) / oldTimelineW;
+
+    const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoomLevel * factor));
+    const newInner = Math.max(viewportWidth * newZoom, 900);
+    const newTimelineW = newInner - SIDEBAR_PX;
+    const newScrollLeft = SIDEBAR_PX + ratio * newTimelineW - centerX;
+
+    setZoomLevel(newZoom);
+    requestAnimationFrame(() => {
+      el.scrollLeft = Math.max(0, newScrollLeft);
+    });
+  }, [viewportWidth, zoomLevel]);
+
+  const handleZoomIn = useCallback(() => zoomBy(1.5), [zoomBy]);
+  const handleZoomOut = useCallback(() => zoomBy(1 / 1.5), [zoomBy]);
+  const handleZoomReset = useCallback(() => {
+    setZoomLevel(1);
+    if (ganttContainerRef.current) ganttContainerRef.current.scrollLeft = 0;
+  }, []);
 
   useEffect(() => {
     if (!activeScenarioId) return;
@@ -1051,7 +1135,7 @@ export function GanttView() {
     if (!ganttContainerRef.current || !simulation.simTime || periodDurMs <= 0) return;
     const nowMs = new Date(simulation.simTime).getTime();
     const p = pct(nowMs, periodStartMs, periodDurMs);
-    const barAreaWidth = ganttContainerRef.current.scrollWidth - 280;
+    const barAreaWidth = ganttContainerRef.current.scrollWidth - SIDEBAR_PX;
     ganttContainerRef.current.scrollTo({
       left: Math.max(0, (p / 100) * barAreaWidth - 200),
       behavior: 'smooth',
@@ -1101,13 +1185,35 @@ export function GanttView() {
             <option>Maritime Only</option>
             <option>Space Only</option>
           </select>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', border: '1px solid var(--border-subtle)', borderRadius: '6px', padding: '0 2px' }}>
+            <button
+              className="btn btn-sm btn-secondary"
+              style={{ padding: '2px 8px', border: 'none', background: 'transparent' }}
+              onClick={handleZoomOut}
+              disabled={zoomLevel <= MIN_ZOOM + 0.001}
+              title="Zoom out (Ctrl/Cmd + wheel)"
+            >−</button>
+            <button
+              className="btn btn-sm btn-secondary"
+              style={{ padding: '2px 6px', border: 'none', background: 'transparent', fontSize: '10px', minWidth: '38px' }}
+              onClick={handleZoomReset}
+              title="Reset zoom"
+            >{Math.round(zoomLevel * 100)}%</button>
+            <button
+              className="btn btn-sm btn-secondary"
+              style={{ padding: '2px 8px', border: 'none', background: 'transparent' }}
+              onClick={handleZoomIn}
+              disabled={zoomLevel >= MAX_ZOOM - 0.001}
+              title="Zoom in (Ctrl/Cmd + wheel)"
+            >+</button>
+          </div>
           <button className="btn btn-sm btn-secondary" onClick={handleZoomToNow}>Zoom to Now</button>
         </div>
       </div>
 
       <div className="content-body" style={{ display: 'flex', overflow: 'hidden', height: 'calc(100vh - 120px)' }}>
         {/* Main Gantt area */}
-        <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+        <div ref={wrapperRef} style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
           <div
             className="gantt-container"
             ref={ganttContainerRef}
@@ -1133,7 +1239,7 @@ export function GanttView() {
             )}
 
             {!loading && !error && filteredMissions.length > 0 && (
-              <div style={{ minWidth: '900px' }}>
+              <div style={{ width: `${innerWidth}px`, minWidth: '900px' }}>
                 <TimeAxisHeader
                   periodStartMs={periodStartMs}
                   periodDurMs={periodDurMs}
