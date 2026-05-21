@@ -1306,7 +1306,11 @@ async function snapshotPositionsAtTime(scenarioId: string, io: Server): Promise<
       });
     }
 
-    await computeAndBroadcastCoverage(scenarioId, io, spaceAssets);
+    // Coverage windows are intentionally NOT recomputed here:
+    // computeAndBroadcastCoverage has side effects (persists new windows,
+    // surfaces DECISION_REQUIRED events) that should only fire during forward
+    // simulation, not during user scrubs. The client filters its existing
+    // window list against the new simTime instead.
   } catch (err) {
     console.error('[SIM] Seek snapshot failed:', err);
   }
