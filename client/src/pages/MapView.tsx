@@ -750,9 +750,19 @@ function MapViewInner() {
       return;
     }
 
+    // Only render coverage windows whose AOS/LOS span the current sim time —
+    // otherwise old/future windows accumulate and obscure the map.
+    const nowMs = simulation.simTime ? new Date(simulation.simTime).getTime() : null;
+
     // Build GeoJSON circles from coverage windows
     const features: GeoJSON.Feature[] = coverageWindows
       .filter(cw => cw.lat != null && cw.lon != null)
+      .filter(cw => {
+        if (nowMs == null) return true;
+        const start = new Date(cw.start).getTime();
+        const end = new Date(cw.end).getTime();
+        return start <= nowMs && nowMs <= end;
+      })
       .map(cw => {
         const color = COVERAGE_COLORS[cw.capability] || '#6366f1';
         // Create a circle polygon (approximation with 32 points)
@@ -793,7 +803,7 @@ function MapViewInner() {
         source: sourceId,
         paint: {
           'fill-color': ['get', 'color'],
-          'fill-opacity': 0.08,
+          'fill-opacity': 0.04,
         },
       });
       map.addLayer({
@@ -803,12 +813,12 @@ function MapViewInner() {
         paint: {
           'line-color': ['get', 'color'],
           'line-width': 1,
-          'line-opacity': 0.3,
+          'line-opacity': 0.18,
           'line-dasharray': [2, 2],
         },
       });
     }
-  }, [coverageWindows, showCoverage]);
+  }, [coverageWindows, showCoverage, simulation.simTime]);
 
   // ─── Update Breadcrumb Trails ───────────────────────────────────────────────
 
@@ -839,9 +849,15 @@ function MapViewInner() {
 
       // Accumulate trail points with sim-time timestamps
       const posSimMs = (pos as any).timestamp ? new Date((pos as any).timestamp).getTime() : Date.now();
-      const trail = trailsRef.current.get(missionId) || [];
+      let trail = trailsRef.current.get(missionId) || [];
       const lastPoint = trail[trail.length - 1];
-      if (!lastPoint || lastPoint.lon !== pos.longitude || lastPoint.lat !== pos.latitude) {
+      // Drop the trail if sim-time moved backward (user scrubbed back) — otherwise
+      // the trail would render a phantom "future" tail attached to the new position.
+      if (lastPoint && posSimMs < lastPoint.simMs) {
+        trail = [];
+      }
+      const newLast = trail[trail.length - 1];
+      if (!newLast || newLast.lon !== pos.longitude || newLast.lat !== pos.latitude) {
         trail.push({ lon: pos.longitude, lat: pos.latitude, simMs: posSimMs });
       }
 

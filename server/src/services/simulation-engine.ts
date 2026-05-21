@@ -1235,8 +1235,81 @@ export async function seekSimulation(targetTime: Date, io: Server, scenarioId?: 
     atoDay: currentSim.currentAtoDay,
   });
 
+  // Snap positions + coverage to the new time so scrubbing (even while paused)
+  // moves missions, satellites, and coverage footprints immediately. The
+  // interval-driven loop only runs when status === RUNNING.
+  await snapshotPositionsAtTime(currentSim.scenarioId, io);
+
   console.log(`[SIM] Seeked to ${clamped.toISOString()} (Day ${currentSim.currentAtoDay})`);
   return currentSim;
+}
+
+/**
+ * One-shot recompute & broadcast of mission positions, space-asset positions,
+ * and coverage windows at the current simTime. Called on seek so the map snaps
+ * to the new time without waiting for the position loop (which only runs while
+ * the simulation status is RUNNING).
+ */
+async function snapshotPositionsAtTime(scenarioId: string, io: Server): Promise<void> {
+  const sim = activeSims.get(scenarioId);
+  if (!sim || !sim.simTime) return;
+
+  try {
+    const activeMissions = await prisma.mission.findMany({
+      where: {
+        status: { in: ['BRIEFED', 'LAUNCHED', 'AIRBORNE', 'ON_STATION', 'ENGAGED', 'EGRESSING', 'RTB'] },
+        package: { taskingOrder: { scenarioId } },
+      },
+      include: { waypoints: { orderBy: { sequence: 'asc' } }, timeWindows: true },
+    });
+
+    for (const mission of activeMissions) {
+      const pos = interpolatePosition(mission, sim.simTime);
+      if (!pos) continue;
+      io.to(`scenario:${scenarioId}`).emit('position:update', {
+        event: 'position:update',
+        update: {
+          missionId: mission.id,
+          callsign: mission.callsign || undefined,
+          domain: mission.domain as any,
+          timestamp: sim.simTime.toISOString(),
+          latitude: pos.lat,
+          longitude: pos.lon,
+          altitude_ft: pos.alt,
+          heading: pos.heading,
+          speed_kts: pos.speed,
+          status: mission.status as any,
+        },
+      });
+    }
+
+    const spaceAssets = await prisma.spaceAsset.findMany({ where: { scenarioId } });
+    for (const asset of spaceAssets) {
+      if (!asset.tleLine1 || !asset.tleLine2) continue;
+      const cacheKey = `space:${scenarioId}:${asset.id}`;
+      let position: SpacePosition | null = propagateFromTLE(asset.tleLine1, asset.tleLine2, sim.simTime);
+      if (position) lastGoodPosition.set(cacheKey, position);
+      else position = lastGoodPosition.get(cacheKey) ?? null;
+      if (!position) continue;
+      io.to(`scenario:${scenarioId}`).emit('position:update', {
+        event: 'position:update',
+        update: {
+          missionId: `space-${asset.id}`,
+          callsign: asset.name,
+          domain: 'SPACE',
+          timestamp: sim.simTime.toISOString(),
+          latitude: position.latitude,
+          longitude: position.longitude,
+          altitude_ft: Math.round(position.altitude_km * 3280.84),
+          status: asset.status,
+        },
+      });
+    }
+
+    await computeAndBroadcastCoverage(scenarioId, io, spaceAssets);
+  } catch (err) {
+    console.error('[SIM] Seek snapshot failed:', err);
+  }
 }
 
 export function setSimSpeed(newRatio: number, io: Server, scenarioId?: string): SimState | null {
