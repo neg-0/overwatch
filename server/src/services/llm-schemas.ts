@@ -673,7 +673,10 @@ export const NORMALIZE_ORDER_SCHEMA = {
       effectiveStart: { type: 'string' as const },
       effectiveEnd: { type: 'string' as const },
       classification: { type: 'string' as const },
-      atoDayNumber: { type: ['number', 'null'] as const },
+      atoDayNumber: {
+        type: ['number', 'null'] as const,
+        description: 'The 1-based ATO/MTO/STO day number from the order header or narrative (e.g. "ATO 002 (DAY 2)" or "ATO DAY 2" → 2). Required for timeline placement; use null only if genuinely absent.',
+      },
       missionPackages: { type: 'array' as const, items: MISSION_PACKAGE_SCHEMA },
       reviewFlags: {
         type: 'array' as const,

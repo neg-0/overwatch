@@ -3,7 +3,7 @@ import multer from 'multer';
 import type { Server } from 'socket.io';
 import prisma from '../db/prisma-client.js';
 import { generateDemoDocument } from '../services/demo-doc-generator.js';
-import { ingestDocument } from '../services/doc-ingest.js';
+import { ingestDocument, IngestReviewRequiredError } from '../services/doc-ingest.js';
 
 // ─── Auto-Stream State ──────────────────────────────────────────────────────
 
@@ -65,6 +65,9 @@ export function createIngestRoutes(io: Server) {
       const result = await ingestDocument(scenarioId, extractedText, sourceHint, io);
       return res.json({ ...result, filename: file.originalname, extractedChars: extractedText.length, timestamp: new Date().toISOString() });
     } catch (err) {
+      if (err instanceof IngestReviewRequiredError) {
+        return res.status(422).json({ success: false, needsReview: true, error: err.message, timestamp: new Date().toISOString() });
+      }
       console.error('[API] File upload ingestion failed:', err);
       return res.status(500).json({
         success: false,
@@ -243,6 +246,9 @@ export function createIngestRoutes(io: Server) {
       const result = await ingestDocument(scenarioId, rawText, sourceHint, io, typeof sourceDocId === 'string' ? sourceDocId : undefined);
       return res.json({ ...result, timestamp: new Date().toISOString() });
     } catch (err) {
+      if (err instanceof IngestReviewRequiredError) {
+        return res.status(422).json({ success: false, needsReview: true, error: err.message, timestamp: new Date().toISOString() });
+      }
       console.error('[API] Ingestion failed:', err);
       return res.status(500).json({
         success: false,
