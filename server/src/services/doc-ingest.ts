@@ -8,6 +8,7 @@ import { buildIngestDelta } from '../api/knowledge-graph.js';
 import {
   CLASSIFY_SCHEMA,
   NORMALIZE_ACO_SCHEMA,
+  NORMALIZE_BDA_SCHEMA,
   NORMALIZE_JIPTL_SCHEMA,
   NORMALIZE_MAAP_SCHEMA,
   NORMALIZE_MSEL_SCHEMA,
@@ -112,7 +113,7 @@ function matchStrategyPriority(
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export type HierarchyLevel = 'STRATEGY' | 'PLANNING' | 'ORDER' | 'EVENT_LIST';
+export type HierarchyLevel = 'STRATEGY' | 'PLANNING' | 'ORDER' | 'EVENT_LIST' | 'BDA';
 
 export interface ClassifyResult {
   hierarchyLevel: HierarchyLevel;
@@ -406,6 +407,19 @@ export interface NormalizedMSEL {
   }>;
 }
 
+export interface NormalizedBDA {
+  title: string;
+  issuingAuthority: string;
+  atoDayNumber: number | null;
+  effectiveDate: string | null;
+  summary: string;
+  targetAssessments: Array<{ targetName: string; effectAchieved: string; assessment: string }>;
+  missionEffectiveness: Array<{ mission: string; outcome: string; notes: string }>;
+  isrGaps: string[];
+  recommendations: string[];
+  reviewFlags: ReviewFlag[];
+}
+
 export interface IngestResult {
   success: boolean;
   hierarchyLevel: HierarchyLevel;
@@ -436,6 +450,8 @@ export interface IngestResult {
     phaseCount?: number;
     commandTaskCount?: number;
     paceCommCount?: number;
+    targetAssessmentCount?: number;
+    recommendationCount?: number;
   };
   reviewFlags: ReviewFlag[];
   parseTimeMs: number;
@@ -450,8 +466,9 @@ const CLASSIFY_PROMPT = `You are a military document classifier. Analyze the fol
    - "PLANNING" — Staff-level planning products (JIPTL, JPEL, SPINS, ACO, MAAP, Component Priority Lists). These support execution planning, not strategic direction. IMPORTANT: The ACO (Airspace Control Order) is a PLANNING document, NOT an ORDER. Despite having "Order" in its name, it defines airspace structures and coordination measures — it is a planning product per JP 3-52.
    - "ORDER" — Tactical-level execution orders that task specific units/missions (ATO, MTO, STO, OPORD, EXORD, FRAGORD). An ATO contains mission packages with callsigns, targets, and timelines. Do NOT classify ACO or SPINS as orders.
    - "EVENT_LIST" — Exercise event lists (MSEL, scenario inject lists, exercise event schedules)
+   - "BDA" — Battle Damage Assessment reports: post-strike effectiveness analysis, target-by-target results, ISR gaps, and recommendations for the next ATO cycle. A BDA is an intelligence assessment — not an order, planning product, or event list.
 
-2. **documentType**: Specific type (NDS, NMS, JSCP, CONPLAN, OPLAN, CAMPAIGN_PLAN, JFC_GUIDANCE, COMPONENT_GUIDANCE, JIPTL, JPEL, SPINS, ACO, MAAP, ATO, MTO, STO, OPORD, EXORD, FRAGORD, MSEL)
+2. **documentType**: Specific type (NDS, NMS, JSCP, CONPLAN, OPLAN, CAMPAIGN_PLAN, JFC_GUIDANCE, COMPONENT_GUIDANCE, JIPTL, JPEL, SPINS, ACO, MAAP, ATO, MTO, STO, OPORD, EXORD, FRAGORD, MSEL, BDA)
 
 3. **sourceFormat**: The format the document is written in:
    - "USMTF" — Slash-delimited USMTF message (MSGID/ATO/...)
@@ -506,7 +523,7 @@ export async function classifyDocument(rawText: string, sourceHint?: string): Pr
   const result = JSON.parse(content) as ClassifyResult;
 
   // Validate hierarchy level
-  if (!['STRATEGY', 'PLANNING', 'ORDER', 'EVENT_LIST'].includes(result.hierarchyLevel)) {
+  if (!['STRATEGY', 'PLANNING', 'ORDER', 'EVENT_LIST', 'BDA'].includes(result.hierarchyLevel)) {
     throw new Error(`Invalid hierarchy level: ${result.hierarchyLevel}`);
   }
 
@@ -529,6 +546,12 @@ export async function classifyDocument(rawText: string, sourceHint?: string): Pr
   if (result.documentType === 'MSEL' && result.hierarchyLevel !== 'EVENT_LIST') {
     console.log(`  [INGEST] Guard: Reclassified MSEL from ${result.hierarchyLevel} → EVENT_LIST`);
     result.hierarchyLevel = 'EVENT_LIST';
+  }
+
+  // BDA reports are their own hierarchy level
+  if (result.documentType === 'BDA' && result.hierarchyLevel !== 'BDA') {
+    console.log(`  [INGEST] Guard: Reclassified BDA from ${result.hierarchyLevel} → BDA`);
+    result.hierarchyLevel = 'BDA';
   }
 
   return result;
@@ -909,7 +932,25 @@ Return ONLY valid JSON.
 DOCUMENT:
 `;
 
-type NormalizedData = NormalizedStrategy | NormalizedOPLAN | NormalizedPlanning | NormalizedJIPTL | NormalizedSPINS | NormalizedACO | NormalizedMAAP | NormalizedOrder | NormalizedMSEL;
+const BDA_NORMALIZE_PROMPT = `You are a military intelligence analyst extracting structured data from a Battle Damage Assessment (BDA) report.
+
+Extract:
+- title, issuingAuthority
+- atoDayNumber: the 1-based ATO day this BDA assesses (from "BDA for Day N", "Day N", etc.); null only if genuinely absent
+- effectiveDate: ISO 8601 if identifiable, else null
+- summary: the executive summary of the assessment
+- targetAssessments: per target — targetName, effectAchieved (DESTROYED / DEGRADED / NEUTRALIZED / NO EFFECT / UNKNOWN), and a short assessment
+- missionEffectiveness: per mission or callsign — outcome and notes
+- isrGaps: intelligence / ISR collection gaps identified
+- recommendations: recommendations that should shape the next ATO cycle
+
+Do NOT reproduce the document text — extract only the structured fields above.
+Return ONLY valid JSON.
+
+DOCUMENT:
+`;
+
+type NormalizedData = NormalizedStrategy | NormalizedOPLAN | NormalizedPlanning | NormalizedJIPTL | NormalizedSPINS | NormalizedACO | NormalizedMAAP | NormalizedOrder | NormalizedMSEL | NormalizedBDA;
 
 function getPromptAndSchema(classification: ClassifyResult): { prompt: string; schema: any } {
   switch (classification.hierarchyLevel) {
@@ -939,6 +980,8 @@ function getPromptAndSchema(classification: ClassifyResult): { prompt: string; s
       return { prompt: ORDER_NORMALIZE_PROMPT, schema: NORMALIZE_ORDER_SCHEMA };
     case 'EVENT_LIST':
       return { prompt: MSEL_NORMALIZE_PROMPT, schema: NORMALIZE_MSEL_SCHEMA };
+    case 'BDA':
+      return { prompt: BDA_NORMALIZE_PROMPT, schema: NORMALIZE_BDA_SCHEMA };
     default:
       return { prompt: PLANNING_NORMALIZE_PROMPT, schema: NORMALIZE_PLANNING_SCHEMA };
   }
@@ -1910,6 +1953,44 @@ async function persistMSEL(
   };
 }
 
+async function persistBDA(
+  scenarioId: string,
+  data: NormalizedBDA,
+  rawText: string,
+  classification: ClassifyResult,
+): Promise<{ createdId: string; extracted: IngestResult['extracted'] }> {
+  const effectiveDate = data.effectiveDate
+    ? parseSafeDate(data.effectiveDate)
+    : parseSafeDate(classification.effectiveDateStr);
+
+  // rawText is stored verbatim; the LLM's structured extraction is kept
+  // separately as JSON — document text is never derived from model output.
+  const bda = await prisma.battleDamageAssessment.create({
+    data: {
+      scenarioId,
+      atoDayNumber: data.atoDayNumber ?? null,
+      title: data.title || classification.title || 'Battle Damage Assessment',
+      issuingAuthority: data.issuingAuthority || classification.issuingAuthority || null,
+      rawText,
+      structured: data as object,
+      effectiveDate,
+      sourceFormat: classification.sourceFormat,
+      confidence: classification.confidence,
+      ingestedAt: new Date(),
+    },
+  });
+
+  console.log(`  [INGEST] BDA created: ${bda.title} — Day ${data.atoDayNumber ?? '?'}, ${data.targetAssessments?.length ?? 0} target assessments`);
+
+  return {
+    createdId: bda.id,
+    extracted: {
+      targetAssessmentCount: data.targetAssessments?.length ?? 0,
+      recommendationCount: data.recommendations?.length ?? 0,
+    },
+  };
+}
+
 /**
  * Parse a military DTG (Date-Time Group) like "041400Z MAR 26" into triggerDay/triggerHour
  * relative to the scenario start date.
@@ -2122,6 +2203,12 @@ export async function ingestDocument(
       }
       case 'EVENT_LIST': {
         const result = await persistMSEL(scenarioId, normalized as NormalizedMSEL, rawText, classification);
+        createdId = result.createdId;
+        extracted = result.extracted;
+        break;
+      }
+      case 'BDA': {
+        const result = await persistBDA(scenarioId, normalized as NormalizedBDA, rawText, classification);
         createdId = result.createdId;
         extracted = result.extracted;
         break;

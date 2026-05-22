@@ -18,11 +18,11 @@ export const CLASSIFY_SCHEMA = {
     properties: {
       hierarchyLevel: {
         type: 'string' as const,
-        enum: ['STRATEGY', 'PLANNING', 'ORDER', 'EVENT_LIST'],
+        enum: ['STRATEGY', 'PLANNING', 'ORDER', 'EVENT_LIST', 'BDA'],
       },
       documentType: {
         type: 'string' as const,
-        description: 'Specific document type, e.g. NDS, NMS, JSCP, CONPLAN, OPLAN, JIPTL, ACO, SPINS, ATO, MTO, STO, OPORD, FRAGORD, MSEL, INTEL_REPORT, MAAP',
+        description: 'Specific document type, e.g. NDS, NMS, JSCP, CONPLAN, OPLAN, JIPTL, ACO, SPINS, ATO, MTO, STO, OPORD, FRAGORD, MSEL, INTEL_REPORT, MAAP, BDA',
       },
       sourceFormat: {
         type: 'string' as const,
@@ -850,6 +850,74 @@ export const GENERATE_MAAP_SCHEMA = {
       guidance: { type: 'string' as const },
     },
     required: ['title', 'classification', 'effectiveDate', 'phase', 'targetPriorityList', 'forceApportionment', 'coordinationMeasures', 'guidance'],
+    additionalProperties: false,
+  },
+};
+
+// ─── Schema: Normalizer — BDA (Battle Damage Assessment) ────────────────────
+
+export const NORMALIZE_BDA_SCHEMA = {
+  name: 'normalized_bda',
+  strict: true,
+  schema: {
+    type: 'object' as const,
+    properties: {
+      title: { type: 'string' as const },
+      issuingAuthority: { type: 'string' as const },
+      atoDayNumber: {
+        type: ['number', 'null'] as const,
+        description: 'The 1-based ATO day this BDA assesses (e.g. "BDA for Day 3" -> 3). Null only if genuinely absent.',
+      },
+      effectiveDate: { type: ['string', 'null'] as const },
+      summary: { type: 'string' as const, description: 'Executive summary of the assessment' },
+      targetAssessments: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            targetName: { type: 'string' as const },
+            effectAchieved: { type: 'string' as const, description: 'e.g. DESTROYED, DEGRADED, NEUTRALIZED, NO EFFECT, UNKNOWN' },
+            assessment: { type: 'string' as const },
+          },
+          required: ['targetName', 'effectAchieved', 'assessment'],
+          additionalProperties: false,
+        },
+      },
+      missionEffectiveness: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            mission: { type: 'string' as const, description: 'Mission callsign or ID' },
+            outcome: { type: 'string' as const },
+            notes: { type: 'string' as const },
+          },
+          required: ['mission', 'outcome', 'notes'],
+          additionalProperties: false,
+        },
+      },
+      isrGaps: { type: 'array' as const, items: { type: 'string' as const } },
+      recommendations: {
+        type: 'array' as const,
+        items: { type: 'string' as const },
+        description: 'Recommendations that should inform the next ATO cycle',
+      },
+      reviewFlags: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            field: { type: 'string' as const },
+            rawValue: { type: 'string' as const },
+            confidence: { type: 'number' as const },
+            reason: { type: 'string' as const },
+          },
+          required: ['field', 'rawValue', 'confidence', 'reason'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['title', 'issuingAuthority', 'atoDayNumber', 'effectiveDate', 'summary', 'targetAssessments', 'missionEffectiveness', 'isrGaps', 'recommendations', 'reviewFlags'],
     additionalProperties: false,
   },
 };

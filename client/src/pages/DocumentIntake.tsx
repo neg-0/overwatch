@@ -12,7 +12,7 @@ interface DocItem {
   docType: string;
   content: string;
   effectiveDate?: string;
-  category: 'strategy' | 'planning' | 'msel' | 'order';
+  category: 'strategy' | 'planning' | 'msel' | 'order' | 'bda';
   icon: string;
   ingestedAt?: string | null;
   priorities?: any[];
@@ -62,7 +62,7 @@ const DOC_TYPE_ICONS: Record<string, string> = {
   OPORD: '📋', EXORD: '🎯', SPINS: '📡', ACO: '🗺️',
   NDS: '🏛️', NMS: '⭐', JSCP: '📊', CONPLAN: '📐',
   OPLAN: '📑', JIPTL: '🎯', INTEL_REPORT: '🔍',
-  MSEL: '💥', MAAP: '📋',
+  MSEL: '💥', MAAP: '📋', BDA: '🔬',
 };
 
 const ENTITY_COLORS = [
@@ -430,6 +430,20 @@ export function DocumentIntake() {
           category: 'order',
           icon: getDocIcon(o.orderType),
           ingestedAt: o.ingestedAt,
+        });
+      }
+
+      // Battle Damage Assessments
+      for (const b of (scenario.battleDamageAssessments || [])) {
+        items.push({
+          id: b.id,
+          title: b.title || `BDA — Day ${b.atoDayNumber ?? '?'}`,
+          docType: 'BDA',
+          content: b.rawText || '',
+          effectiveDate: b.effectiveDate,
+          category: 'bda',
+          icon: getDocIcon('BDA'),
+          ingestedAt: b.ingestedAt,
         });
       }
 
@@ -1111,6 +1125,21 @@ export function DocumentIntake() {
             {docs.filter(d => d.category === 'order').length > 0 && (
               <DocGroup label="Tasking Orders">
                 {docs.filter(d => d.category === 'order').map(d => (
+                  <DocListItem
+                    key={d.id}
+                    doc={d}
+                    selected={selectedDocId === d.id}
+                    onClick={() => setSelectedDocId(d.id)}
+                    hasPendingFlags={pendingFlags.some(f => f.documentId === d.id)}
+                  />
+                ))}
+              </DocGroup>
+            )}
+
+            {/* Battle Damage Assessments group */}
+            {docs.filter(d => d.category === 'bda').length > 0 && (
+              <DocGroup label="Battle Damage Assessments">
+                {docs.filter(d => d.category === 'bda').map(d => (
                   <DocListItem
                     key={d.id}
                     doc={d}

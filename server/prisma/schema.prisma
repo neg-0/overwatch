@@ -160,6 +160,7 @@ model Scenario {
   strategies       StrategyDocument[]
   planningDocs     PlanningDocument[]
   taskingOrders    TaskingOrder[]
+  battleDamageAssessments BattleDamageAssessment[]
   units            Unit[]
   bases            Base[]
   spaceAssets      SpaceAsset[]
@@ -372,6 +373,32 @@ model TaskingOrder {
   missionPackages  MissionPackage[]
 
   @@map("tasking_orders")
+}
+
+// ─── Battle Damage Assessment ────────────────────────────────────────────────
+// A first-class assessment document, peer to TaskingOrder. Generated after an
+// ATO day executes and fed back into the next day's order generation.
+
+model BattleDamageAssessment {
+  id               String         @id @default(uuid())
+  scenarioId       String
+  scenario         Scenario       @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  atoDayNumber     Int?           // the ATO day this BDA assesses
+  title            String
+  issuingAuthority String?
+  rawText          String         @db.Text  // verbatim source document — never overwritten
+  structured       Json?          // normalized structured extraction (effects, ISR gaps, recommendations)
+  classification   Classification @default(UNCLASSIFIED)
+  effectiveDate    DateTime?
+  createdAt        DateTime       @default(now())
+
+  // Ingestion metadata
+  sourceFormat     String?
+  confidence       Float?
+  reviewFlags      Json?
+  ingestedAt       DateTime?
+
+  @@map("battle_damage_assessments")
 }
 
 model MissionPackage {
