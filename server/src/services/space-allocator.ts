@@ -81,6 +81,17 @@ export interface AllocationReport {
     rationale: string | null;
     riskLevel: string | null;
     contentionGroup: string | null;
+    // Enriched fields for asset-centric UI rendering — let clients group
+    // allocations by asset / mission without joining a second endpoint.
+    spaceAssetId: string | null;
+    spaceAssetName: string | null;
+    constellation: string | null;
+    capabilityType: string;
+    missionId: string;
+    missionCallsign: string | null;
+    missionDomain: string;
+    missionType: string;
+    missionCriticality: string | null;
   }[];
   contentions: ContentionEvent[];
   summary: {
@@ -91,6 +102,19 @@ export interface AllocationReport {
     contention: number;
     riskLevel: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL';
   };
+}
+
+/**
+ * Optional inputs that let callers run hypothetical "what-if" allocations
+ * against the in-memory asset pool without touching the DB.
+ */
+export interface AllocationOptions {
+  /** Asset IDs to treat as unavailable for this run (e.g. taken offline). */
+  excludeAssetIds?: string[];
+  /** Per-asset status overrides applied before matching. "OFFLINE" excludes the asset. */
+  statusOverrides?: Record<string, 'OPERATIONAL' | 'DEGRADED' | 'OFFLINE'>;
+  /** When true, compute decisions but skip every spaceAllocation create/update. */
+  dryRun?: boolean;
 }
 
 interface AssetLite {
@@ -256,10 +280,15 @@ function decide(need: { capabilityType: string; missionCriticality?: string | nu
 
 /**
  * Run allocation for all space needs within a specific ATO day period of a scenario.
+ *
+ * Pass `options.dryRun` with `excludeAssetIds`/`statusOverrides` to compute a
+ * hypothetical allocation report without persisting anything — used by the
+ * what-if preview endpoint.
  */
 export async function allocateSpaceResources(
   scenarioId: string,
   atoDayNumber: number,
+  options: AllocationOptions = {},
 ): Promise<AllocationReport> {
   const orders = await prisma.taskingOrder.findMany({
     where: { scenarioId, atoDayNumber },
@@ -307,17 +336,38 @@ export async function allocateSpaceResources(
     };
   }
 
-  // Available friendly space assets (OPERATIONAL or DEGRADED — both are eligible)
+  // Available friendly space assets. Fetch all so what-if overrides can flip
+  // a MAINTENANCE/LOST asset into the eligible pool (or vice versa) without
+  // a second query; the final OPERATIONAL/DEGRADED filter runs in-memory.
+  const overrides = options.statusOverrides ?? {};
+  const excludeSet = new Set<string>(options.excludeAssetIds ?? []);
+  for (const [id, st] of Object.entries(overrides)) {
+    if (st === 'OFFLINE') excludeSet.add(id);
+  }
+
   const spaceAssetsRaw = await prisma.spaceAsset.findMany({
-    where: { scenarioId, status: { in: ['OPERATIONAL', 'DEGRADED'] } },
+    where: { scenarioId },
   });
-  const spaceAssets: AssetLite[] = spaceAssetsRaw.map(a => ({
-    id: a.id,
-    name: a.name,
-    constellation: a.constellation,
-    capabilities: a.capabilities as unknown as string[],
-    status: a.status,
-  }));
+  const spaceAssets: AssetLite[] = spaceAssetsRaw
+    .filter(a => !excludeSet.has(a.id))
+    .map(a => {
+      const ov = overrides[a.id];
+      const effectiveStatus = ov && ov !== 'OFFLINE' ? ov : a.status;
+      return {
+        id: a.id,
+        name: a.name,
+        constellation: a.constellation,
+        capabilities: a.capabilities as unknown as string[],
+        status: effectiveStatus,
+      };
+    })
+    .filter(a => a.status === 'OPERATIONAL' || a.status === 'DEGRADED');
+
+  // Asset lookup for enrichment (some matches target assets that may not be in
+  // the eligible pool — e.g. need.fallbackCapability resolution can match any
+  // asset by ID we've already seen via findBestAsset).
+  const assetById = new Map<string, AssetLite>();
+  for (const a of spaceAssets) assetById.set(a.id, a);
 
   // ─── Contention groups: compute first so each allocation can carry the group ID ─
   // For EXCLUSIVE capabilities, surface where multiple missions are sharing the
@@ -354,6 +404,7 @@ export async function allocateSpaceResources(
   // ─── Per-need allocation ──────────────────────────────────────────────────
   for (const entry of allNeeds) {
     const need = entry.need;
+    const mission = entry.mission;
     const capClass = CAPABILITY_CLASS[need.capabilityType];
 
     let decision: AllocationDecision;
@@ -372,6 +423,34 @@ export async function allocateSpaceResources(
 
     const contentionGroup = needToContentionGroup.get(need.id) ?? null;
     const existing = need.allocations[0];
+    const matchedAsset = decision.spaceAssetId ? assetById.get(decision.spaceAssetId) ?? null : null;
+    const enriched = {
+      spaceAssetId: decision.spaceAssetId,
+      spaceAssetName: matchedAsset?.name ?? null,
+      constellation: matchedAsset?.constellation ?? null,
+      capabilityType: need.capabilityType,
+      missionId: mission.missionId,
+      missionCallsign: mission.callsign ?? null,
+      missionDomain: mission.domain,
+      missionType: mission.missionType,
+      missionCriticality: need.missionCriticality ?? null,
+    };
+
+    // Dry-run: surface the hypothetical without touching the DB. Real rows
+    // keep their id; new ones get a "preview:" prefix so callers can tell.
+    if (options.dryRun) {
+      allocationResults.push({
+        id: existing?.id ?? `preview:${need.id}`,
+        spaceNeedId: need.id,
+        status: decision.status,
+        allocatedCapability: decision.allocatedCapability,
+        rationale: decision.rationale,
+        riskLevel: decision.riskLevel,
+        contentionGroup,
+        ...enriched,
+      });
+      continue;
+    }
 
     // Skip the DB write when the existing row is already current — keeps
     // the auto-heal path in the timeline endpoint cheap (no-op on warm reads).
@@ -392,6 +471,7 @@ export async function allocateSpaceResources(
         rationale: existing.rationale,
         riskLevel: existing.riskLevel,
         contentionGroup,
+        ...enriched,
       });
       continue;
     }
@@ -428,6 +508,7 @@ export async function allocateSpaceResources(
       rationale: allocation.rationale,
       riskLevel: allocation.riskLevel,
       contentionGroup: allocation.contentionGroup,
+      ...enriched,
     });
   }
 

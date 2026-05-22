@@ -138,3 +138,19 @@ export function broadcastGraphUpdate(scenarioId: string, data: {
 export function getIO(): SocketIOServer | null {
   return ioInstance;
 }
+
+/**
+ * Emitted after a what-if commit (or any other write) changes one or more
+ * space assets' status. Clients listening can re-fetch the asset roster and/or
+ * the affected day's allocations so every view stays consistent with the SSOT.
+ */
+export function broadcastSpaceAssetUpdated(scenarioId: string, data: {
+  changes: Array<{ id: string; field: 'status'; from: string; to: string }>;
+}) {
+  ioInstance?.to(`scenario:${scenarioId}`).emit('spaceAsset:updated', {
+    event: 'spaceAsset:updated',
+    scenarioId,
+    timestamp: new Date().toISOString(),
+    ...data,
+  });
+}
