@@ -18,6 +18,7 @@ import {
   NORMALIZE_STRATEGY_SCHEMA,
 } from './llm-schemas.js';
 import { buildUnitIndex, resolveUnitForMission } from './unit-resolver.js';
+import { normalizeApplicableTo } from './mission-taxonomy.js';
 
 // ─── OpenAI Client ───────────────────────────────────────────────────────────
 import { getOpenAIClient } from '../lib/openai-client.js';
@@ -685,6 +686,13 @@ PROCEDURES — Extract every distinct procedure, rule, or instruction into the p
 - DURESS: Duress words, abort procedures, emergency codes
 - GENERAL: Any other operational procedure not in the above categories
 
+For each procedure's "applicableTo": list ONLY the specific mission types it actually
+governs (e.g. a refueling note → ["TANKER"]; a SEAD weapons-release rule → ["SEAD"]).
+Most procedures apply to 1-3 mission types. Use "ALL" ONLY for genuinely universal
+items — guard frequency, IFF/SIF, theater-wide EMCON or theater-wide ROE. NEVER combine
+"ALL" with specific types (["SEAD","OCA","ALL"] is wrong — if it is universal, just
+["ALL"]; if not, list the specific types).
+
 COMM PLANS — Extract every communication net, frequency, or channel:
 - netName: Net or channel name
 - frequency: Frequency with unit (e.g., "243.0 MHz")
@@ -1351,7 +1359,7 @@ async function persistSPINS(
         description: proc.description,
         conditions: proc.conditions || null,
         authority: proc.authority || null,
-        applicableTo: proc.applicableTo || [],
+        applicableTo: normalizeApplicableTo(proc.applicableTo),
       },
     });
   }
@@ -1367,7 +1375,7 @@ async function persistSPINS(
         callsign: comm.callsign || null,
         purpose: comm.purpose,
         paceOrder: comm.paceOrder || null,
-        applicableTo: comm.applicableTo || [],
+        applicableTo: normalizeApplicableTo(comm.applicableTo),
       },
     });
   }

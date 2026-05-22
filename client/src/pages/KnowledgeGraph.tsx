@@ -15,6 +15,7 @@ type GraphNodeType =
   | 'SPACE_ASSET'
   | 'SPACE_NEED'
   | 'MISSION'
+  | 'MISSION_TYPE'
   | 'ASSET'
   | 'PACKAGE'
   | 'ALLOCATION';
@@ -54,6 +55,7 @@ const NODE_CONFIG: Record<GraphNodeType, { color: string; icon: string }> = {
   SPACE_ASSET: { color: '#38bdf8', icon: '✦' },
   SPACE_NEED: { color: '#c084fc', icon: '📡' },
   MISSION: { color: '#fbbf24', icon: '✈️' },
+  MISSION_TYPE: { color: '#2dd4bf', icon: '🏷' },
   ASSET: { color: '#4ade80', icon: '🔧' },
   PACKAGE: { color: '#fb923c', icon: '📦' },
   ALLOCATION: { color: '#94a3b8', icon: '⬡' },
@@ -80,6 +82,7 @@ const NODE_TIER: Record<GraphNodeType, number> = {
   TARGET: 3,
   BASE: 3,
   ASSET: 3,
+  MISSION_TYPE: 4,
   SPACE_NEED: 4,
   ALLOCATION: 5,
   SPACE_ASSET: 5,
@@ -105,6 +108,10 @@ const EDGE_COLORS: Record<string, string> = {
   HAS_ASSET:            '#4ade80',
   PREFERS:              '#94a3b8',
   NEEDS_BAND:           '#e879f9',
+  OF_TYPE:              '#2dd4bf',
+  RESTRICTED_BY:        '#f87171',
+  GOVERNED_BY:          '#2dd4bf',
+  COMMUNICATES_ON:      '#38bdf8',
 };
 
 const CORE_TYPES: Set<GraphNodeType> = new Set(['DOCUMENT', 'PRIORITY', 'MISSION', 'TARGET', 'SPACE_NEED', 'PACKAGE', 'ALLOCATION']);

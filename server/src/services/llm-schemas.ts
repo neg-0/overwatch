@@ -330,7 +330,7 @@ export const NORMALIZE_SPINS_SCHEMA = {
             applicableTo: {
               type: 'array' as const,
               items: { type: 'string' as const },
-              description: 'Mission types this applies to: OCA, DCA, CAS, SEAD, ISR, TANKER, C2, ALL, etc.',
+              description: 'Specific mission types this procedure governs (OCA, DCA, CAS, SEAD, ISR, TANKER, C2, EW, ESCORT). Most procedures apply to 1-3 types. Use "ALL" ONLY for genuinely universal items (guard frequency, IFF/SIF, theater-wide EMCON/ROE), and when used, "ALL" must be the only entry — never combine it with specific types.',
             },
           },
           required: ['category', 'title', 'description', 'conditions', 'authority', 'applicableTo'],
@@ -351,7 +351,7 @@ export const NORMALIZE_SPINS_SCHEMA = {
             applicableTo: {
               type: 'array' as const,
               items: { type: 'string' as const },
-              description: 'Mission types: CAS, SEAD, ISR, ALL, etc.',
+              description: 'Specific mission types that use this net (CAS, SEAD, ISR, OCA, DCA, TANKER, C2, EW, ESCORT). Use "ALL" ONLY for genuinely universal nets (guard, common), and when used it must be the only entry — never combine "ALL" with specific types.',
             },
           },
           required: ['netName', 'frequency', 'band', 'callsign', 'purpose', 'paceOrder', 'applicableTo'],
