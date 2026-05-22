@@ -609,7 +609,7 @@ const OPLAN_NORMALIZE_PROMPT = `You are a military operations planner extracting
 These are the richest strategy documents. Extract ALL of the following:
 
 BASIC FIELDS:
-- title, docType (OPLAN or CONPLAN), authorityLevel, content (full text), effectiveDate, tier (CONPLAN=4, OPLAN=5)
+- title, docType (OPLAN or CONPLAN), authorityLevel, effectiveDate, tier (CONPLAN=4, OPLAN=5)
 - parentDocReference: the parent authority document referenced (e.g., JSCP, NMS)
 - commanderIntent: the full commander's intent (purpose, method, end state) from section 3.a
 - mission: the mission statement from section 2
