@@ -17,6 +17,7 @@ import {
   seedSpaceAssetsForScenario,
 } from './reference-data.js';
 import { buildUnitIndex, resolveUnitForMission, type UnitIndex } from './unit-resolver.js';
+import type { NormalizedBDA } from './doc-ingest.js';
 
 // ─── OpenAI Client ───────────────────────────────────────────────────────────
 
@@ -1312,39 +1313,55 @@ export async function generateDayOrders(scenarioId: string, atoDay: number, mode
     prevDayBDA = 'First day of operations — no previous day data';
   } else {
     prevDayLabel = `Day ${atoDay - 1} Results`;
-    // Query previous day's missions
-    const prevDayOrders = await prisma.taskingOrder.findMany({
+
+    // Prefer the prior day's Battle Damage Assessment — a proper intelligence
+    // product directly shapes the next ATO. Fall back to a raw mission-status
+    // summary when no BDA has been ingested for that day yet.
+    const priorBDA = await prisma.battleDamageAssessment.findFirst({
       where: { scenarioId, atoDayNumber: atoDay - 1 },
-      include: {
-        missionPackages: {
-          include: {
-            missions: {
-              include: {
-                targets: true,
-              },
-            },
-          },
-        },
-      },
+      orderBy: { createdAt: 'desc' },
     });
 
-    if (prevDayOrders.length === 0) {
-      prevDayBDA = 'No previous day orders found — treat as first operational day';
+    if (priorBDA) {
+      const s = (priorBDA.structured ?? {}) as unknown as Partial<NormalizedBDA>;
+      const parts: string[] = [];
+      if (s.summary) parts.push(`SUMMARY: ${s.summary}`);
+      if (s.targetAssessments?.length) {
+        parts.push('TARGET EFFECTS:\n' + s.targetAssessments
+          .slice(0, 15)
+          .map(t => `  - ${t.targetName}: ${t.effectAchieved} — ${t.assessment}`)
+          .join('\n'));
+      }
+      if (s.isrGaps?.length) parts.push('ISR GAPS:\n' + s.isrGaps.map(g => `  - ${g}`).join('\n'));
+      if (s.recommendations?.length) parts.push('RECOMMENDATIONS:\n' + s.recommendations.map(r => `  - ${r}`).join('\n'));
+      prevDayBDA = parts.length > 0 ? parts.join('\n\n') : priorBDA.rawText.slice(0, 4000);
     } else {
-      const missionSummaries: string[] = [];
-      for (const order of prevDayOrders) {
-        for (const pkg of order.missionPackages) {
-          for (const msn of pkg.missions) {
-            const targetNames = msn.targets.map(t => t.targetName).join(', ');
-            missionSummaries.push(
-              `${msn.callsign || msn.missionId} (${msn.missionType}, ${msn.platformType}x${msn.platformCount}) — Status: ${msn.status}${targetNames ? ` — Targets: ${targetNames}` : ''}`
-            );
+      // Fallback: summarize the previous day's mission statuses.
+      const prevDayOrders = await prisma.taskingOrder.findMany({
+        where: { scenarioId, atoDayNumber: atoDay - 1 },
+        include: {
+          missionPackages: { include: { missions: { include: { targets: true } } } },
+        },
+      });
+
+      if (prevDayOrders.length === 0) {
+        prevDayBDA = 'No previous day orders found — treat as first operational day';
+      } else {
+        const missionSummaries: string[] = [];
+        for (const order of prevDayOrders) {
+          for (const pkg of order.missionPackages) {
+            for (const msn of pkg.missions) {
+              const targetNames = msn.targets.map(t => t.targetName).join(', ');
+              missionSummaries.push(
+                `${msn.callsign || msn.missionId} (${msn.missionType}, ${msn.platformType}x${msn.platformCount}) — Status: ${msn.status}${targetNames ? ` — Targets: ${targetNames}` : ''}`
+              );
+            }
           }
         }
+        prevDayBDA = missionSummaries.length > 0
+          ? missionSummaries.slice(0, 15).join('\n')
+          : 'Previous day missions had no details available';
       }
-      prevDayBDA = missionSummaries.length > 0
-        ? missionSummaries.slice(0, 15).join('\n')
-        : 'Previous day missions had no details available';
     }
   }
 

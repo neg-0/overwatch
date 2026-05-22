@@ -12,7 +12,7 @@ interface DocItem {
   docType: string;
   content: string;
   effectiveDate?: string;
-  category: 'strategy' | 'planning' | 'msel' | 'order';
+  category: 'strategy' | 'planning' | 'msel' | 'order' | 'bda';
   icon: string;
   ingestedAt?: string | null;
   priorities?: any[];
@@ -62,7 +62,7 @@ const DOC_TYPE_ICONS: Record<string, string> = {
   OPORD: '📋', EXORD: '🎯', SPINS: '📡', ACO: '🗺️',
   NDS: '🏛️', NMS: '⭐', JSCP: '📊', CONPLAN: '📐',
   OPLAN: '📑', JIPTL: '🎯', INTEL_REPORT: '🔍',
-  MSEL: '💥', MAAP: '📋',
+  MSEL: '💥', MAAP: '📋', BDA: '🔬',
 };
 
 const ENTITY_COLORS = [
@@ -430,6 +430,20 @@ export function DocumentIntake() {
           category: 'order',
           icon: getDocIcon(o.orderType),
           ingestedAt: o.ingestedAt,
+        });
+      }
+
+      // Battle Damage Assessments
+      for (const b of (scenario.battleDamageAssessments || [])) {
+        items.push({
+          id: b.id,
+          title: b.title || `BDA — Day ${b.atoDayNumber ?? '?'}`,
+          docType: 'BDA',
+          content: b.rawText || '',
+          effectiveDate: b.effectiveDate,
+          category: 'bda',
+          icon: getDocIcon('BDA'),
+          ingestedAt: b.ingestedAt,
         });
       }
 
@@ -1121,6 +1135,25 @@ export function DocumentIntake() {
                 ))}
               </DocGroup>
             )}
+
+            {/* Battle Damage Assessments group */}
+            {(() => {
+              const bdaDocs = docs.filter(d => d.category === 'bda');
+              if (bdaDocs.length === 0) return null;
+              return (
+                <DocGroup label="Battle Damage Assessments">
+                  {bdaDocs.map(d => (
+                    <DocListItem
+                      key={d.id}
+                      doc={d}
+                      selected={selectedDocId === d.id}
+                      onClick={() => setSelectedDocId(d.id)}
+                      hasPendingFlags={pendingFlags.some(f => f.documentId === d.id)}
+                    />
+                  ))}
+                </DocGroup>
+              );
+            })()}
 
             {docs.length === 0 && !loadingDocs && (
               <div style={{
