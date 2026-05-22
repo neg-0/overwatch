@@ -590,7 +590,7 @@ export async function createTestApp(): Promise<TestApp> {
   const { createDecisionRoutes } = await import('../../api/decisions.js');
   const { createAdvisorRoutes } = await import('../../api/advisor.js');
   const { createIngestRoutes } = await import('../../api/ingest.js');
-  const { orderRoutes } = await import('../../api/orders.js');
+  const { createOrderRoutes } = await import('../../api/orders.js');
   const { injectRoutes } = await import('../../api/injects.js');
   const eventsModule = await import('../../api/events.js');
   const { knowledgeGraphRoutes } = await import('../../api/knowledge-graph.js');
@@ -627,7 +627,7 @@ export async function createTestApp(): Promise<TestApp> {
 
   app.use('/api/scenarios', scenarioRoutes);
   app.use('/api/missions', missionRoutes);
-  app.use('/api/orders', orderRoutes);
+  app.use('/api/orders', createOrderRoutes(io));
   app.use('/api/simulation', createSimulationRoutes(io));
   app.use('/api/decisions', createDecisionRoutes(io));
   app.use('/api/advisor', createAdvisorRoutes(io));

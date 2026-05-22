@@ -3,6 +3,13 @@ import { useOverwatchStore } from '../store/overwatch-store';
 import type { IngestCard, BatchStatus } from '../store/overwatch-store';
 import type { OrderDetail as OrderDetailData } from '../types/orders';
 import { orderTypeBadge } from '../types/orders';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import { DocumentEditModal } from '../components/DocumentEditModal';
+
+// An order-document action awaiting confirmation.
+type DocPendingAction =
+  | { kind: 'delete'; doc: DocItem }
+  | { kind: 'edit-save'; doc: DocItem; rawText: string };
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -332,6 +339,11 @@ export function DocumentIntake() {
   const [orderDetails, setOrderDetails] = useState<Map<string, OrderDetailData>>(new Map());
   const [loadingOrderDetail, setLoadingOrderDetail] = useState(false);
 
+  // Per-order edit/delete controls
+  const [docPendingAction, setDocPendingAction] = useState<DocPendingAction | null>(null);
+  const [docActionBusy, setDocActionBusy] = useState(false);
+  const [editingDoc, setEditingDoc] = useState<DocItem | null>(null);
+
   // Entity matches for selected doc
   const [entityMatches, setEntityMatches] = useState<EntityMatch[]>([]);
   const [hoveredEntity, setHoveredEntity] = useState<string | null>(null);
@@ -458,6 +470,67 @@ export function DocumentIntake() {
   useEffect(() => {
     fetchDocs();
   }, [fetchDocs]);
+
+  // ─── Per-order edit / delete ────────────────────────────────────────────
+  const runDocAction = async () => {
+    if (!docPendingAction) return;
+    setDocActionBusy(true);
+    try {
+      if (docPendingAction.kind === 'delete') {
+        const res = await fetch(`/api/orders/${docPendingAction.doc.id}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error('Failed to delete order');
+        if (selectedDocId === docPendingAction.doc.id) setSelectedDocId(null);
+      } else {
+        const res = await fetch(`/api/orders/${docPendingAction.doc.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rawText: docPendingAction.rawText }),
+        });
+        if (!res.ok) throw new Error('Failed to re-ingest order');
+        setEditingDoc(null);
+      }
+      setDocPendingAction(null);
+      fetchDocs();
+    } catch (err) {
+      console.error(err);
+      setDocPendingAction(null);
+    } finally {
+      setDocActionBusy(false);
+    }
+  };
+
+  const docConfirm = (() => {
+    if (!docPendingAction) return null;
+    const simNote = (
+      <p style={{ marginTop: '8px', color: 'var(--text-muted)' }}>
+        If the simulation is running, changes to tasking orders can affect its results.
+      </p>
+    );
+    if (docPendingAction.kind === 'delete') {
+      return {
+        variant: 'danger' as const,
+        title: `Delete ${docPendingAction.doc.title}?`,
+        confirmLabel: 'Delete order',
+        message: (
+          <>
+            <p>This permanently removes the tasking order and all of its missions, targets, time windows, and space tasking.</p>
+            {simNote}
+          </>
+        ),
+      };
+    }
+    return {
+      variant: 'warning' as const,
+      title: `Re-ingest edited ${docPendingAction.doc.title}?`,
+      confirmLabel: 'Save & re-ingest',
+      message: (
+        <>
+          <p>Saving re-runs the ingest pipeline on the edited text and replaces this order's missions, targets, and space tasking.</p>
+          {simNote}
+        </>
+      ),
+    };
+  })();
 
   // ─── Fetch Review Flags ─────────────────────────────────────────────────
 
@@ -703,6 +776,35 @@ export function DocumentIntake() {
   const handleIngestSelected = () => {
     if (selectedDoc) {
       ingestDocument(selectedDoc.content, undefined, selectedDoc.id);
+    }
+  };
+
+  // Re-run the ingest pipeline on an already-ingested document, replacing its
+  // prior extraction — used to re-process a doc after prompt tweaks.
+  const reingestDocument = async (doc: DocItem) => {
+    setSubmitting(prev => new Set(prev).add(doc.id));
+    try {
+      const res = await fetch('/api/ingest/reingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: doc.category, docId: doc.id }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Re-ingest failed' }));
+        addIngestToast(`❌ Re-ingest failed: ${err.error || 'Unknown error'}`);
+        return;
+      }
+      addIngestToast(`✓ Re-ingested ${doc.title}`);
+      setSelectedDocId(null);
+      fetchDocs();
+    } catch {
+      addIngestToast('❌ Re-ingest failed');
+    } finally {
+      setSubmitting(prev => {
+        const next = new Set(prev);
+        next.delete(doc.id);
+        return next;
+      });
     }
   };
 
@@ -1253,19 +1355,49 @@ export function DocumentIntake() {
                     {selectedDoc.effectiveDate && ` · ${new Date(selectedDoc.effectiveDate).toLocaleDateString()}`}
                   </div>
                 </div>
-                <button
-                  onClick={handleIngestSelected}
-                  disabled={submitting.has(selectedDoc.id) || !!selectedDoc.ingestedAt}
-                  style={{
-                    padding: '8px 16px', borderRadius: '6px', border: 'none', fontWeight: 700,
-                    fontSize: '12px', cursor: selectedDoc.ingestedAt ? 'default' : 'pointer',
-                    background: selectedDoc.ingestedAt ? 'rgba(0, 200, 83, 0.15)' : submitting.has(selectedDoc.id) ? 'rgba(0, 212, 255, 0.2)' : 'var(--accent-primary)',
-                    color: selectedDoc.ingestedAt ? 'var(--accent-success)' : submitting.has(selectedDoc.id) ? 'var(--accent-primary)' : '#000',
-                    transition: 'all 0.2s',
-                  }}
-                >
-                  {selectedDoc.ingestedAt ? '✅ Ingested' : submitting.has(selectedDoc.id) ? '⟳ Processing…' : '⚡ Ingest'}
-                </button>
+                {(() => {
+                  const busy = submitting.has(selectedDoc.id);
+                  const ingested = !!selectedDoc.ingestedAt;
+                  return (
+                    <button
+                      onClick={() => (ingested ? reingestDocument(selectedDoc) : handleIngestSelected())}
+                      disabled={busy}
+                      title={ingested ? 'Re-run the ingest pipeline, replacing the prior extraction' : undefined}
+                      style={{
+                        padding: '8px 16px', borderRadius: '6px', fontWeight: 700,
+                        fontSize: '12px', cursor: busy ? 'default' : 'pointer',
+                        border: ingested && !busy ? '1px solid rgba(0, 212, 255, 0.35)' : 'none',
+                        background: busy ? 'rgba(0, 212, 255, 0.2)' : ingested ? 'rgba(0, 212, 255, 0.12)' : 'var(--accent-primary)',
+                        color: busy || ingested ? 'var(--accent-primary)' : '#000',
+                        transition: 'all 0.2s',
+                      }}
+                    >
+                      {busy ? '⟳ Processing…' : ingested ? '↻ Re-ingest' : '⚡ Ingest'}
+                    </button>
+                  );
+                })()}
+                {selectedDoc.category === 'order' && (
+                  <>
+                    <button
+                      onClick={() => setEditingDoc(selectedDoc)}
+                      style={{
+                        padding: '8px 14px', borderRadius: '6px', fontWeight: 700, fontSize: '12px', cursor: 'pointer',
+                        background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.4)', color: 'var(--accent-warning)',
+                      }}
+                    >
+                      ✎ Edit
+                    </button>
+                    <button
+                      onClick={() => setDocPendingAction({ kind: 'delete', doc: selectedDoc })}
+                      style={{
+                        padding: '8px 14px', borderRadius: '6px', fontWeight: 700, fontSize: '12px', cursor: 'pointer',
+                        background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)', color: 'var(--accent-danger)',
+                      }}
+                    >
+                      🗑 Delete
+                    </button>
+                  </>
+                )}
               </div>
 
               {/* Raw text with highlights */}
@@ -1874,6 +2006,33 @@ export function DocumentIntake() {
           <div key={toast.id} className="toast toast-auto-dismiss">{toast.msg}</div>
         ))}
       </div>
+
+      {/* ─── Order edit modal ──────────────────────────────────── */}
+      {editingDoc && (
+        <DocumentEditModal
+          isOpen
+          title={editingDoc.title}
+          docType={editingDoc.docType}
+          initialText={editingDoc.content}
+          busy={docActionBusy}
+          onClose={() => { if (!docActionBusy) setEditingDoc(null); }}
+          onSave={(text) => setDocPendingAction({ kind: 'edit-save', doc: editingDoc, rawText: text })}
+        />
+      )}
+
+      {/* ─── Order edit/delete confirm dialog ──────────────────── */}
+      {docConfirm && (
+        <ConfirmDialog
+          isOpen
+          title={docConfirm.title}
+          message={docConfirm.message}
+          variant={docConfirm.variant}
+          confirmLabel={docConfirm.confirmLabel}
+          busy={docActionBusy}
+          onConfirm={runDocAction}
+          onClose={() => { if (!docActionBusy) setDocPendingAction(null); }}
+        />
+      )}
     </div>
   );
 }
