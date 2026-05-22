@@ -69,6 +69,9 @@ export function ScenarioDetail() {
   const [modelOverrides, setModelOverrides] = useState<ModelOverrides>({});
   const [regeneratingSteps, setRegeneratingSteps] = useState<Record<string, boolean>>({});
   const [generating, setGenerating] = useState(false);
+  // When set, the poll loop clears `generating` once the day's orders have
+  // been deleted and regenerated (rather than relying on a fixed timer).
+  const [regenTarget, setRegenTarget] = useState<{ atoDay: number; originalIds: string[] } | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [editingOrder, setEditingOrder] = useState<EditingOrder | null>(null);
@@ -107,10 +110,25 @@ export function ScenarioDetail() {
     if (!scenarioId || !generating) return;
     const interval = setInterval(async () => {
       const detail = await fetchScenarioDetail(scenarioId);
-      if (detail) setScenarioDetail(detail);
+      if (!detail) return;
+      setScenarioDetail(detail);
+
+      // A day regeneration is done once the original orders have been
+      // deleted and a fresh full set has been persisted for the day.
+      if (regenTarget) {
+        const orders: any[] = (detail as any).taskingOrders ?? [];
+        const allOriginalsGone = regenTarget.originalIds.every(
+          (id) => !orders.some((o) => o.id === id),
+        );
+        const dayOrderCount = orders.filter((o) => o.atoDayNumber === regenTarget.atoDay).length;
+        if (allOriginalsGone && dayOrderCount >= regenTarget.originalIds.length) {
+          setRegenTarget(null);
+          setGenerating(false);
+        }
+      }
     }, 8000);
     return () => clearInterval(interval);
-  }, [scenarioId, generating, fetchScenarioDetail]);
+  }, [scenarioId, generating, regenTarget, fetchScenarioDetail]);
 
   // ─── Generate / Regenerate ──────────────────────────────────────
   const handleGenerate = async () => {
@@ -221,10 +239,17 @@ export function ScenarioDetail() {
         case 'regenerate-order': {
           const res = await fetch(`/api/orders/${pendingAction.order.id}/regenerate`, { method: 'POST' });
           if (!res.ok) throw new Error('Failed to regenerate order');
+          const atoDay: number = pendingAction.order.atoDayNumber;
+          const originalIds: string[] = (scenarioDetail?.taskingOrders ?? [])
+            .filter((o: any) => o.atoDayNumber === atoDay)
+            .map((o: any) => o.id);
           setPendingAction(null);
-          // Day regeneration runs in the background; poll for ~2.5 min.
+          // Day regeneration runs in the background; the poll loop clears
+          // `generating` once the new orders land. The timer is only a
+          // safety net for a regeneration that never completes.
           setGenerating(true);
-          setTimeout(() => setGenerating(false), 150000);
+          setRegenTarget({ atoDay, originalIds });
+          setTimeout(() => { setGenerating(false); setRegenTarget(null); }, 300000);
           break;
         }
         case 'edit-order-save': {

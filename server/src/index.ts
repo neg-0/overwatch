@@ -24,7 +24,7 @@ import { createIngestRoutes } from './api/ingest.js';
 import { injectRoutes } from './api/injects.js';
 import { knowledgeGraphRoutes } from './api/knowledge-graph.js';
 import { missionRoutes } from './api/missions.js';
-import { orderRoutes } from './api/orders.js';
+import { createOrderRoutes } from './api/orders.js';
 import { scenarioRoutes } from './api/scenarios.js';
 import { createSimulationRoutes } from './api/simulation.js';
 import { spaceAssetRoutes } from './api/space-assets.js';
@@ -73,7 +73,7 @@ app.get('/api/health', async (_req, res) => {
 // ─── API Routes ──────────────────────────────────────────────────────────────
 
 app.use('/api/scenarios', scenarioRoutes);
-app.use('/api/orders', orderRoutes);
+app.use('/api/orders', createOrderRoutes(io));
 app.use('/api/missions', missionRoutes);
 app.use('/api/assets', assetRoutes);
 app.use('/api/bases', baseRoutes);
