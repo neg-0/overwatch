@@ -765,6 +765,35 @@ export function DocumentIntake() {
     }
   };
 
+  // Re-run the ingest pipeline on an already-ingested document, replacing its
+  // prior extraction — used to re-process a doc after prompt tweaks.
+  const reingestDocument = async (doc: DocItem) => {
+    setSubmitting(prev => new Set(prev).add(doc.id));
+    try {
+      const res = await fetch('/api/ingest/reingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: doc.category, docId: doc.id }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Re-ingest failed' }));
+        addIngestToast(`❌ Re-ingest failed: ${err.error || 'Unknown error'}`);
+        return;
+      }
+      addIngestToast(`✓ Re-ingested ${doc.title}`);
+      setSelectedDocId(null);
+      fetchDocs();
+    } catch {
+      addIngestToast('❌ Re-ingest failed');
+    } finally {
+      setSubmitting(prev => {
+        const next = new Set(prev);
+        next.delete(doc.id);
+        return next;
+      });
+    }
+  };
+
   // ─── Batch Ingest All Unprocessed Docs ─────────────────────────────
 
   const batchIngestAll = async () => {
@@ -1293,19 +1322,27 @@ export function DocumentIntake() {
                     {selectedDoc.effectiveDate && ` · ${new Date(selectedDoc.effectiveDate).toLocaleDateString()}`}
                   </div>
                 </div>
-                <button
-                  onClick={handleIngestSelected}
-                  disabled={submitting.has(selectedDoc.id) || !!selectedDoc.ingestedAt}
-                  style={{
-                    padding: '8px 16px', borderRadius: '6px', border: 'none', fontWeight: 700,
-                    fontSize: '12px', cursor: selectedDoc.ingestedAt ? 'default' : 'pointer',
-                    background: selectedDoc.ingestedAt ? 'rgba(0, 200, 83, 0.15)' : submitting.has(selectedDoc.id) ? 'rgba(0, 212, 255, 0.2)' : 'var(--accent-primary)',
-                    color: selectedDoc.ingestedAt ? 'var(--accent-success)' : submitting.has(selectedDoc.id) ? 'var(--accent-primary)' : '#000',
-                    transition: 'all 0.2s',
-                  }}
-                >
-                  {selectedDoc.ingestedAt ? '✅ Ingested' : submitting.has(selectedDoc.id) ? '⟳ Processing…' : '⚡ Ingest'}
-                </button>
+                {(() => {
+                  const busy = submitting.has(selectedDoc.id);
+                  const ingested = !!selectedDoc.ingestedAt;
+                  return (
+                    <button
+                      onClick={() => (ingested ? reingestDocument(selectedDoc) : handleIngestSelected())}
+                      disabled={busy}
+                      title={ingested ? 'Re-run the ingest pipeline, replacing the prior extraction' : undefined}
+                      style={{
+                        padding: '8px 16px', borderRadius: '6px', fontWeight: 700,
+                        fontSize: '12px', cursor: busy ? 'default' : 'pointer',
+                        border: ingested && !busy ? '1px solid rgba(0, 212, 255, 0.35)' : 'none',
+                        background: busy ? 'rgba(0, 212, 255, 0.2)' : ingested ? 'rgba(0, 212, 255, 0.12)' : 'var(--accent-primary)',
+                        color: busy || ingested ? 'var(--accent-primary)' : '#000',
+                        transition: 'all 0.2s',
+                      }}
+                    >
+                      {busy ? '⟳ Processing…' : ingested ? '↻ Re-ingest' : '⚡ Ingest'}
+                    </button>
+                  );
+                })()}
                 {selectedDoc.category === 'order' && (
                   <>
                     <button

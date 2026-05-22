@@ -253,6 +253,82 @@ export function createIngestRoutes(io: Server) {
   });
 
   /**
+   * POST /api/ingest/reingest
+   * Re-run the ingest pipeline on an existing document, replacing its prior
+   * extraction. Useful for re-processing a single document after tweaking the
+   * classification/extraction prompts — no full scenario rebuild needed.
+   * Body: { category: 'strategy' | 'planning' | 'msel' | 'order', docId: string }
+   */
+  router.post('/reingest', async (req, res) => {
+    const { category, docId } = req.body ?? {};
+    if (!docId || typeof docId !== 'string') {
+      return res.status(400).json({ success: false, error: 'docId is required', timestamp: new Date().toISOString() });
+    }
+
+    try {
+      // Load the document's scenario and raw text, and prepare the cleanup of
+      // its prior record. The new ingested record is created first (below), so
+      // a failed re-ingest never destroys the original.
+      let scenarioId: string;
+      let rawText: string | null;
+      let deleteOld: () => Promise<unknown>;
+
+      if (category === 'order') {
+        const order = await prisma.taskingOrder.findUnique({
+          where: { id: docId },
+          select: { scenarioId: true, rawText: true },
+        });
+        if (!order) {
+          return res.status(404).json({ success: false, error: 'Order not found', timestamp: new Date().toISOString() });
+        }
+        scenarioId = order.scenarioId;
+        rawText = order.rawText;
+        deleteOld = () => prisma.taskingOrder.delete({ where: { id: docId } });
+      } else if (category === 'strategy') {
+        const doc = await prisma.strategyDocument.findUnique({
+          where: { id: docId },
+          select: { scenarioId: true, content: true },
+        });
+        if (!doc) {
+          return res.status(404).json({ success: false, error: 'Strategy document not found', timestamp: new Date().toISOString() });
+        }
+        scenarioId = doc.scenarioId;
+        rawText = doc.content;
+        deleteOld = () => prisma.strategyDocument.delete({ where: { id: docId } });
+      } else if (category === 'planning' || category === 'msel') {
+        const doc = await prisma.planningDocument.findUnique({
+          where: { id: docId },
+          select: { scenarioId: true, content: true },
+        });
+        if (!doc) {
+          return res.status(404).json({ success: false, error: 'Planning document not found', timestamp: new Date().toISOString() });
+        }
+        scenarioId = doc.scenarioId;
+        rawText = doc.content;
+        deleteOld = () => prisma.planningDocument.delete({ where: { id: docId } });
+      } else {
+        return res.status(400).json({ success: false, error: "category must be 'strategy', 'planning', 'msel', or 'order'", timestamp: new Date().toISOString() });
+      }
+
+      if (!rawText || rawText.trim().length === 0) {
+        return res.status(400).json({ success: false, error: 'Document has no raw text to re-ingest', timestamp: new Date().toISOString() });
+      }
+
+      const result = await ingestDocument(scenarioId, rawText, 'reingest', io);
+      await deleteOld();
+
+      return res.json({ ...result, timestamp: new Date().toISOString() });
+    } catch (err) {
+      console.error('[API] Re-ingestion failed:', err);
+      return res.status(500).json({
+        success: false,
+        error: 'Internal server error',
+        timestamp: new Date().toISOString(),
+      });
+    }
+  });
+
+  /**
    * GET /api/ingest/log?scenarioId=
    * Retrieve ingestion history for a scenario.
    */
