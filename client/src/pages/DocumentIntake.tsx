@@ -1137,19 +1137,23 @@ export function DocumentIntake() {
             )}
 
             {/* Battle Damage Assessments group */}
-            {docs.filter(d => d.category === 'bda').length > 0 && (
-              <DocGroup label="Battle Damage Assessments">
-                {docs.filter(d => d.category === 'bda').map(d => (
-                  <DocListItem
-                    key={d.id}
-                    doc={d}
-                    selected={selectedDocId === d.id}
-                    onClick={() => setSelectedDocId(d.id)}
-                    hasPendingFlags={pendingFlags.some(f => f.documentId === d.id)}
-                  />
-                ))}
-              </DocGroup>
-            )}
+            {(() => {
+              const bdaDocs = docs.filter(d => d.category === 'bda');
+              if (bdaDocs.length === 0) return null;
+              return (
+                <DocGroup label="Battle Damage Assessments">
+                  {bdaDocs.map(d => (
+                    <DocListItem
+                      key={d.id}
+                      doc={d}
+                      selected={selectedDocId === d.id}
+                      onClick={() => setSelectedDocId(d.id)}
+                      hasPendingFlags={pendingFlags.some(f => f.documentId === d.id)}
+                    />
+                  ))}
+                </DocGroup>
+              );
+            })()}
 
             {docs.length === 0 && !loadingDocs && (
               <div style={{

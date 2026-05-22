@@ -17,6 +17,7 @@ import {
   seedSpaceAssetsForScenario,
 } from './reference-data.js';
 import { buildUnitIndex, resolveUnitForMission, type UnitIndex } from './unit-resolver.js';
+import type { NormalizedBDA } from './doc-ingest.js';
 
 // ─── OpenAI Client ───────────────────────────────────────────────────────────
 
@@ -1322,12 +1323,7 @@ export async function generateDayOrders(scenarioId: string, atoDay: number, mode
     });
 
     if (priorBDA) {
-      const s = (priorBDA.structured ?? {}) as unknown as {
-        summary?: string;
-        targetAssessments?: Array<{ targetName: string; effectAchieved: string; assessment: string }>;
-        isrGaps?: string[];
-        recommendations?: string[];
-      };
+      const s = (priorBDA.structured ?? {}) as unknown as Partial<NormalizedBDA>;
       const parts: string[] = [];
       if (s.summary) parts.push(`SUMMARY: ${s.summary}`);
       if (s.targetAssessments?.length) {
