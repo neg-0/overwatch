@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { DocumentReaderModal } from '../components/DocumentReaderModal';
 import { GenerationProgressModal } from '../components/GenerationProgressModal';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useOverwatchStore, type ModelOverrides } from '../store/overwatch-store';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -68,6 +69,8 @@ export function ScenarioSetup() {
 
   const [modelOverrides, setModelOverrides] = useState<ModelOverrides>({});
   const [regeneratingSteps, setRegeneratingSteps] = useState<Record<string, boolean>>({});
+  const [alertMsg, setAlertMsg] = useState<string | null>(null);
+  const [pendingStep, setPendingStep] = useState<string | null>(null);
 
   const update = (key: keyof ScenarioConfig, value: string | number) =>
     setConfig(prev => ({ ...prev, [key]: value }));
@@ -152,11 +155,11 @@ export function ScenarioSetup() {
         // setActiveScenario joins the WS room + sets activeScenarioId
         // The activeScenarioId effect will trigger loadScenarioDetail
       } else {
-        alert(data.error || 'Failed to load ready-made scenario');
+        setAlertMsg(data.error || 'Failed to load ready-made scenario');
       }
     } catch (err) {
       console.error(err);
-      alert('Failed to load ready-made scenario');
+      setAlertMsg('Failed to load ready-made scenario');
     } finally {
       setGenerating(false);
     }
@@ -185,24 +188,15 @@ export function ScenarioSetup() {
     'MAAP', 'MSEL Injects',
   ];
 
-  const handleRegenerateStep = async (stepName: string) => {
+  const handleRegenerateStep = (stepName: string) => {
     const scenarioId = result?.data?.id || activeScenarioId;
     if (!scenarioId) return;
+    setPendingStep(stepName);
+  };
 
-    // Build list of downstream steps that will be destroyed
-    const stepIdx = PIPELINE_STEPS.indexOf(stepName);
-    const downstreamSteps = PIPELINE_STEPS.slice(stepIdx);
-
-    // Show cascade warning
-    const confirmed = window.confirm(
-      `⚠️ Cascading Regeneration Warning\n\n` +
-      `Regenerating "${stepName}" will also regenerate all downstream artifacts:\n\n` +
-      downstreamSteps.map((s, i) => `  ${i === 0 ? '➡️' : '  →'} ${s}`).join('\n') +
-      `\n\nThis action cannot be undone. Existing data for these steps will be permanently replaced.\n\nContinue?`
-    );
-
-    if (!confirmed) return;
-
+  const doRegenerateStep = async (stepName: string) => {
+    const scenarioId = result?.data?.id || activeScenarioId;
+    if (!scenarioId) return;
     try {
       setRegeneratingSteps(prev => ({ ...prev, [stepName]: true }));
       setRegenerateFromStep(stepName);
@@ -855,6 +849,37 @@ export function ScenarioSetup() {
           docType={selectedDoc.docType}
           content={selectedDoc.content}
           effectiveDate={selectedDoc.effectiveDate}
+        />
+      )}
+
+      {pendingStep && (
+        <ConfirmDialog
+          isOpen
+          variant="warning"
+          title="Cascading regeneration"
+          confirmLabel="Regenerate"
+          message={
+            <>
+              <p>Regenerating <strong>{pendingStep}</strong> also regenerates every downstream artifact:</p>
+              <ul style={{ margin: '8px 0 0', paddingLeft: '18px' }}>
+                {PIPELINE_STEPS.slice(PIPELINE_STEPS.indexOf(pendingStep)).map((s) => <li key={s}>{s}</li>)}
+              </ul>
+              <p style={{ marginTop: '8px' }}>Existing data for these steps is permanently replaced.</p>
+            </>
+          }
+          onConfirm={() => { const s = pendingStep; setPendingStep(null); doRegenerateStep(s); }}
+          onClose={() => setPendingStep(null)}
+        />
+      )}
+
+      {alertMsg && (
+        <ConfirmDialog
+          isOpen
+          mode="alert"
+          variant="danger"
+          title="Scenario load failed"
+          message={alertMsg}
+          onClose={() => setAlertMsg(null)}
         />
       )}
     </>

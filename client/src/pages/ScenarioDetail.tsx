@@ -1,8 +1,27 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { DocumentReaderModal } from '../components/DocumentReaderModal';
+import { DocumentEditModal } from '../components/DocumentEditModal';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { GenerationProgressModal } from '../components/GenerationProgressModal';
 import { useOverwatchStore, type ModelOverrides } from '../store/overwatch-store';
+
+// A tasking order being edited — raw text is fetched on demand.
+interface EditingOrder {
+  id: string;
+  title: string;
+  docType: string;
+  atoDay: number | null;
+  rawText: string;
+}
+
+// An action awaiting confirmation in the shared ConfirmDialog.
+type PendingAction =
+  | { kind: 'regenerate-scenario' }
+  | { kind: 'regenerate-step'; stepName: string }
+  | { kind: 'delete-order'; order: any }
+  | { kind: 'regenerate-order'; order: any }
+  | { kind: 'edit-order-save'; orderId: string; orderLabel: string; atoDay: number | null; rawText: string };
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -50,7 +69,11 @@ export function ScenarioDetail() {
   const [modelOverrides, setModelOverrides] = useState<ModelOverrides>({});
   const [regeneratingSteps, setRegeneratingSteps] = useState<Record<string, boolean>>({});
   const [generating, setGenerating] = useState(false);
-  const [showConfirmRegenerate, setShowConfirmRegenerate] = useState(false);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [editingOrder, setEditingOrder] = useState<EditingOrder | null>(null);
+
+  const simulation = useOverwatchStore((s) => s.simulation);
 
   const updateModel = (key: keyof ModelOverrides, value: string) =>
     setModelOverrides(prev => ({ ...prev, [key]: value || undefined }));
@@ -110,12 +133,7 @@ export function ScenarioDetail() {
   };
 
   const handleRegenerate = () => {
-    setShowConfirmRegenerate(true);
-  };
-
-  const confirmRegenerate = () => {
-    setShowConfirmRegenerate(false);
-    handleGenerate();
+    setPendingAction({ kind: 'regenerate-scenario' });
   };
 
   const handleResume = async () => {
@@ -136,18 +154,13 @@ export function ScenarioDetail() {
     'MAAP', 'MSEL Injects',
   ];
 
-  const handleRegenerateStep = async (stepName: string) => {
+  const handleRegenerateStep = (stepName: string) => {
     if (!scenarioId) return;
-    const stepIdx = PIPELINE_STEPS.indexOf(stepName);
-    const downstreamSteps = PIPELINE_STEPS.slice(stepIdx);
-    const confirmed = window.confirm(
-      `⚠️ Cascading Regeneration Warning\n\n` +
-      `Regenerating "${stepName}" will also regenerate all downstream artifacts:\n\n` +
-      downstreamSteps.map((s, i) => `  ${i === 0 ? '➡️' : '  →'} ${s}`).join('\n') +
-      `\n\nThis action cannot be undone. Continue?`
-    );
-    if (!confirmed) return;
+    setPendingAction({ kind: 'regenerate-step', stepName });
+  };
 
+  const doRegenerateStep = async (stepName: string) => {
+    if (!scenarioId) return;
     try {
       setRegeneratingSteps(prev => ({ ...prev, [stepName]: true }));
       setRegenerateFromStep(stepName);
@@ -165,6 +178,168 @@ export function ScenarioDetail() {
       setRegeneratingSteps(prev => ({ ...prev, [stepName]: false }));
     }
   };
+
+  // ─── Per-order controls ─────────────────────────────────────────
+  const handleEditOrder = async (order: any) => {
+    try {
+      const res = await fetch(`/api/orders/${order.id}`);
+      const json = await res.json();
+      setEditingOrder({
+        id: order.id,
+        title: `${order.orderType} — Day ${order.atoDayNumber}`,
+        docType: order.orderType,
+        atoDay: order.atoDayNumber ?? null,
+        rawText: json?.data?.rawText || '',
+      });
+    } catch (err) {
+      console.error('Failed to load order for editing:', err);
+    }
+  };
+
+  const runPendingAction = async () => {
+    if (!pendingAction) return;
+    setActionBusy(true);
+    try {
+      switch (pendingAction.kind) {
+        case 'regenerate-scenario':
+          setPendingAction(null);
+          handleGenerate();
+          break;
+        case 'regenerate-step': {
+          const step = pendingAction.stepName;
+          setPendingAction(null);
+          await doRegenerateStep(step);
+          break;
+        }
+        case 'delete-order': {
+          const res = await fetch(`/api/orders/${pendingAction.order.id}`, { method: 'DELETE' });
+          if (!res.ok) throw new Error('Failed to delete order');
+          setPendingAction(null);
+          if (scenarioId) loadScenarioDetail(scenarioId);
+          break;
+        }
+        case 'regenerate-order': {
+          const res = await fetch(`/api/orders/${pendingAction.order.id}/regenerate`, { method: 'POST' });
+          if (!res.ok) throw new Error('Failed to regenerate order');
+          setPendingAction(null);
+          // Day regeneration runs in the background; poll for ~2.5 min.
+          setGenerating(true);
+          setTimeout(() => setGenerating(false), 150000);
+          break;
+        }
+        case 'edit-order-save': {
+          const res = await fetch(`/api/orders/${pendingAction.orderId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rawText: pendingAction.rawText }),
+          });
+          if (!res.ok) throw new Error('Failed to re-ingest order');
+          setPendingAction(null);
+          setEditingOrder(null);
+          if (scenarioId) loadScenarioDetail(scenarioId);
+          break;
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      setPendingAction(null);
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  // Contextual note: editing an order at or before the current sim day is riskier.
+  const simImpactNote = (atoDay: number | null | undefined): ReactNode => {
+    const curDay = simulation?.currentAtoDay ?? 0;
+    if (atoDay != null && curDay > 0 && atoDay <= curDay) {
+      return (
+        <p style={{ marginTop: '8px', color: 'var(--accent-warning)' }}>
+          ⚠ This order is on Day {atoDay}, at or before the current simulation day (Day {curDay}) —
+          it may have already executed. Changes can desync the running simulation.
+        </p>
+      );
+    }
+    return (
+      <p style={{ marginTop: '8px', color: 'var(--text-muted)' }}>
+        If the simulation is running, changes to tasking orders can affect its results.
+      </p>
+    );
+  };
+
+  const confirmDialog = (() => {
+    if (!pendingAction) return null;
+    switch (pendingAction.kind) {
+      case 'regenerate-scenario':
+        return {
+          variant: 'danger' as const,
+          title: 'Regenerate entire scenario?',
+          confirmLabel: 'Regenerate',
+          message: (
+            <>
+              <p>
+                This replaces <strong>all generated artifacts</strong> — strategies, planning docs,
+                ORBAT, space assets, injects, and every tasking order — with new versions.
+                This cannot be undone.
+              </p>
+            </>
+          ),
+        };
+      case 'regenerate-step': {
+        const idx = PIPELINE_STEPS.indexOf(pendingAction.stepName);
+        const downstream = PIPELINE_STEPS.slice(idx);
+        return {
+          variant: 'warning' as const,
+          title: 'Cascading regeneration',
+          confirmLabel: 'Regenerate',
+          message: (
+            <>
+              <p>Regenerating <strong>{pendingAction.stepName}</strong> also regenerates every downstream artifact:</p>
+              <ul style={{ margin: '8px 0 0', paddingLeft: '18px' }}>
+                {downstream.map((s) => <li key={s}>{s}</li>)}
+              </ul>
+              <p style={{ marginTop: '8px' }}>This cannot be undone.</p>
+            </>
+          ),
+        };
+      }
+      case 'delete-order':
+        return {
+          variant: 'danger' as const,
+          title: `Delete ${pendingAction.order.orderType} — Day ${pendingAction.order.atoDayNumber}?`,
+          confirmLabel: 'Delete order',
+          message: (
+            <>
+              <p>This permanently removes the order and all of its mission packages, missions, targets, time windows, and space tasking.</p>
+              {simImpactNote(pendingAction.order.atoDayNumber)}
+            </>
+          ),
+        };
+      case 'regenerate-order':
+        return {
+          variant: 'warning' as const,
+          title: `Regenerate Day ${pendingAction.order.atoDayNumber} orders?`,
+          confirmLabel: 'Regenerate day',
+          message: (
+            <>
+              <p>This deletes and re-generates the ATO, MTO, and STO for Day {pendingAction.order.atoDayNumber} (they are interdependent). New missions and space tasking replace the current ones.</p>
+              {simImpactNote(pendingAction.order.atoDayNumber)}
+            </>
+          ),
+        };
+      case 'edit-order-save':
+        return {
+          variant: 'warning' as const,
+          title: `Re-ingest edited ${pendingAction.orderLabel}?`,
+          confirmLabel: 'Save & re-ingest',
+          message: (
+            <>
+              <p>Saving re-runs the ingest pipeline on the edited text and replaces this order's missions, targets, and space tasking.</p>
+              {simImpactNote(pendingAction.atoDay)}
+            </>
+          ),
+        };
+    }
+  })();
 
   const toggleExpand = (section: string) =>
     setExpanded(prev => prev === section ? null : section);
@@ -455,9 +630,14 @@ export function ScenarioDetail() {
                   onRegenerate={() => handleRegenerateStep('MAAP')} isRegenerating={regeneratingSteps['MAAP']}
                 >
                   {scenarioDetail.taskingOrders?.slice(0, 20).map((o: any, i: number) => (
-                    <div key={i} style={{ ...artifactDetailStyle, display: 'flex', justifyContent: 'space-between' }}>
+                    <div key={o.id ?? i} style={{ ...artifactDetailStyle, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
                       <span style={{ fontSize: '12px' }}>{o.orderType} — Day {o.atoDayNumber}</span>
-                      <span className="badge badge-primary" style={{ fontSize: '10px' }}>{o.missionPackages?.flatMap((mp: any) => mp.missions)?.length || 0} missions</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span className="badge badge-primary" style={{ fontSize: '10px' }}>{o.missionPackages?.flatMap((mp: any) => mp.missions)?.length || 0} missions</span>
+                        <DocAction label="Edit" onClick={() => handleEditOrder(o)} />
+                        <DocAction label="Regenerate" onClick={() => setPendingAction({ kind: 'regenerate-order', order: o })} />
+                        <DocAction label="Delete" danger onClick={() => setPendingAction({ kind: 'delete-order', order: o })} />
+                      </div>
                     </div>
                   ))}
                 </ArtifactSection>
@@ -589,38 +769,37 @@ export function ScenarioDetail() {
         </div>
       </div>
 
-      {/* ─── Confirm Regenerate Dialog ─── */}
-      {showConfirmRegenerate && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
-          display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000,
-        }} onClick={() => setShowConfirmRegenerate(false)}>
-          <div style={{
-            background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)',
-            borderRadius: '12px', padding: '28px', width: '420px',
-            boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
-          }} onClick={e => e.stopPropagation()}>
-            <h3 style={{ margin: '0 0 12px', fontSize: '16px', color: 'var(--text-bright)' }}>
-              ⚠️ Regenerate Scenario?
-            </h3>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5, margin: '0 0 20px' }}>
-              This will replace <strong>all existing generated artifacts</strong> (strategies, planning docs, ORBAT, space assets, injects, and orders) with new versions. This action cannot be undone.
-            </p>
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-              <button onClick={() => setShowConfirmRegenerate(false)} className="btn"
-                style={{ padding: '8px 20px', background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)' }}>
-                Cancel
-              </button>
-              <button onClick={confirmRegenerate} className="btn"
-                style={{
-                  padding: '8px 20px', background: 'rgba(255, 82, 82, 0.15)',
-                  border: '1px solid rgba(255, 82, 82, 0.4)', color: 'var(--accent-danger)', fontWeight: 700,
-                }}>
-                🔄 Regenerate
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* ─── Document edit modal ─── */}
+      {editingOrder && (
+        <DocumentEditModal
+          isOpen
+          title={editingOrder.title}
+          docType={editingOrder.docType}
+          initialText={editingOrder.rawText}
+          busy={actionBusy}
+          onClose={() => { if (!actionBusy) setEditingOrder(null); }}
+          onSave={(text) => setPendingAction({
+            kind: 'edit-order-save',
+            orderId: editingOrder.id,
+            orderLabel: editingOrder.title,
+            atoDay: editingOrder.atoDay,
+            rawText: text,
+          })}
+        />
+      )}
+
+      {/* ─── Shared confirm dialog ─── */}
+      {confirmDialog && (
+        <ConfirmDialog
+          isOpen
+          title={confirmDialog.title}
+          message={confirmDialog.message}
+          variant={confirmDialog.variant}
+          confirmLabel={confirmDialog.confirmLabel}
+          busy={actionBusy}
+          onConfirm={runPendingAction}
+          onClose={() => { if (!actionBusy) setPendingAction(null); }}
+        />
       )}
 
       <GenerationProgressModal
@@ -708,6 +887,26 @@ function ArtifactSection({
         </div>
       )}
     </div>
+  );
+}
+
+function DocAction({ label, onClick, danger }: { label: string; onClick: () => void; danger?: boolean }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      style={{
+        padding: '3px 8px',
+        fontSize: '10px',
+        fontWeight: 600,
+        borderRadius: '4px',
+        background: danger ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.05)',
+        color: danger ? 'var(--accent-danger)' : 'var(--text-secondary)',
+        border: `1px solid ${danger ? 'rgba(239,68,68,0.3)' : 'var(--border-subtle)'}`,
+        cursor: 'pointer',
+      }}
+    >
+      {label}
+    </button>
   );
 }
 
