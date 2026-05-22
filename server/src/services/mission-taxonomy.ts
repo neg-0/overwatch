@@ -47,7 +47,7 @@ const KEYWORD_RULES: { match: string[]; type: CanonicalMissionType }[] = [
   { match: ['DCA', 'DEFENSIVE COUNTER'], type: 'DCA' },
   { match: ['CSAR', 'SEARCH AND RESCUE', 'SEARCH & RESCUE', 'PERSONNEL RECOVERY'], type: 'CSAR' },
   { match: ['CLOSE AIR SUPPORT', 'CAS'], type: 'CAS' },
-  { match: ['AIR INTERDICTION', 'INTERDICT'], type: 'AI' },
+  { match: ['AIR INTERDICTION', 'INTERDICT', 'AI'], type: 'AI' },
   { match: ['STRIKE', 'ATTACK', 'BOMBING'], type: 'STRIKE' },
   { match: ['ISR', 'INTELLIGENCE', 'SURVEILLANCE', 'RECON', 'RECCE'], type: 'ISR' },
   { match: ['TANKER', 'REFUEL', 'AAR', 'AIR REFUEL'], type: 'TANKER' },

@@ -14,6 +14,8 @@ describe('canonicalMissionTypes', () => {
     expect(canonicalMissionTypes('SEAD')).toEqual(['SEAD']);
     expect(canonicalMissionTypes('OCA')).toEqual(['OCA']);
     expect(canonicalMissionTypes('DCA')).toEqual(['DCA']);
+    expect(canonicalMissionTypes('CAS')).toEqual(['CAS']);
+    expect(canonicalMissionTypes('AI')).toEqual(['AI']);
     expect(canonicalMissionTypes('ISR')).toEqual(['ISR']);
     expect(canonicalMissionTypes('TANKER')).toEqual(['TANKER']);
     expect(canonicalMissionTypes('C2')).toEqual(['C2']);
