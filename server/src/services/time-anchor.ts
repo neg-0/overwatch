@@ -40,8 +40,8 @@ export function extractTimeOfDay(raw: string | null | undefined): TimeOfDay | nu
   const dtg = s.match(/^\d{2}(\d{2})(\d{2})\s*Z?\s*(?:[A-Z]{3})?\s*(?:\d{2,4})?$/);
   if (dtg) return clampTime(parseInt(dtg[1], 10), parseInt(dtg[2], 10));
 
-  // HH:MM[Z] or HHMM[Z] — e.g. 06:10Z, 0610Z
-  const hm = s.match(/^(\d{1,2}):?(\d{2})\s*Z?$/);
+  // HH:MM[:SS][Z] or HHMM[Z] — e.g. 06:10Z, 0610Z, 06:10:00Z
+  const hm = s.match(/^(\d{1,2}):?(\d{2})(?::\d{2})?\s*Z?$/);
   if (hm) return clampTime(parseInt(hm[1], 10), parseInt(hm[2], 10));
 
   return null;

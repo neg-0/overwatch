@@ -281,7 +281,10 @@ function MapViewInner() {
   const baseMarkersRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
   const targetMarkersRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
   const trailsRef = useRef<Map<string, { lon: number; lat: number; simMs: number }[]>>(new Map());
-  const mapLoadedRef = useRef(false);
+  // Reactive map-loaded flag — must be state, not a ref, so the layer-rendering
+  // effects below re-run once the Mapbox style finishes loading. With a ref,
+  // effects that lose the race on first paint would never re-render.
+  const [mapLoaded, setMapLoaded] = useState(false);
 
   // Interpolation state for smooth marker movement
   const interpRef = useRef<Map<string, { from: [number, number]; to: [number, number]; startMs: number }>>(new Map());
@@ -342,14 +345,14 @@ function MapViewInner() {
     map.addControl(new mapboxgl.ScaleControl(), 'bottom-left');
 
     map.on('load', () => {
-      mapLoadedRef.current = true;
       initializeMapSources(map);
+      setMapLoaded(true);
     });
 
     mapRef.current = map;
 
     return () => {
-      mapLoadedRef.current = false;
+      setMapLoaded(false);
       map.remove();
       mapRef.current = null;
     };
@@ -474,7 +477,7 @@ function MapViewInner() {
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapLoadedRef.current || routes.length === 0) return;
+    if (!map || !mapLoaded || routes.length === 0) return;
 
     routes.forEach(route => {
       const sourceId = `route-${route.missionId}`;
@@ -539,7 +542,7 @@ function MapViewInner() {
         });
       }
     });
-  }, [routes]);
+  }, [routes, mapLoaded]);
 
   // ─── Render Base Markers ────────────────────────────────────────────────────
 
@@ -749,7 +752,7 @@ function MapViewInner() {
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapLoadedRef.current) return;
+    if (!map || !mapLoaded) return;
 
     const sourceId = 'coverage-circles';
 
@@ -831,13 +834,13 @@ function MapViewInner() {
         },
       });
     }
-  }, [parsedCoverageWindows, showCoverage, simulation.simTime]);
+  }, [parsedCoverageWindows, showCoverage, simulation.simTime, mapLoaded]);
 
   // ─── Update Breadcrumb Trails ───────────────────────────────────────────────
 
   const updateTrails = useCallback(() => {
     const map = mapRef.current;
-    if (!map || !mapLoadedRef.current) return;
+    if (!map || !mapLoaded) return;
 
     // If tracks are hidden, clear all trail layers
     if (!showTracks) {
@@ -922,7 +925,7 @@ function MapViewInner() {
         });
       }
     });
-  }, [positions, activeDomains, showTracks, simulation.simTime]);
+  }, [positions, activeDomains, showTracks, simulation.simTime, mapLoaded]);
 
   // ─── Update Markers + Trails from Positions ─────────────────────────────────
 
@@ -1028,7 +1031,7 @@ function MapViewInner() {
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapLoadedRef.current) return;
+    if (!map || !mapLoaded) return;
 
     const sourceId = 'space-links';
 
@@ -1112,7 +1115,7 @@ function MapViewInner() {
       map.removeLayer(`${sourceId}-line`);
       if (map.getSource(sourceId)) map.removeSource(sourceId);
     }
-  }, [linkMode, selectedEntity, allocations, positions, unitPositions]);
+  }, [linkMode, selectedEntity, allocations, positions, unitPositions, mapLoaded]);
 
   // ─── Domain Toggle ──────────────────────────────────────────────────────────
 

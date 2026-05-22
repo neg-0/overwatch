@@ -399,6 +399,7 @@ scenarioRoutes.get('/:id', async (req, res) => {
             },
           },
         },
+        battleDamageAssessments: { orderBy: { atoDayNumber: 'asc' } },
       },
     });
     if (!scenario) {

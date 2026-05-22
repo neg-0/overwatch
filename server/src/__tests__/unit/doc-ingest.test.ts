@@ -434,7 +434,7 @@ describe('Document Ingestion — Normalization', () => {
                 { waypointType: 'TGT', sequence: 3, latitude: 9.55, longitude: 112.89 },
               ],
               timeWindows: [
-                { windowType: 'TOT', start: '2026-03-01T14:30:00Z', end: '2026-03-01T15:30:00Z' },
+                { windowType: 'TOT', startTime: '2026-03-01T14:30:00Z', endTime: '2026-03-01T15:30:00Z' },
               ],
               targets: [
                 {
@@ -553,7 +553,7 @@ describe('Document Ingestion — Full Pipeline', () => {
                 { waypointType: 'TGT', sequence: 2, latitude: 9.55, longitude: 112.89 },
               ],
               timeWindows: [
-                { windowType: 'TOT', start: '2026-03-01T14:30:00Z', end: '2026-03-01T15:30:00Z' },
+                { windowType: 'TOT', startTime: '2026-03-01T14:30:00Z', endTime: '2026-03-01T15:30:00Z' },
               ],
               targets: [
                 {
@@ -591,6 +591,7 @@ describe('Document Ingestion — Full Pipeline', () => {
     expect(prisma.missionPackage.create).toHaveBeenCalled();
     expect(prisma.mission.create).toHaveBeenCalled();
     expect(prisma.waypoint.create).toHaveBeenCalledTimes(2);
+    expect(prisma.timeWindow.create).toHaveBeenCalledTimes(1);
     expect(prisma.missionTarget.create).toHaveBeenCalled();
     expect(prisma.spaceNeed.create).toHaveBeenCalled();
     expect(prisma.ingestLog.create).toHaveBeenCalled();
@@ -632,7 +633,7 @@ describe('Document Ingestion — Full Pipeline', () => {
                 { waypointType: 'TGT', sequence: 1, latitude: 9.55, longitude: 112.89 },
               ],
               timeWindows: [
-                { windowType: 'TOT', start: '2026-03-01T14:30:00Z' },
+                { windowType: 'TOT', startTime: '2026-03-01T14:30:00Z', endTime: null },
               ],
               targets: [],
               supportRequirements: [
@@ -695,7 +696,7 @@ describe('Document Ingestion — Full Pipeline', () => {
               platformCount: 2,
               missionType: 'CAS',
               waypoints: [],
-              timeWindows: [{ windowType: 'TOT', start: '14:30Z' }],
+              timeWindows: [{ windowType: 'TOT', startTime: '14:30Z', endTime: null }],
               targets: [],
               supportRequirements: [],
               spaceNeeds: [],

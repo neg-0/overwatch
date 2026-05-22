@@ -8,6 +8,7 @@ import { buildIngestDelta } from '../api/knowledge-graph.js';
 import {
   CLASSIFY_SCHEMA,
   NORMALIZE_ACO_SCHEMA,
+  NORMALIZE_BDA_SCHEMA,
   NORMALIZE_JIPTL_SCHEMA,
   NORMALIZE_MAAP_SCHEMA,
   NORMALIZE_MSEL_SCHEMA,
@@ -19,6 +20,7 @@ import {
 } from './llm-schemas.js';
 import { buildUnitIndex, resolveUnitForMission } from './unit-resolver.js';
 import { extractTimeOfDay, anchorToSimDay, anchorWindow } from './time-anchor.js';
+import { normalizeApplicableTo } from './mission-taxonomy.js';
 
 // ─── OpenAI Client ───────────────────────────────────────────────────────────
 import { getOpenAIClient } from '../lib/openai-client.js';
@@ -113,7 +115,7 @@ function matchStrategyPriority(
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export type HierarchyLevel = 'STRATEGY' | 'PLANNING' | 'ORDER' | 'EVENT_LIST';
+export type HierarchyLevel = 'STRATEGY' | 'PLANNING' | 'ORDER' | 'EVENT_LIST' | 'BDA';
 
 export interface ClassifyResult {
   hierarchyLevel: HierarchyLevel;
@@ -136,7 +138,6 @@ export interface NormalizedStrategy {
   title: string;
   docType: string;
   authorityLevel: string;
-  content: string;
   effectiveDate: string;
   tier: number;
   parentDocReference: string | null;
@@ -181,7 +182,6 @@ export interface NormalizedOPLAN extends NormalizedStrategy {
 export interface NormalizedPlanning {
   title: string;
   docType: string;
-  content: string;
   effectiveDate: string;
   priorities: Array<{
     rank: number;
@@ -216,7 +216,6 @@ export interface NormalizedJIPTL extends NormalizedPlanning {
 export interface NormalizedSPINS {
   title: string;
   docType: string;
-  content: string;
   effectiveDate: string;
   procedures: Array<{
     category: string;
@@ -245,7 +244,6 @@ export interface NormalizedSPINS {
 export interface NormalizedACO {
   title: string;
   docType: string;
-  content: string;
   effectiveDate: string;
   issuingAuthority: string;
   airspaceControlMeasures: Array<{
@@ -274,7 +272,6 @@ export interface NormalizedACO {
 export interface NormalizedMAAP {
   title: string;
   docType: string;
-  content: string;
   effectiveDate: string;
   classification: string;
   phase?: string | null;
@@ -353,8 +350,8 @@ export interface NormalizedOrder {
       }>;
       timeWindows: Array<{
         windowType: string;
-        start: string;
-        end?: string;
+        startTime: string;
+        endTime?: string | null;
       }>;
       targets: Array<{
         targetId: string;
@@ -407,6 +404,19 @@ export interface NormalizedMSEL {
   }>;
 }
 
+export interface NormalizedBDA {
+  title: string;
+  issuingAuthority: string;
+  atoDayNumber: number | null;
+  effectiveDate: string | null;
+  summary: string;
+  targetAssessments: Array<{ targetName: string; effectAchieved: string; assessment: string }>;
+  missionEffectiveness: Array<{ mission: string; outcome: string; notes: string }>;
+  isrGaps: string[];
+  recommendations: string[];
+  reviewFlags: ReviewFlag[];
+}
+
 export interface IngestResult {
   success: boolean;
   hierarchyLevel: HierarchyLevel;
@@ -437,6 +447,8 @@ export interface IngestResult {
     phaseCount?: number;
     commandTaskCount?: number;
     paceCommCount?: number;
+    targetAssessmentCount?: number;
+    recommendationCount?: number;
   };
   reviewFlags: ReviewFlag[];
   parseTimeMs: number;
@@ -451,8 +463,9 @@ const CLASSIFY_PROMPT = `You are a military document classifier. Analyze the fol
    - "PLANNING" — Staff-level planning products (JIPTL, JPEL, SPINS, ACO, MAAP, Component Priority Lists). These support execution planning, not strategic direction. IMPORTANT: The ACO (Airspace Control Order) is a PLANNING document, NOT an ORDER. Despite having "Order" in its name, it defines airspace structures and coordination measures — it is a planning product per JP 3-52.
    - "ORDER" — Tactical-level execution orders that task specific units/missions (ATO, MTO, STO, OPORD, EXORD, FRAGORD). An ATO contains mission packages with callsigns, targets, and timelines. Do NOT classify ACO or SPINS as orders.
    - "EVENT_LIST" — Exercise event lists (MSEL, scenario inject lists, exercise event schedules)
+   - "BDA" — Battle Damage Assessment reports: post-strike effectiveness analysis, target-by-target results, ISR gaps, and recommendations for the next ATO cycle. A BDA is an intelligence assessment — not an order, planning product, or event list.
 
-2. **documentType**: Specific type (NDS, NMS, JSCP, CONPLAN, OPLAN, CAMPAIGN_PLAN, JFC_GUIDANCE, COMPONENT_GUIDANCE, JIPTL, JPEL, SPINS, ACO, MAAP, ATO, MTO, STO, OPORD, EXORD, FRAGORD, MSEL)
+2. **documentType**: Specific type (NDS, NMS, JSCP, CONPLAN, OPLAN, CAMPAIGN_PLAN, JFC_GUIDANCE, COMPONENT_GUIDANCE, JIPTL, JPEL, SPINS, ACO, MAAP, ATO, MTO, STO, OPORD, EXORD, FRAGORD, MSEL, BDA)
 
 3. **sourceFormat**: The format the document is written in:
    - "USMTF" — Slash-delimited USMTF message (MSGID/ATO/...)
@@ -507,7 +520,7 @@ export async function classifyDocument(rawText: string, sourceHint?: string): Pr
   const result = JSON.parse(content) as ClassifyResult;
 
   // Validate hierarchy level
-  if (!['STRATEGY', 'PLANNING', 'ORDER', 'EVENT_LIST'].includes(result.hierarchyLevel)) {
+  if (!['STRATEGY', 'PLANNING', 'ORDER', 'EVENT_LIST', 'BDA'].includes(result.hierarchyLevel)) {
     throw new Error(`Invalid hierarchy level: ${result.hierarchyLevel}`);
   }
 
@@ -532,6 +545,12 @@ export async function classifyDocument(rawText: string, sourceHint?: string): Pr
     result.hierarchyLevel = 'EVENT_LIST';
   }
 
+  // BDA reports are their own hierarchy level
+  if (result.documentType === 'BDA' && result.hierarchyLevel !== 'BDA') {
+    console.log(`  [INGEST] Guard: Reclassified BDA from ${result.hierarchyLevel} → BDA`);
+    result.hierarchyLevel = 'BDA';
+  }
+
   return result;
 }
 
@@ -544,7 +563,6 @@ Extract the following into JSON:
   "title": "Document title",
   "docType": "NDS|NMS|JSCP|CONPLAN|OPLAN|CAMPAIGN_PLAN|JFC_GUIDANCE|COMPONENT_GUIDANCE",
   "authorityLevel": "SecDef|CJCS|CCDR|JFC|JFCC-Space|etc.",
-  "content": "Full text content preserved",
   "effectiveDate": "ISO 8601 date",
   "tier": 0,
   "parentDocReference": "Title or identifier of the parent authority document this derives from, or null if this is the root document",
@@ -581,7 +599,6 @@ Extract the following into JSON:
 {
   "title": "Document title",
   "docType": "JIPTL|JPEL|COMPONENT_PRIORITY|SPINS|ACO|MAAP",
-  "content": "Full text content preserved",
   "effectiveDate": "ISO 8601 date",
   "priorities": [
     {
@@ -617,7 +634,7 @@ const OPLAN_NORMALIZE_PROMPT = `You are a military operations planner extracting
 These are the richest strategy documents. Extract ALL of the following:
 
 BASIC FIELDS:
-- title, docType (OPLAN or CONPLAN), authorityLevel, content (full text), effectiveDate, tier (CONPLAN=4, OPLAN=5)
+- title, docType (OPLAN or CONPLAN), authorityLevel, effectiveDate, tier (CONPLAN=4, OPLAN=5)
 - parentDocReference: the parent authority document referenced (e.g., JSCP, NMS)
 - commanderIntent: the full commander's intent (purpose, method, end state) from section 3.a
 - mission: the mission statement from section 2
@@ -685,6 +702,13 @@ PROCEDURES — Extract every distinct procedure, rule, or instruction into the p
 - IFF: Identification Friend or Foe procedures, modes, codes, challenge/response
 - DURESS: Duress words, abort procedures, emergency codes
 - GENERAL: Any other operational procedure not in the above categories
+
+For each procedure's "applicableTo": list ONLY the specific mission types it actually
+governs (e.g. a refueling note → ["TANKER"]; a SEAD weapons-release rule → ["SEAD"]).
+Most procedures apply to 1-3 mission types. Use "ALL" ONLY for genuinely universal
+items — guard frequency, IFF/SIF, theater-wide EMCON or theater-wide ROE. NEVER combine
+"ALL" with specific types (["SEAD","OCA","ALL"] is wrong — if it is universal, just
+["ALL"]; if not, list the specific types).
 
 COMM PLANS — Extract every communication net, frequency, or channel:
 - netName: Net or channel name
@@ -916,7 +940,25 @@ Return ONLY valid JSON.
 DOCUMENT:
 `;
 
-type NormalizedData = NormalizedStrategy | NormalizedOPLAN | NormalizedPlanning | NormalizedJIPTL | NormalizedSPINS | NormalizedACO | NormalizedMAAP | NormalizedOrder | NormalizedMSEL;
+const BDA_NORMALIZE_PROMPT = `You are a military intelligence analyst extracting structured data from a Battle Damage Assessment (BDA) report.
+
+Extract:
+- title, issuingAuthority
+- atoDayNumber: the 1-based ATO day this BDA assesses (from "BDA for Day N", "Day N", etc.); null only if genuinely absent
+- effectiveDate: ISO 8601 if identifiable, else null
+- summary: the executive summary of the assessment
+- targetAssessments: per target — targetName, effectAchieved (DESTROYED / DEGRADED / NEUTRALIZED / NO EFFECT / UNKNOWN), and a short assessment
+- missionEffectiveness: per mission or callsign — outcome and notes
+- isrGaps: intelligence / ISR collection gaps identified
+- recommendations: recommendations that should shape the next ATO cycle
+
+Do NOT reproduce the document text — extract only the structured fields above.
+Return ONLY valid JSON.
+
+DOCUMENT:
+`;
+
+type NormalizedData = NormalizedStrategy | NormalizedOPLAN | NormalizedPlanning | NormalizedJIPTL | NormalizedSPINS | NormalizedACO | NormalizedMAAP | NormalizedOrder | NormalizedMSEL | NormalizedBDA;
 
 function getPromptAndSchema(classification: ClassifyResult): { prompt: string; schema: any } {
   switch (classification.hierarchyLevel) {
@@ -946,6 +988,8 @@ function getPromptAndSchema(classification: ClassifyResult): { prompt: string; s
       return { prompt: ORDER_NORMALIZE_PROMPT, schema: NORMALIZE_ORDER_SCHEMA };
     case 'EVENT_LIST':
       return { prompt: MSEL_NORMALIZE_PROMPT, schema: NORMALIZE_MSEL_SCHEMA };
+    case 'BDA':
+      return { prompt: BDA_NORMALIZE_PROMPT, schema: NORMALIZE_BDA_SCHEMA };
     default:
       return { prompt: PLANNING_NORMALIZE_PROMPT, schema: NORMALIZE_PLANNING_SCHEMA };
   }
@@ -1045,7 +1089,7 @@ async function persistStrategy(
       scenarioId,
       title: data.title || classification.title,
       docType,
-      content: data.content || rawText,
+      content: rawText,
       authorityLevel: data.authorityLevel || classification.issuingAuthority,
       effectiveDate,
       tier,
@@ -1102,7 +1146,7 @@ async function persistOPLAN(
         scenarioId,
         title: data.title || classification.title,
         docType,
-        content: data.content || rawText,
+        content: rawText,
         authorityLevel: data.authorityLevel || classification.issuingAuthority,
         effectiveDate,
         tier,
@@ -1206,7 +1250,7 @@ async function persistPlanning(
       strategyDocId,
       title: data.title || classification.title,
       docType: data.docType || classification.documentType,
-      content: data.content || rawText,
+      content: rawText,
       effectiveDate,
       sourceFormat: classification.sourceFormat,
       confidence: classification.confidence,
@@ -1268,7 +1312,7 @@ async function persistJIPTL(
       strategyDocId,
       title: data.title || classification.title,
       docType: data.docType || 'JIPTL',
-      content: data.content || rawText,
+      content: rawText,
       docTier: 3, // JIPTL tier
       effectiveDate,
       sourceFormat: classification.sourceFormat,
@@ -1339,7 +1383,7 @@ async function persistSPINS(
       strategyDocId,
       title: data.title || classification.title,
       docType: 'SPINS',
-      content: data.content || rawText,
+      content: rawText,
       docTier: 5, // SPINS tier
       effectiveDate,
       sourceFormat: classification.sourceFormat,
@@ -1358,7 +1402,7 @@ async function persistSPINS(
         description: proc.description,
         conditions: proc.conditions || null,
         authority: proc.authority || null,
-        applicableTo: proc.applicableTo || [],
+        applicableTo: normalizeApplicableTo(proc.applicableTo),
       },
     });
   }
@@ -1374,7 +1418,7 @@ async function persistSPINS(
         callsign: comm.callsign || null,
         purpose: comm.purpose,
         paceOrder: comm.paceOrder || null,
-        applicableTo: comm.applicableTo || [],
+        applicableTo: normalizeApplicableTo(comm.applicableTo),
       },
     });
   }
@@ -1408,7 +1452,7 @@ async function persistACO(
       strategyDocId,
       title: data.title || classification.title,
       docType: 'ACO',
-      content: data.content || rawText,
+      content: rawText,
       docTier: 5, // ACO tier
       effectiveDate,
       sourceFormat: classification.sourceFormat,
@@ -1480,7 +1524,7 @@ async function persistMAAP(
       strategyDocId,
       title: data.title || classification.title,
       docType: 'MAAP',
-      content: data.content || rawText,
+      content: rawText,
       docTier: 4, // MAAP tier
       effectiveDate,
       sourceFormat: classification.sourceFormat,
@@ -1754,9 +1798,9 @@ async function persistOrder(
 
           // Anchor the window to the order's simulation day; only the
           // time-of-day from the document is used (see persistOrder above).
-          const anchored = anchorWindow(scenario.startDate, dayOrdinal, tw.start, tw.end);
+          const anchored = anchorWindow(scenario.startDate, dayOrdinal, tw.startTime, tw.endTime);
           if (!anchored) {
-            console.warn(`[INGEST] Skipping time window with unparseable start: "${tw.start}"`);
+            console.warn(`[INGEST] Skipping time window with unparseable start: "${tw.startTime}"`);
             continue;
           }
 
@@ -1980,6 +2024,44 @@ async function persistMSEL(
   };
 }
 
+async function persistBDA(
+  scenarioId: string,
+  data: NormalizedBDA,
+  rawText: string,
+  classification: ClassifyResult,
+): Promise<{ createdId: string; extracted: IngestResult['extracted'] }> {
+  const effectiveDate = data.effectiveDate
+    ? parseSafeDate(data.effectiveDate)
+    : parseSafeDate(classification.effectiveDateStr);
+
+  // rawText is stored verbatim; the LLM's structured extraction is kept
+  // separately as JSON — document text is never derived from model output.
+  const bda = await prisma.battleDamageAssessment.create({
+    data: {
+      scenarioId,
+      atoDayNumber: data.atoDayNumber ?? null,
+      title: data.title || classification.title || 'Battle Damage Assessment',
+      issuingAuthority: data.issuingAuthority || classification.issuingAuthority || null,
+      rawText,
+      structured: data as object,
+      effectiveDate,
+      sourceFormat: classification.sourceFormat,
+      confidence: classification.confidence,
+      ingestedAt: new Date(),
+    },
+  });
+
+  console.log(`  [INGEST] BDA created: ${bda.title} — Day ${data.atoDayNumber ?? '?'}, ${data.targetAssessments?.length ?? 0} target assessments`);
+
+  return {
+    createdId: bda.id,
+    extracted: {
+      targetAssessmentCount: data.targetAssessments?.length ?? 0,
+      recommendationCount: data.recommendations?.length ?? 0,
+    },
+  };
+}
+
 /**
  * Parse a military DTG (Date-Time Group) like "041400Z MAR 26" into triggerDay/triggerHour
  * relative to the scenario start date.
@@ -2192,6 +2274,12 @@ export async function ingestDocument(
       }
       case 'EVENT_LIST': {
         const result = await persistMSEL(scenarioId, normalized as NormalizedMSEL, rawText, classification);
+        createdId = result.createdId;
+        extracted = result.extracted;
+        break;
+      }
+      case 'BDA': {
+        const result = await persistBDA(scenarioId, normalized as NormalizedBDA, rawText, classification);
         createdId = result.createdId;
         extracted = result.extracted;
         break;

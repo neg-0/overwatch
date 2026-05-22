@@ -17,7 +17,8 @@ import {
   seedSpaceAssetsForScenario,
 } from './reference-data.js';
 import { buildUnitIndex, resolveUnitForMission, type UnitIndex } from './unit-resolver.js';
-import { extractTimeOfDay, formatDTG } from './time-anchor.js';
+import { extractTimeOfDay, formatDTG, anchorWindow } from './time-anchor.js';
+import type { NormalizedBDA } from './doc-ingest.js';
 
 // ─── OpenAI Client ───────────────────────────────────────────────────────────
 
@@ -30,6 +31,9 @@ const openai = getOpenAIClient();
 function getModel(tier: 'flagship' | 'midRange' | 'fast', override?: string): string {
   return override || config.llm[tier];
 }
+
+const HOUR_MS = 3_600_000;
+const DAY_MS = 24 * HOUR_MS;
 
 // ─── Prompt Templates ────────────────────────────────────────────────────────
 
@@ -676,7 +680,7 @@ export async function generateFullScenario({
   // Read startDate from the scenario record instead of hardcoding
   const scenarioRecord = await prisma.scenario.findUnique({ where: { id: scenarioId }, select: { startDate: true, endDate: true } });
   const startDate = scenarioRecord?.startDate || new Date('2026-03-01T00:00:00Z');
-  const endDate = new Date(startDate.getTime() + duration * 24 * 3600000);
+  const endDate = new Date(startDate.getTime() + duration * DAY_MS);
 
   // Determine which step to start from (for resume)
   let startIndex = 0;
@@ -1254,7 +1258,7 @@ export async function generateDayOrders(scenarioId: string, atoDay: number, mode
   // Build unit index for doctrine-driven mission → unit assignment (ORBAT match)
   const unitIndex = buildUnitIndex(scenario.units);
 
-  const dayDate = new Date(scenario.startDate.getTime() + (atoDay - 1) * 24 * 3600000);
+  const dayDate = new Date(scenario.startDate.getTime() + (atoDay - 1) * DAY_MS);
   const dayStr = String(atoDay).padStart(3, '0');
 
   // Find the JIPTL to link orders to
@@ -1313,39 +1317,55 @@ export async function generateDayOrders(scenarioId: string, atoDay: number, mode
     prevDayBDA = 'First day of operations — no previous day data';
   } else {
     prevDayLabel = `Day ${atoDay - 1} Results`;
-    // Query previous day's missions
-    const prevDayOrders = await prisma.taskingOrder.findMany({
+
+    // Prefer the prior day's Battle Damage Assessment — a proper intelligence
+    // product directly shapes the next ATO. Fall back to a raw mission-status
+    // summary when no BDA has been ingested for that day yet.
+    const priorBDA = await prisma.battleDamageAssessment.findFirst({
       where: { scenarioId, atoDayNumber: atoDay - 1 },
-      include: {
-        missionPackages: {
-          include: {
-            missions: {
-              include: {
-                targets: true,
-              },
-            },
-          },
-        },
-      },
+      orderBy: { createdAt: 'desc' },
     });
 
-    if (prevDayOrders.length === 0) {
-      prevDayBDA = 'No previous day orders found — treat as first operational day';
+    if (priorBDA) {
+      const s = (priorBDA.structured ?? {}) as unknown as Partial<NormalizedBDA>;
+      const parts: string[] = [];
+      if (s.summary) parts.push(`SUMMARY: ${s.summary}`);
+      if (s.targetAssessments?.length) {
+        parts.push('TARGET EFFECTS:\n' + s.targetAssessments
+          .slice(0, 15)
+          .map(t => `  - ${t.targetName}: ${t.effectAchieved} — ${t.assessment}`)
+          .join('\n'));
+      }
+      if (s.isrGaps?.length) parts.push('ISR GAPS:\n' + s.isrGaps.map(g => `  - ${g}`).join('\n'));
+      if (s.recommendations?.length) parts.push('RECOMMENDATIONS:\n' + s.recommendations.map(r => `  - ${r}`).join('\n'));
+      prevDayBDA = parts.length > 0 ? parts.join('\n\n') : priorBDA.rawText.slice(0, 4000);
     } else {
-      const missionSummaries: string[] = [];
-      for (const order of prevDayOrders) {
-        for (const pkg of order.missionPackages) {
-          for (const msn of pkg.missions) {
-            const targetNames = msn.targets.map(t => t.targetName).join(', ');
-            missionSummaries.push(
-              `${msn.callsign || msn.missionId} (${msn.missionType}, ${msn.platformType}x${msn.platformCount}) — Status: ${msn.status}${targetNames ? ` — Targets: ${targetNames}` : ''}`
-            );
+      // Fallback: summarize the previous day's mission statuses.
+      const prevDayOrders = await prisma.taskingOrder.findMany({
+        where: { scenarioId, atoDayNumber: atoDay - 1 },
+        include: {
+          missionPackages: { include: { missions: { include: { targets: true } } } },
+        },
+      });
+
+      if (prevDayOrders.length === 0) {
+        prevDayBDA = 'No previous day orders found — treat as first operational day';
+      } else {
+        const missionSummaries: string[] = [];
+        for (const order of prevDayOrders) {
+          for (const pkg of order.missionPackages) {
+            for (const msn of pkg.missions) {
+              const targetNames = msn.targets.map(t => t.targetName).join(', ');
+              missionSummaries.push(
+                `${msn.callsign || msn.missionId} (${msn.missionType}, ${msn.platformType}x${msn.platformCount}) — Status: ${msn.status}${targetNames ? ` — Targets: ${targetNames}` : ''}`
+              );
+            }
           }
         }
+        prevDayBDA = missionSummaries.length > 0
+          ? missionSummaries.slice(0, 15).join('\n')
+          : 'Previous day missions had no details available';
       }
-      prevDayBDA = missionSummaries.length > 0
-        ? missionSummaries.slice(0, 15).join('\n')
-        : 'Previous day missions had no details available';
     }
   }
 
@@ -1472,7 +1492,7 @@ async function generateOrder(
         orderId: orderData.orderId || `${orderType} -2026 - ${String(atoDay).padStart(3, '0')} A`,
         issuingAuthority: orderData.issuingAuthority || `${orderType} Authority`,
         effectiveStart: dayDate,
-        effectiveEnd: new Date(dayDate.getTime() + 24 * 3600000),
+        effectiveEnd: new Date(dayDate.getTime() + DAY_MS),
         atoDayNumber: atoDay,
         rawText: rawJson,
         rawFormat: 'PLAIN_TEXT',
@@ -1538,26 +1558,15 @@ async function generateOrder(
             // Time windows
             if (msn.timeWindows) {
               for (const tw of msn.timeWindows) {
-                const startTod = extractTimeOfDay(tw.startTime) ?? { hours: 0, minutes: 0 };
-                const twStart = new Date(dayDate);
-                twStart.setUTCHours(startTod.hours, startTod.minutes, 0, 0);
-
-                const endTod = tw.endTime ? extractTimeOfDay(tw.endTime) : null;
-                let twEnd: Date | undefined;
-                if (endTod) {
-                  twEnd = new Date(dayDate);
-                  twEnd.setUTCHours(endTod.hours, endTod.minutes, 0, 0);
-                  if (twEnd.getTime() <= twStart.getTime()) {
-                    twEnd = new Date(twEnd.getTime() + 24 * 3600000);
-                  }
-                }
+                const anchored = anchorWindow(dayDate, 1, tw.startTime, tw.endTime);
+                if (!anchored) continue;
 
                 await prisma.timeWindow.create({
                   data: {
                     missionId: dbMission.id,
                     windowType: normalizeWindowType(tw.windowType),
-                    startTime: twStart,
-                    endTime: twEnd,
+                    startTime: anchored.start,
+                    endTime: anchored.end,
                   },
                 });
               }
@@ -1658,7 +1667,7 @@ async function generateOrder(
                   const tod = extractTimeOfDay(twForSpace.startTime) ?? { hours: 0, minutes: 0 };
                   snStart.setUTCHours(tod.hours - 1, tod.minutes, 0, 0);
                 }
-                const snEnd = new Date(snStart.getTime() + 4 * 3600000);
+                const snEnd = new Date(snStart.getTime() + 4 * HOUR_MS);
 
                 spaceNeedData.push({
                   missionId: dbMission.id,
@@ -1690,7 +1699,7 @@ async function generateOrder(
                 const missionStart = msn.timeWindows?.[0]
                   ? (() => { const d = new Date(dayDate); const tod = extractTimeOfDay(msn.timeWindows[0].startTime) ?? { hours: 0, minutes: 0 }; d.setUTCHours(tod.hours - 1, tod.minutes, 0, 0); return d; })()
                   : dayDate;
-                const missionEnd = new Date(missionStart.getTime() + 4 * 3600000);
+                const missionEnd = new Date(missionStart.getTime() + 4 * HOUR_MS);
 
                 // Map comms systems → SpaceCapabilityType
                 const systemToCapability = {
