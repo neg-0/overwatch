@@ -49,7 +49,6 @@ export const NORMALIZE_STRATEGY_SCHEMA = {
       title: { type: 'string' as const },
       docType: { type: 'string' as const },
       authorityLevel: { type: 'string' as const },
-      content: { type: 'string' as const },
       effectiveDate: { type: 'string' as const },
       tier: { type: 'number' as const, description: 'Hierarchy tier: NDS=1, NMS=2, JSCP=3, CONPLAN=4, OPLAN=5, other=0' },
       parentDocReference: { type: ['string', 'null'] as const, description: 'Title or identifier of the parent authority document this derives from, if referenced' },
@@ -82,7 +81,7 @@ export const NORMALIZE_STRATEGY_SCHEMA = {
         },
       },
     },
-    required: ['title', 'docType', 'authorityLevel', 'content', 'effectiveDate', 'tier', 'parentDocReference', 'priorities', 'reviewFlags'],
+    required: ['title', 'docType', 'authorityLevel', 'effectiveDate', 'tier', 'parentDocReference', 'priorities', 'reviewFlags'],
     additionalProperties: false,
   },
 };
@@ -98,7 +97,6 @@ export const NORMALIZE_OPLAN_SCHEMA = {
       title: { type: 'string' as const },
       docType: { type: 'string' as const },
       authorityLevel: { type: 'string' as const },
-      content: { type: 'string' as const },
       effectiveDate: { type: 'string' as const },
       tier: { type: 'number' as const },
       parentDocReference: { type: ['string', 'null'] as const },
@@ -190,7 +188,7 @@ export const NORMALIZE_OPLAN_SCHEMA = {
         },
       },
     },
-    required: ['title', 'docType', 'authorityLevel', 'content', 'effectiveDate', 'tier',
+    required: ['title', 'docType', 'authorityLevel', 'effectiveDate', 'tier',
       'parentDocReference', 'commanderIntent', 'mission', 'priorities', 'phases',
       'commandTasks', 'paceComms', 'logisticsPriorities', 'reviewFlags'],
     additionalProperties: false,
@@ -207,7 +205,6 @@ export const NORMALIZE_PLANNING_SCHEMA = {
     properties: {
       title: { type: 'string' as const },
       docType: { type: 'string' as const },
-      content: { type: 'string' as const },
       effectiveDate: { type: 'string' as const },
       priorities: {
         type: 'array' as const,
@@ -241,7 +238,7 @@ export const NORMALIZE_PLANNING_SCHEMA = {
         },
       },
     },
-    required: ['title', 'docType', 'content', 'effectiveDate', 'priorities', 'reviewFlags'],
+    required: ['title', 'docType', 'effectiveDate', 'priorities', 'reviewFlags'],
     additionalProperties: false,
   },
 };
@@ -271,7 +268,6 @@ export const NORMALIZE_JIPTL_SCHEMA = {
     properties: {
       title: { type: 'string' as const },
       docType: { type: 'string' as const },
-      content: { type: 'string' as const },
       effectiveDate: { type: 'string' as const },
       priorities: {
         type: 'array' as const,
@@ -300,7 +296,7 @@ export const NORMALIZE_JIPTL_SCHEMA = {
       },
       reviewFlags: REVIEW_FLAGS_SCHEMA,
     },
-    required: ['title', 'docType', 'content', 'effectiveDate', 'priorities', 'reviewFlags'],
+    required: ['title', 'docType', 'effectiveDate', 'priorities', 'reviewFlags'],
     additionalProperties: false,
   },
 };
@@ -315,7 +311,6 @@ export const NORMALIZE_SPINS_SCHEMA = {
     properties: {
       title: { type: 'string' as const },
       docType: { type: 'string' as const },
-      content: { type: 'string' as const },
       effectiveDate: { type: 'string' as const },
       procedures: {
         type: 'array' as const,
@@ -373,7 +368,7 @@ export const NORMALIZE_SPINS_SCHEMA = {
       },
       reviewFlags: REVIEW_FLAGS_SCHEMA,
     },
-    required: ['title', 'docType', 'content', 'effectiveDate', 'procedures', 'commPlans', 'codeWords', 'reviewFlags'],
+    required: ['title', 'docType', 'effectiveDate', 'procedures', 'commPlans', 'codeWords', 'reviewFlags'],
     additionalProperties: false,
   },
 };
@@ -388,7 +383,6 @@ export const NORMALIZE_ACO_SCHEMA = {
     properties: {
       title: { type: 'string' as const },
       docType: { type: 'string' as const },
-      content: { type: 'string' as const },
       effectiveDate: { type: 'string' as const },
       issuingAuthority: { type: 'string' as const },
       airspaceControlMeasures: {
@@ -432,7 +426,7 @@ export const NORMALIZE_ACO_SCHEMA = {
       },
       reviewFlags: REVIEW_FLAGS_SCHEMA,
     },
-    required: ['title', 'docType', 'content', 'effectiveDate', 'issuingAuthority', 'airspaceControlMeasures', 'fireSupportMeasures', 'reviewFlags'],
+    required: ['title', 'docType', 'effectiveDate', 'issuingAuthority', 'airspaceControlMeasures', 'fireSupportMeasures', 'reviewFlags'],
     additionalProperties: false,
   },
 };
@@ -447,7 +441,6 @@ export const NORMALIZE_MAAP_SCHEMA = {
     properties: {
       title: { type: 'string' as const },
       docType: { type: 'string' as const },
-      content: { type: 'string' as const },
       effectiveDate: { type: 'string' as const },
       classification: { type: 'string' as const },
       phase: { type: ['string', 'null'] as const },
@@ -535,7 +528,7 @@ export const NORMALIZE_MAAP_SCHEMA = {
       guidance: { type: ['string', 'null'] as const },
       reviewFlags: REVIEW_FLAGS_SCHEMA,
     },
-    required: ['title', 'docType', 'content', 'effectiveDate', 'classification', 'phase',
+    required: ['title', 'docType', 'effectiveDate', 'classification', 'phase',
       'targetPriorityList', 'forceApportionment', 'coordinationMeasures', 'weaponTargetPairings',
       'sortieFlow', 'guidance', 'reviewFlags'],
     additionalProperties: false,

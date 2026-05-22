@@ -135,7 +135,6 @@ export interface NormalizedStrategy {
   title: string;
   docType: string;
   authorityLevel: string;
-  content: string;
   effectiveDate: string;
   tier: number;
   parentDocReference: string | null;
@@ -180,7 +179,6 @@ export interface NormalizedOPLAN extends NormalizedStrategy {
 export interface NormalizedPlanning {
   title: string;
   docType: string;
-  content: string;
   effectiveDate: string;
   priorities: Array<{
     rank: number;
@@ -215,7 +213,6 @@ export interface NormalizedJIPTL extends NormalizedPlanning {
 export interface NormalizedSPINS {
   title: string;
   docType: string;
-  content: string;
   effectiveDate: string;
   procedures: Array<{
     category: string;
@@ -244,7 +241,6 @@ export interface NormalizedSPINS {
 export interface NormalizedACO {
   title: string;
   docType: string;
-  content: string;
   effectiveDate: string;
   issuingAuthority: string;
   airspaceControlMeasures: Array<{
@@ -273,7 +269,6 @@ export interface NormalizedACO {
 export interface NormalizedMAAP {
   title: string;
   docType: string;
-  content: string;
   effectiveDate: string;
   classification: string;
   phase?: string | null;
@@ -543,7 +538,6 @@ Extract the following into JSON:
   "title": "Document title",
   "docType": "NDS|NMS|JSCP|CONPLAN|OPLAN|CAMPAIGN_PLAN|JFC_GUIDANCE|COMPONENT_GUIDANCE",
   "authorityLevel": "SecDef|CJCS|CCDR|JFC|JFCC-Space|etc.",
-  "content": "Full text content preserved",
   "effectiveDate": "ISO 8601 date",
   "tier": 0,
   "parentDocReference": "Title or identifier of the parent authority document this derives from, or null if this is the root document",
@@ -580,7 +574,6 @@ Extract the following into JSON:
 {
   "title": "Document title",
   "docType": "JIPTL|JPEL|COMPONENT_PRIORITY|SPINS|ACO|MAAP",
-  "content": "Full text content preserved",
   "effectiveDate": "ISO 8601 date",
   "priorities": [
     {
@@ -1038,7 +1031,7 @@ async function persistStrategy(
       scenarioId,
       title: data.title || classification.title,
       docType,
-      content: data.content || rawText,
+      content: rawText,
       authorityLevel: data.authorityLevel || classification.issuingAuthority,
       effectiveDate,
       tier,
@@ -1095,7 +1088,7 @@ async function persistOPLAN(
         scenarioId,
         title: data.title || classification.title,
         docType,
-        content: data.content || rawText,
+        content: rawText,
         authorityLevel: data.authorityLevel || classification.issuingAuthority,
         effectiveDate,
         tier,
@@ -1199,7 +1192,7 @@ async function persistPlanning(
       strategyDocId,
       title: data.title || classification.title,
       docType: data.docType || classification.documentType,
-      content: data.content || rawText,
+      content: rawText,
       effectiveDate,
       sourceFormat: classification.sourceFormat,
       confidence: classification.confidence,
@@ -1261,7 +1254,7 @@ async function persistJIPTL(
       strategyDocId,
       title: data.title || classification.title,
       docType: data.docType || 'JIPTL',
-      content: data.content || rawText,
+      content: rawText,
       docTier: 3, // JIPTL tier
       effectiveDate,
       sourceFormat: classification.sourceFormat,
@@ -1332,7 +1325,7 @@ async function persistSPINS(
       strategyDocId,
       title: data.title || classification.title,
       docType: 'SPINS',
-      content: data.content || rawText,
+      content: rawText,
       docTier: 5, // SPINS tier
       effectiveDate,
       sourceFormat: classification.sourceFormat,
@@ -1401,7 +1394,7 @@ async function persistACO(
       strategyDocId,
       title: data.title || classification.title,
       docType: 'ACO',
-      content: data.content || rawText,
+      content: rawText,
       docTier: 5, // ACO tier
       effectiveDate,
       sourceFormat: classification.sourceFormat,
@@ -1473,7 +1466,7 @@ async function persistMAAP(
       strategyDocId,
       title: data.title || classification.title,
       docType: 'MAAP',
-      content: data.content || rawText,
+      content: rawText,
       docTier: 4, // MAAP tier
       effectiveDate,
       sourceFormat: classification.sourceFormat,
