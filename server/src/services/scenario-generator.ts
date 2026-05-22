@@ -17,6 +17,7 @@ import {
   seedSpaceAssetsForScenario,
 } from './reference-data.js';
 import { buildUnitIndex, resolveUnitForMission, type UnitIndex } from './unit-resolver.js';
+import { extractTimeOfDay, formatDTG } from './time-anchor.js';
 
 // ─── OpenAI Client ───────────────────────────────────────────────────────────
 
@@ -440,7 +441,7 @@ Include realistic details specific to the "{theater}" theater and "{adversary}" 
 The document should be 1500-2500 words. Include specific targets, units, frequencies, and procedures.
 Return ONLY the document text, no JSON, no markdown fences.`;
 
-const ATO_PROMPT = `You are a military operations officer generating a realistic Air Tasking Order (ATO) for Day "{atoDay}".
+const ATO_PROMPT = `You are a military operations officer generating a realistic Air Tasking Order (ATO) for Day "{atoDay}", effective "{effectiveDtg}" (a 24-hour period). Use this date for every date-time group (DTG) in the order.
 
 CONTEXT:
 - Theater: "{theater}"
@@ -529,7 +530,7 @@ Return as JSON matching this structure:
 Make sure all coordinates are realistic for the "{theater}" theater.
 Return ONLY valid JSON, no markdown code fences.`;
 
-const MTO_PROMPT = `You are a maritime operations officer generating a Maritime Tasking Order (MTO) for Day "{atoDay}".
+const MTO_PROMPT = `You are a maritime operations officer generating a Maritime Tasking Order (MTO) for Day "{atoDay}", effective "{effectiveDtg}" (a 24-hour period). Use this date for every date-time group (DTG) in the order.
 
 CONTEXT:
 - Theater: "{theater}"
@@ -568,7 +569,7 @@ Return as JSON with same structure as ATO but with domain: "MARITIME".
 Use realistic maritime waypoints (patrol boxes, choke points) with coordinates in "{theater}".
 Return ONLY valid JSON.`;
 
-const STO_PROMPT = `You are a USSPACECOM/JFCC-Space operations officer generating a Space Tasking Order (STO) for Day "{atoDay}".
+const STO_PROMPT = `You are a USSPACECOM/JFCC-Space operations officer generating a Space Tasking Order (STO) for Day "{atoDay}", effective "{effectiveDtg}" (a 24-hour period). Use this date for every date-time group (DTG) in the order.
 
 CONTEXT:
 - Theater: "{theater}"
@@ -1449,6 +1450,7 @@ async function generateOrder(
     prompt = prompt.replace(new RegExp(`"\\{${key}\\}"`, 'g'), value);
   }
   prompt = prompt.replace(/"\{atoDay\}"/g, String(atoDay));
+  prompt = prompt.replace(/"\{effectiveDtg\}"/g, formatDTG(dayDate));
 
   try {
     const response = await openai.chat.completions.create({
@@ -1536,14 +1538,18 @@ async function generateOrder(
             // Time windows
             if (msn.timeWindows) {
               for (const tw of msn.timeWindows) {
+                const startTod = extractTimeOfDay(tw.startTime) ?? { hours: 0, minutes: 0 };
                 const twStart = new Date(dayDate);
-                const [hours, minutes] = (tw.startTime || '00:00Z').replace('Z', '').split(':');
-                twStart.setUTCHours(parseInt(hours), parseInt(minutes), 0, 0);
+                twStart.setUTCHours(startTod.hours, startTod.minutes, 0, 0);
 
-                const twEnd = tw.endTime ? new Date(dayDate) : undefined;
-                if (twEnd && tw.endTime) {
-                  const [h2, m2] = tw.endTime.replace('Z', '').split(':');
-                  twEnd.setUTCHours(parseInt(h2), parseInt(m2), 0, 0);
+                const endTod = tw.endTime ? extractTimeOfDay(tw.endTime) : null;
+                let twEnd: Date | undefined;
+                if (endTod) {
+                  twEnd = new Date(dayDate);
+                  twEnd.setUTCHours(endTod.hours, endTod.minutes, 0, 0);
+                  if (twEnd.getTime() <= twStart.getTime()) {
+                    twEnd = new Date(twEnd.getTime() + 24 * 3600000);
+                  }
                 }
 
                 await prisma.timeWindow.create({
@@ -1649,8 +1655,8 @@ async function generateOrder(
                 const twForSpace = msn.timeWindows?.[0];
                 const snStart = new Date(dayDate);
                 if (twForSpace) {
-                  const [h, m] = (twForSpace.startTime || '00:00Z').replace('Z', '').split(':');
-                  snStart.setUTCHours(parseInt(h) - 1, parseInt(m), 0, 0);
+                  const tod = extractTimeOfDay(twForSpace.startTime) ?? { hours: 0, minutes: 0 };
+                  snStart.setUTCHours(tod.hours - 1, tod.minutes, 0, 0);
                 }
                 const snEnd = new Date(snStart.getTime() + 4 * 3600000);
 
@@ -1682,7 +1688,7 @@ async function generateOrder(
               if (missionAssetType) {
                 const commsSystems = missionAssetType.commsSystems as { band: string; system: string; role: string }[] | null;
                 const missionStart = msn.timeWindows?.[0]
-                  ? (() => { const d = new Date(dayDate); const [h, m] = (msn.timeWindows[0].startTime || '00:00Z').replace('Z', '').split(':'); d.setUTCHours(parseInt(h) - 1, parseInt(m), 0, 0); return d; })()
+                  ? (() => { const d = new Date(dayDate); const tod = extractTimeOfDay(msn.timeWindows[0].startTime) ?? { hours: 0, minutes: 0 }; d.setUTCHours(tod.hours - 1, tod.minutes, 0, 0); return d; })()
                   : dayDate;
                 const missionEnd = new Date(missionStart.getTime() + 4 * 3600000);
 

@@ -18,6 +18,7 @@ import {
   NORMALIZE_STRATEGY_SCHEMA,
 } from './llm-schemas.js';
 import { buildUnitIndex, resolveUnitForMission } from './unit-resolver.js';
+import { extractTimeOfDay, anchorToSimDay, anchorWindow } from './time-anchor.js';
 
 // ─── OpenAI Client ───────────────────────────────────────────────────────────
 import { getOpenAIClient } from '../lib/openai-client.js';
@@ -834,7 +835,13 @@ Extract ALL available information into this JSON structure:
 
 CRITICAL INSTRUCTIONS:
 - Parse coordinates from ANY format (DMS, decimal, MGRS, killbox) into decimal degrees
-- Parse dates from ANY format (DTG, ISO 8601, plain language) into ISO 8601
+- atoDayNumber: REQUIRED for timeline placement. Extract the 1-based ATO/MTO/STO
+  day from the order header or narrative — e.g. "ATO 002 (DAY 2)", "ATO DAY 2",
+  and "NARR/ATO DAY 2" all mean atoDayNumber = 2. Use null ONLY if the document
+  genuinely has no day designator; when null, add a reviewFlag for it.
+- Parse times from ANY format (DTG, ISO 8601, plain language). The simulation
+  supplies the calendar date from atoDayNumber, so only the TIME-OF-DAY needs to
+  be correct — never invent a month or year for an abbreviated DTG like "220430Z".
 - If a field is ambiguous, include it in reviewFlags
 - If information is missing, make reasonable defaults and flag them
 - For USMTF: parse slash-delimited sets (AMSNDAT/, MSNACFT/, GTGTLOC/, etc.)
@@ -1553,14 +1560,77 @@ async function persistMAAP(
   };
 }
 
+/**
+ * Raised when an order cannot be placed on the simulation calendar. The ingest
+ * is hard-failed rather than guessing a date — a guessed calendar date
+ * previously placed orders days or weeks off their true ATO day.
+ */
+export class IngestReviewRequiredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'IngestReviewRequiredError';
+  }
+}
+
+/**
+ * Resolve which 1-based simulation day an order belongs to. The simulation owns
+ * the calendar, so placement needs an explicit day ordinal — never a calendar
+ * date guessed from an abbreviated DTG. Trust order: the normalizer's
+ * atoDayNumber, then an explicit "ATO/MTO/STO DAY N" marker in the raw text.
+ */
+function resolveDayOrdinal(data: NormalizedOrder, rawText: string): number {
+  if (
+    typeof data.atoDayNumber === 'number' &&
+    Number.isInteger(data.atoDayNumber) &&
+    data.atoDayNumber >= 1
+  ) {
+    return data.atoDayNumber;
+  }
+  const marker =
+    rawText.match(/\b(?:ATO|MTO|STO)\s+DAY\s+(\d{1,3})\b/i) ||
+    rawText.match(/\b(?:ATO|MTO|STO)\s+\d+\s*\(\s*DAY\s+(\d{1,3})\s*\)/i);
+  if (marker) {
+    const n = parseInt(marker[1], 10);
+    if (n >= 1) return n;
+  }
+  throw new IngestReviewRequiredError(
+    `Cannot place order "${data.orderId}" on the simulation timeline: no ATO day ` +
+    `number was found. Add an explicit day designator (e.g. "ATO DAY 2") to the ` +
+    `document and re-ingest. Dates are not guessed — a guessed calendar date ` +
+    `would mis-place the order by days or weeks.`,
+  );
+}
+
 async function persistOrder(
   scenarioId: string,
   data: NormalizedOrder,
   rawText: string,
   classification: ClassifyResult,
 ): Promise<{ createdId: string; parentLinkId?: string; matchedPriorities: number[]; extracted: IngestResult['extracted'] }> {
-  const effectiveStart = parseSafeDate(data.effectiveStart);
-  const effectiveEnd = parseSafeDate(data.effectiveEnd, new Date(effectiveStart.getTime() + 24 * 60 * 60 * 1000));
+  // Anchor the order to the simulation calendar by its ATO day ordinal. The
+  // document's absolute dates are unreliable (abbreviated DTGs, exercise
+  // calendars that differ from the scenario), so only the time-of-day is taken
+  // from them — the date comes from scenario.startDate + the day ordinal.
+  const scenario = await prisma.scenario.findUnique({
+    where: { id: scenarioId },
+    select: { startDate: true },
+  });
+  if (!scenario) throw new Error(`Scenario ${scenarioId} not found`);
+
+  const dayOrdinal = resolveDayOrdinal(data, rawText);
+
+  const effectiveStart = anchorToSimDay(
+    scenario.startDate,
+    dayOrdinal,
+    extractTimeOfDay(data.effectiveStart) ?? { hours: 0, minutes: 0 },
+  );
+  const effEndTime = extractTimeOfDay(data.effectiveEnd);
+  let effectiveEnd = effEndTime
+    ? anchorToSimDay(scenario.startDate, dayOrdinal, effEndTime)
+    : new Date(effectiveStart.getTime() + 24 * 60 * 60 * 1000);
+  if (effectiveEnd.getTime() <= effectiveStart.getTime()) {
+    effectiveEnd = new Date(effectiveEnd.getTime() + 24 * 60 * 60 * 1000);
+  }
 
   // Find parent planning doc and match priorities
   const { docId: planningDocId, matchedPriorities } = await findParentPlanningDoc(scenarioId);
@@ -1682,11 +1752,11 @@ async function persistOrder(
             ? (tw.windowType as typeof validTimeWindowTypes[number])
             : 'TOT';
 
-          // Guard against invalid dates from LLM output
-          const startTime = tw.start ? new Date(tw.start) : null;
-          const endTime = tw.end ? new Date(tw.end) : null;
-          if (!startTime || isNaN(startTime.getTime())) {
-            console.warn(`[INGEST] Skipping time window with invalid startTime: "${tw.start}"`);
+          // Anchor the window to the order's simulation day; only the
+          // time-of-day from the document is used (see persistOrder above).
+          const anchored = anchorWindow(scenario.startDate, dayOrdinal, tw.start, tw.end);
+          if (!anchored) {
+            console.warn(`[INGEST] Skipping time window with unparseable start: "${tw.start}"`);
             continue;
           }
 
@@ -1694,8 +1764,8 @@ async function persistOrder(
             data: {
               missionId: mission.id,
               windowType,
-              startTime,
-              endTime: endTime && !isNaN(endTime.getTime()) ? endTime : null,
+              startTime: anchored.start,
+              endTime: anchored.end,
             },
           });
         }

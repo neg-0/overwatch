@@ -146,7 +146,7 @@ vi.mock('../../db/prisma-client.js', () => {
 
 // ─── Import after mocks ─────────────────────────────────────────────────────
 
-import { classifyDocument, ingestDocument, normalizeDocument } from '../../services/doc-ingest.js';
+import { classifyDocument, ingestDocument, normalizeDocument, IngestReviewRequiredError } from '../../services/doc-ingest.js';
 
 // ─── Test Helpers ────────────────────────────────────────────────────────────
 
@@ -533,6 +533,7 @@ describe('Document Ingestion — Full Pipeline', () => {
       effectiveStart: '2026-03-01T12:00:00Z',
       effectiveEnd: '2026-03-01T23:59:00Z',
       classification: 'SECRET',
+      atoDayNumber: 1,
       missionPackages: [
         {
           packageId: 'PKGA01',
@@ -612,6 +613,7 @@ describe('Document Ingestion — Full Pipeline', () => {
       effectiveStart: '2026-03-01T14:30:00Z',
       effectiveEnd: '2026-03-02T00:00:00Z',
       classification: 'UNCLASSIFIED',
+      atoDayNumber: 2,
       missionPackages: [
         {
           packageId: 'PKG-ADHOC',
@@ -658,6 +660,56 @@ describe('Document Ingestion — Full Pipeline', () => {
     expect(result.reviewFlags.length).toBeGreaterThan(0);
     // Even messy input should still produce structured output
     expect(result.extracted.missionCount).toBe(1);
+  });
+
+  it('hard-fails an order that has no determinable ATO day', async () => {
+    mockClassifyResponse({
+      hierarchyLevel: 'ORDER',
+      documentType: 'ATO',
+      sourceFormat: 'ABBREVIATED',
+      confidence: 0.6,
+      title: 'Ad-hoc tasking',
+      issuingAuthority: 'UNKNOWN',
+    });
+
+    mockNormalizeResponse({
+      orderId: 'NODAY-001',
+      orderType: 'ATO',
+      issuingAuthority: 'UNKNOWN',
+      effectiveStart: '14:30Z',
+      effectiveEnd: '18:00Z',
+      classification: 'UNCLASSIFIED',
+      // atoDayNumber deliberately omitted — the order cannot be placed
+      missionPackages: [
+        {
+          packageId: 'PKG-NODAY',
+          priorityRank: 1,
+          missionType: 'CAS',
+          effectDesired: 'Close air support',
+          missions: [
+            {
+              missionId: 'MSN-NODAY-01',
+              callsign: 'RAGE 21',
+              domain: 'AIR',
+              platformType: 'F-16',
+              platformCount: 2,
+              missionType: 'CAS',
+              waypoints: [],
+              timeWindows: [{ windowType: 'TOT', start: '14:30Z' }],
+              targets: [],
+              supportRequirements: [],
+              spaceNeeds: [],
+            },
+          ],
+        },
+      ],
+      reviewFlags: [],
+    });
+
+    // Raw text carries no "ATO DAY N" marker, so the day cannot be resolved.
+    await expect(
+      ingestDocument('scenario-123', 'ADHOC TASKING - RAGE 21 F-16 x2 CAS TOT 1430Z'),
+    ).rejects.toThrow(IngestReviewRequiredError);
   });
 
   it('creates an audit log entry for every ingestion', async () => {
