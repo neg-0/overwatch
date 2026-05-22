@@ -235,19 +235,22 @@ router.post('/allocations/commit', async (req, res) => {
 
     // 2. Re-run allocation for every ATO day that has orders (asset status is
     //    day-independent, so a single status flip can ripple through all days).
+    //    Days are independent — they touch disjoint SpaceNeed rows — so we
+    //    parallelize. A scenario typically has ~14 days, well inside the
+    //    Prisma connection pool and far faster than sequential awaits.
     const days = await prisma.taskingOrder.findMany({
       where: { scenarioId },
       distinct: ['atoDayNumber'],
       select: { atoDayNumber: true },
     });
-    for (const { atoDayNumber } of days) {
-      if (typeof atoDayNumber !== 'number') continue;
+    await Promise.all(days.map(async ({ atoDayNumber }) => {
+      if (typeof atoDayNumber !== 'number') return;
       try {
         await allocateSpaceResources(scenarioId, atoDayNumber);
       } catch (err) {
         console.warn(`[API] Re-allocation for Day ${atoDayNumber} failed (non-fatal):`, err);
       }
-    }
+    }));
 
     // 3. Notify every open view in this scenario room. Clients re-fetch the
     //    asset roster + the current day's allocations off this one event.

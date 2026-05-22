@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useOverwatchStore } from '../store/overwatch-store';
 import type { SpaceAssetEntry, WhatIfStatus } from '../store/overwatch-store';
 
@@ -46,6 +46,28 @@ interface AllocationRow {
   missionDomain: string;
   missionType: string;
   missionCriticality: string | null;
+}
+
+interface ContentionEventShape {
+  contentionGroup: string;
+  capability: string;
+  timeStart: string;
+  timeEnd: string;
+  competitors: unknown[];
+  resolution: string;
+}
+
+interface AllocationReportShape {
+  allocations: AllocationRow[];
+  contentions: ContentionEventShape[];
+  summary: {
+    totalNeeds: number;
+    fulfilled: number;
+    degraded: number;
+    denied: number;
+    contention: number;
+    riskLevel: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL';
+  };
 }
 
 /* ─── Status colors ────────────────────────────────────────────────────────── */
@@ -110,19 +132,24 @@ export function SpaceDashboard() {
 
   /* ─── Active report — what-if preview overrides the committed report ─────── */
 
-  const activeReport = whatIf.active && whatIf.previewReport
+  // The store types both reports loosely (Record<string, unknown>) because the
+  // allocator shape lives server-side. Narrow once here so the rest of the
+  // component reads typed data.
+  const activeReport = (whatIf.active && whatIf.previewReport
     ? whatIf.previewReport
-    : allocationReport;
-  const allocations: AllocationRow[] = ((activeReport as any)?.allocations as AllocationRow[]) ?? [];
-  const contentions: any[] = ((activeReport as any)?.contentions as any[]) ?? [];
+    : allocationReport) as AllocationReportShape | null;
+  const allocations: AllocationRow[] = activeReport?.allocations ?? [];
+  const contentions: ContentionEventShape[] = activeReport?.contentions ?? [];
 
   /* ─── Derived: effective asset status, grouping, indices ─────────────────── */
 
-  const effectiveStatus = (asset: SpaceAssetEntry): string => {
+  // Memoized so it can participate in dependency arrays (e.g. spofCount below)
+  // without an eslint suppression — a stable identity per overrides change.
+  const effectiveStatus = useCallback((asset: SpaceAssetEntry): string => {
     const ov = whatIf.statusOverrides[asset.id];
     if (ov) return ov;
     return asset.status;
-  };
+  }, [whatIf.statusOverrides]);
 
   const allocationsByAsset = useMemo(() => {
     const map = new Map<string, AllocationRow[]>();
@@ -188,8 +215,7 @@ export function SpaceDashboard() {
       if (providers.length === 1) count++;
     }
     return count;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spaceAssets, whatIf.statusOverrides, allocations]);
+  }, [spaceAssets, effectiveStatus, allocations]);
 
   const deniedAllocations = allocations.filter(a => a.status === 'DENIED');
 

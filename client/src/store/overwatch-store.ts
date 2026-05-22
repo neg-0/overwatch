@@ -319,6 +319,12 @@ interface OverwatchStore {
 // Module-level AbortController for setActiveScenario race condition prevention
 let activeScenarioAbort: AbortController | null = null;
 
+// Monotonically-incrementing token for what-if preview requests. Each call to
+// setAssetWhatIf increments it; the in-flight request captures the value at
+// start and only applies its response if the token still matches when the
+// response arrives. Cheap, allocation-free, order-insensitive.
+let previewRequestSeq = 0;
+
 export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
   // ─── Initial State ───────────────────────────────────────────────────────
   socket: null,
@@ -1232,6 +1238,7 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
       },
     });
     if (!active) return;
+    const myReqId = ++previewRequestSeq;
     try {
       const res = await fetch('/api/space-assets/allocations/preview', {
         method: 'POST',
@@ -1239,17 +1246,17 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
         body: JSON.stringify({ scenarioId, day, statusOverrides: next }),
       });
       const data = await res.json();
-      const after = get().whatIf;
-      // Only commit the preview if the override set hasn't changed since.
-      if (JSON.stringify(after.statusOverrides) !== JSON.stringify(next)) return;
+      // Drop stale responses — a newer call superseded this one.
+      if (myReqId !== previewRequestSeq) return;
       set({
         whatIf: {
-          ...after,
+          ...get().whatIf,
           previewReport: data.success ? data.data : null,
           previewLoading: false,
         },
       });
     } catch (err) {
+      if (myReqId !== previewRequestSeq) return;
       console.error('[STORE] What-if preview failed:', err);
       set({ whatIf: { ...get().whatIf, previewLoading: false } });
     }
