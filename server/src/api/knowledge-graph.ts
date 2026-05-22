@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import prisma from '../db/prisma-client.js';
+import { canonicalMissionTypes, normalizeApplicableTo, ALL_TOKEN } from '../services/mission-taxonomy.js';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -12,6 +13,7 @@ export type GraphNodeType =
   | 'SPACE_ASSET'
   | 'SPACE_NEED'
   | 'MISSION'
+  | 'MISSION_TYPE'
   | 'ASSET'
   | 'PACKAGE'
   | 'ALLOCATION'
@@ -545,7 +547,7 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
           type: 'MISSION',
           label: mission.callsign || mission.missionId,
           sublabel: `${mission.missionType} (${mission.platformType})`,
-          meta: { domain: mission.domain, status: mission.status },
+          meta: { domain: mission.domain, status: mission.status, missionType: mission.missionType },
         });
 
         // Mission → package
@@ -554,6 +556,14 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
         // Mission → unit
         if (mission.unitId) {
           addEdge({ source: mission.unitId, target: mission.id, relationship: 'EXECUTES' });
+        }
+
+        // Mission → mission type(s) — the grouping layer that procedures/comm nets
+        // attach to, so applicability never fans out to every mission instance.
+        for (const mtype of canonicalMissionTypes(mission.missionType)) {
+          const mtypeId = `mtype:${mtype}`;
+          addNode({ id: mtypeId, type: 'MISSION_TYPE', label: mtype, sublabel: 'Mission Type' });
+          addEdge({ source: mission.id, target: mtypeId, relationship: 'OF_TYPE' });
         }
 
         // Mission targets
@@ -588,28 +598,35 @@ export async function buildKnowledgeGraph(scenarioId: string, atoDay?: number): 
     }
   }
 
-  // Missions → Procedures/Restrictions (GOVERNED_BY / RESTRICTED_BY)
-  // Missions → Comm Nets (COMMUNICATES_ON)
-  const allMissionNodes = nodes.filter(n => n.type === 'MISSION');
-  for (const missionNode of allMissionNodes) {
-    const missionType = (missionNode.meta?.missionType as string) || (missionNode.sublabel?.split(' ')[0]) || '';
+  // Mission Types → Procedures/Restrictions (GOVERNED_BY / RESTRICTED_BY)
+  // Mission Types → Comm Nets (COMMUNICATES_ON)
+  // Edges attach to the MISSION_TYPE grouping nodes, not to every mission
+  // instance — so an ALL-scoped procedure produces ~one edge per type, not
+  // hundreds per mission. Each mission reaches its procedures via OF_TYPE.
+  const allMissionTypeNodes = nodes.filter(n => n.type === 'MISSION_TYPE');
 
-    for (const entry of spinsEntries) {
-      if (entry.applicableTo.includes('ALL') || entry.applicableTo.some(t => missionType.toUpperCase().includes(t.toUpperCase()))) {
-        const isRestriction = ['ROE', 'WEAPONS_RELEASE', 'EMCON'].includes(entry.category);
-        addEdge({
-          source: missionNode.id,
-          target: entry.id,
-          relationship: isRestriction ? 'RESTRICTED_BY' : 'GOVERNED_BY',
-        });
+  const linkByApplicability = (
+    applicableTo: string[],
+    targetId: string,
+    relationship: string,
+  ) => {
+    const scope = normalizeApplicableTo(applicableTo);
+    const universal = scope.includes(ALL_TOKEN);
+    for (const mtypeNode of allMissionTypeNodes) {
+      const mtype = mtypeNode.label; // e.g. "SEAD"
+      if (universal || scope.includes(mtype)) {
+        addEdge({ source: mtypeNode.id, target: targetId, relationship });
       }
     }
+  };
 
-    for (const comm of commPlans) {
-      if (comm.applicableTo.includes('ALL') || comm.applicableTo.some(t => missionType.toUpperCase().includes(t.toUpperCase()))) {
-        addEdge({ source: missionNode.id, target: comm.id, relationship: 'COMMUNICATES_ON' });
-      }
-    }
+  for (const entry of spinsEntries) {
+    const isRestriction = ['ROE', 'WEAPONS_RELEASE', 'EMCON'].includes(entry.category);
+    linkByApplicability(entry.applicableTo, entry.id, isRestriction ? 'RESTRICTED_BY' : 'GOVERNED_BY');
+  }
+
+  for (const comm of commPlans) {
+    linkByApplicability(comm.applicableTo, comm.id, 'COMMUNICATES_ON');
   }
 
   // Units → Airspace (CONTROLS)

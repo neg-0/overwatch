@@ -172,7 +172,7 @@ STRATEGIC PRIORITIES:
       },
     });
 
-    await prisma.spaceNeed.create({
+    const spaceNeed = await prisma.spaceNeed.create({
       data: {
         missionId: mission.id,
         capabilityType: 'GPS',
@@ -213,10 +213,14 @@ STRATEGIC PRIORITIES:
     const allocBody: any = await allocRes.json();
 
     expect(allocRes.status).toBe(200);
-    expect(allocBody.data.summary.totalNeeds).toBe(1);
-    expect(allocBody.data.summary.fulfilled).toBe(1);
-    expect(allocBody.data.allocations).toHaveLength(1);
-    expect(allocBody.data.allocations[0].status).toBe('FULFILLED');
+
+    // seedTestScenario() also creates a day-1 space need, so assert on this
+    // test's own need rather than the scenario-wide summary counts.
+    const ownAllocation = allocBody.data.allocations.find(
+      (a: any) => a.spaceNeedId === spaceNeed.id,
+    );
+    expect(ownAllocation).toBeDefined();
+    expect(ownAllocation.status).toBe('FULFILLED');
 
     // Verify hierarchy chain is complete
     const hierRes = await fetch(`${app.baseUrl}/api/scenarios/${seed.scenarioId}/hierarchy`);
