@@ -111,6 +111,7 @@ export function createIngestRoutes(io: Server) {
       index: number;
       text: string;
       sourceHint: string;
+      sourceDocId?: string;
       status: 'queued' | 'processing' | 'done' | 'error';
       error?: string;
       createdId?: string;
@@ -127,7 +128,13 @@ export function createIngestRoutes(io: Server) {
         items.push({ index: i, text: '', sourceHint: '', status: 'error', error: 'Document text exceeds 100000 character limit' });
         continue;
       }
-      items.push({ index: i, text: doc.text, sourceHint: doc.sourceHint || `batch:${i}`, status: 'queued' });
+      items.push({
+        index: i,
+        text: doc.text,
+        sourceHint: doc.sourceHint || `batch:${i}`,
+        sourceDocId: typeof doc.sourceDocId === 'string' ? doc.sourceDocId : undefined,
+        status: 'queued',
+      });
     }
 
     const validItems = items.filter(it => it.status === 'queued');
@@ -177,7 +184,7 @@ export function createIngestRoutes(io: Server) {
       });
 
       try {
-        const result = await ingestDocument(scenarioId, item.text, item.sourceHint, io);
+        const result = await ingestDocument(scenarioId, item.text, item.sourceHint, io, item.sourceDocId);
         item.status = 'done';
         item.createdId = result.createdId;
       } catch (err) {

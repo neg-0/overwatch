@@ -66,6 +66,7 @@ vi.mock('../../db/prisma-client.js', () => {
     planningDocument: {
       create: vi.fn().mockResolvedValue({ id: 'plan-001', title: 'Test Planning Doc' }),
       findMany: vi.fn().mockResolvedValue([]),
+      findFirst: vi.fn().mockResolvedValue(null),
       findUnique: vi.fn().mockResolvedValue(null),
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
@@ -104,6 +105,7 @@ vi.mock('../../db/prisma-client.js', () => {
     },
     taskingOrder: {
       create: vi.fn().mockResolvedValue({ id: 'order-001', orderId: 'ATO-TEST-001' }),
+      findFirst: vi.fn().mockResolvedValue(null),
       findUnique: vi.fn().mockResolvedValue(null),
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
