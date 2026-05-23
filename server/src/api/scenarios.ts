@@ -11,6 +11,8 @@ import { allocateSpaceResources } from '../services/space-allocator.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
 export const scenarioRoutes = Router();
 
 // List all scenarios
@@ -377,6 +379,7 @@ scenarioRoutes.get('/:id', async (req, res) => {
         },
         units: { include: { assets: { include: { assetType: true } } } },
         spaceAssets: true,
+        bases: { orderBy: { name: 'asc' } },
         scenarioInjects: { orderBy: { triggerDay: 'asc' } },
         taskingOrders: {
           orderBy: { atoDayNumber: 'asc' },
@@ -469,7 +472,7 @@ scenarioRoutes.post('/generate', async (req, res) => {
         theater: theater || 'INDOPACOM — Western Pacific',
         adversary: adversary || 'Near-peer state adversary (Pacific)',
         startDate: new Date('2026-03-01T00:00:00Z'),
-        endDate: new Date(new Date('2026-03-01T00:00:00Z').getTime() + safeDuration * 24 * 3600000),
+        endDate: new Date(new Date('2026-03-01T00:00:00Z').getTime() + safeDuration * MS_PER_DAY),
         classification: 'UNCLASSIFIED',
         compressionRatio: safeCompression,
         generationStatus: GenerationStatus.GENERATING,
@@ -492,6 +495,59 @@ scenarioRoutes.post('/generate', async (req, res) => {
       description: scenario.description,
       duration: safeDuration,
       compressionRatio: safeCompression,
+      modelOverrides,
+    }).then(() => {
+      console.log(`[SCENARIO] Background generation complete: ${scenario.id}`);
+    }).catch(err => {
+      console.error(`[SCENARIO] Background generation failed: ${scenario.id}`, err);
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
+  }
+});
+
+// Start generation on an existing scenario (e.g. one saved via POST /)
+scenarioRoutes.post('/:id/generate', async (req, res) => {
+  try {
+    // Atomic transition PENDING -> GENERATING so a double-click can't kick off
+    // two generation runs against the same record.
+    const updated = await prisma.scenario.updateMany({
+      where: { id: req.params.id, generationStatus: GenerationStatus.PENDING },
+      data: { generationStatus: GenerationStatus.GENERATING },
+    });
+
+    if (updated.count === 0) {
+      const exists = await prisma.scenario.findUnique({ where: { id: req.params.id } });
+      if (!exists) {
+        return res.status(404).json({ success: false, error: 'Scenario not found', timestamp: new Date().toISOString() });
+      }
+      return res.status(400).json({
+        success: false,
+        error: `Cannot start generation — status is "${exists.generationStatus}", expected "PENDING"`,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    const scenario = await prisma.scenario.findUniqueOrThrow({ where: { id: req.params.id } });
+    const { modelOverrides } = req.body || {};
+    const duration = Math.ceil((scenario.endDate.getTime() - scenario.startDate.getTime()) / MS_PER_DAY);
+
+    res.status(202).json({
+      success: true,
+      data: scenario,
+      message: 'Scenario generation pipeline started in background.',
+      timestamp: new Date().toISOString(),
+    });
+
+    generateFullScenario({
+      scenarioId: scenario.id,
+      name: scenario.name,
+      theater: scenario.theater,
+      adversary: scenario.adversary,
+      description: scenario.description,
+      duration,
+      compressionRatio: scenario.compressionRatio,
       modelOverrides,
     }).then(() => {
       console.log(`[SCENARIO] Background generation complete: ${scenario.id}`);
@@ -531,7 +587,7 @@ scenarioRoutes.post('/:id/resume', async (req, res) => {
     const scenario = await prisma.scenario.findUniqueOrThrow({ where: { id: req.params.id } });
     const { modelOverrides } = req.body || {};
 
-    const duration = Math.ceil((scenario.endDate.getTime() - scenario.startDate.getTime()) / (24 * 3600000));
+    const duration = Math.ceil((scenario.endDate.getTime() - scenario.startDate.getTime()) / MS_PER_DAY);
 
     res.status(202).json({
       success: true,
@@ -596,7 +652,7 @@ scenarioRoutes.post('/:id/steps/:step/regenerate', async (req, res) => {
     }
 
     const { modelOverrides } = req.body || {};
-    const duration = Math.ceil((scenario.endDate.getTime() - scenario.startDate.getTime()) / (24 * 3600000));
+    const duration = Math.ceil((scenario.endDate.getTime() - scenario.startDate.getTime()) / MS_PER_DAY);
 
     res.status(202).json({
       success: true,
@@ -1107,7 +1163,7 @@ scenarioRoutes.post('/', async (req, res) => {
         theater: theater || 'INDOPACOM — Western Pacific',
         adversary: adversary || 'Near-peer state adversary (Pacific)',
         startDate: new Date('2026-03-01T00:00:00Z'),
-        endDate: new Date(new Date('2026-03-01T00:00:00Z').getTime() + safeDuration * 24 * 3600000),
+        endDate: new Date(new Date('2026-03-01T00:00:00Z').getTime() + safeDuration * MS_PER_DAY),
         classification: 'UNCLASSIFIED',
         compressionRatio: safeCompression,
         generationStatus: GenerationStatus.PENDING,

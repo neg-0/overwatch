@@ -13,31 +13,12 @@ export interface ModelOverrides {
   dailyOrders?: string;
 }
 
-export interface GenerateScenarioConfig {
-  name: string;
-  theater?: string;
-  adversary?: string;
-  description?: string;
-  duration?: number;
-  compressionRatio?: number;
-  modelOverrides?: ModelOverrides;
-}
-
 export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
   message?: string;
   timestamp: string;
-}
-
-export interface ScenarioSummary {
-  id: string;
-  name: string;
-  theater: string;
-  adversary: string;
-  generationStatus: string;
-  generationProgress: number;
 }
 
 // ─── Ingest Types (lifted from DocumentIntake for global persistence) ────────
@@ -248,13 +229,13 @@ interface OverwatchStore {
   pauseSimulation: () => Promise<void>;
   resumeSimulation: () => Promise<void>;
   stopSimulation: () => Promise<void>;
-  generateScenario: (config: GenerateScenarioConfig) => Promise<ApiResponse<ScenarioSummary>>;
   deleteScenario: (id: string) => Promise<void>;
   renameScenario: (id: string, data: { name?: string; description?: string; theater?: string; adversary?: string }) => Promise<boolean>;
   duplicateScenario: (id: string) => Promise<string | null>;
   createScenario: (config: { name: string; theater?: string; adversary?: string; description?: string; duration?: number }) => Promise<string | null>;
   fetchScenarioDetail: (id: string) => Promise<Record<string, unknown> | null>;
   resumeScenarioGeneration: (id: string, modelOverrides?: ModelOverrides) => Promise<ApiResponse>;
+  startScenarioGeneration: (id: string, modelOverrides?: ModelOverrides) => Promise<ApiResponse>;
 
   // Timeline playback
   seekTo: (simTime: string) => Promise<void>;
@@ -840,36 +821,6 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
     }
   },
 
-  generateScenario: async (config: GenerateScenarioConfig) => {
-    set({ artifactResults: [] }); // Clear previous results
-    try {
-      const res = await fetch('/api/scenarios/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-      });
-      const data = await res.json();
-      if (data.success) {
-        const socket = get().socket;
-        const prevScenarioId = get().activeScenarioId;
-        if (socket?.connected) {
-          if (prevScenarioId && prevScenarioId !== data.data.id) {
-            socket.emit('leave:scenario', prevScenarioId);
-          }
-          socket.emit('join:scenario', data.data.id);
-        }
-        set({ activeScenarioId: data.data.id, artifactResults: [] });
-        get().fetchScenarios();
-        get().fetchScenarioTimeRange(data.data.id);
-      }
-      return data;
-    } catch (err) {
-      console.error('[STORE] Failed to generate scenario:', err);
-      set({ generationProgress: null });
-      throw err;
-    }
-  },
-
   deleteScenario: async (id: string) => {
     try {
       const res = await fetch(`/api/scenarios/${id}`, { method: 'DELETE' });
@@ -963,6 +914,27 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
       return data;
     } catch (err) {
       console.error('[STORE] Failed to resume generation:', err);
+      return { success: false, error: String(err) };
+    }
+  },
+
+  startScenarioGeneration: async (id: string, modelOverrides?: ModelOverrides) => {
+    set({ artifactResults: [] });
+    try {
+      const res = await fetch(`/api/scenarios/${id}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modelOverrides }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        const socket = get().socket;
+        if (socket?.connected) socket.emit('join:scenario', id);
+        get().fetchScenarios();
+      }
+      return data;
+    } catch (err) {
+      console.error('[STORE] Failed to start generation:', err);
       return { success: false, error: String(err) };
     }
   },
