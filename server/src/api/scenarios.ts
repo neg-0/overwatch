@@ -11,6 +11,8 @@ import { allocateSpaceResources } from '../services/space-allocator.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
 export const scenarioRoutes = Router();
 
 // List all scenarios
@@ -470,7 +472,7 @@ scenarioRoutes.post('/generate', async (req, res) => {
         theater: theater || 'INDOPACOM — Western Pacific',
         adversary: adversary || 'Near-peer state adversary (Pacific)',
         startDate: new Date('2026-03-01T00:00:00Z'),
-        endDate: new Date(new Date('2026-03-01T00:00:00Z').getTime() + safeDuration * 24 * 3600000),
+        endDate: new Date(new Date('2026-03-01T00:00:00Z').getTime() + safeDuration * MS_PER_DAY),
         classification: 'UNCLASSIFIED',
         compressionRatio: safeCompression,
         generationStatus: GenerationStatus.GENERATING,
@@ -529,7 +531,7 @@ scenarioRoutes.post('/:id/generate', async (req, res) => {
 
     const scenario = await prisma.scenario.findUniqueOrThrow({ where: { id: req.params.id } });
     const { modelOverrides } = req.body || {};
-    const duration = Math.ceil((scenario.endDate.getTime() - scenario.startDate.getTime()) / (24 * 3600000));
+    const duration = Math.ceil((scenario.endDate.getTime() - scenario.startDate.getTime()) / MS_PER_DAY);
 
     res.status(202).json({
       success: true,
@@ -585,7 +587,7 @@ scenarioRoutes.post('/:id/resume', async (req, res) => {
     const scenario = await prisma.scenario.findUniqueOrThrow({ where: { id: req.params.id } });
     const { modelOverrides } = req.body || {};
 
-    const duration = Math.ceil((scenario.endDate.getTime() - scenario.startDate.getTime()) / (24 * 3600000));
+    const duration = Math.ceil((scenario.endDate.getTime() - scenario.startDate.getTime()) / MS_PER_DAY);
 
     res.status(202).json({
       success: true,
@@ -650,7 +652,7 @@ scenarioRoutes.post('/:id/steps/:step/regenerate', async (req, res) => {
     }
 
     const { modelOverrides } = req.body || {};
-    const duration = Math.ceil((scenario.endDate.getTime() - scenario.startDate.getTime()) / (24 * 3600000));
+    const duration = Math.ceil((scenario.endDate.getTime() - scenario.startDate.getTime()) / MS_PER_DAY);
 
     res.status(202).json({
       success: true,
@@ -1161,7 +1163,7 @@ scenarioRoutes.post('/', async (req, res) => {
         theater: theater || 'INDOPACOM — Western Pacific',
         adversary: adversary || 'Near-peer state adversary (Pacific)',
         startDate: new Date('2026-03-01T00:00:00Z'),
-        endDate: new Date(new Date('2026-03-01T00:00:00Z').getTime() + safeDuration * 24 * 3600000),
+        endDate: new Date(new Date('2026-03-01T00:00:00Z').getTime() + safeDuration * MS_PER_DAY),
         classification: 'UNCLASSIFIED',
         compressionRatio: safeCompression,
         generationStatus: GenerationStatus.PENDING,
