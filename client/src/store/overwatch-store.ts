@@ -187,6 +187,26 @@ export interface ArtifactResult {
   message?: string;
 }
 
+export interface SpaceAssetEntry {
+  id: string;
+  name: string;
+  constellation: string;
+  status: string;
+  capabilities: string[];
+  operator: string | null;
+  affiliation: string;
+  coverageRegion: string | null;
+}
+
+export type WhatIfStatus = 'OPERATIONAL' | 'DEGRADED' | 'OFFLINE';
+
+export interface WhatIfState {
+  active: boolean;
+  statusOverrides: Record<string, WhatIfStatus>;
+  previewReport: Record<string, unknown> | null;
+  previewLoading: boolean;
+}
+
 // ─── Store Definition ────────────────────────────────────────────────────────
 
 interface OverwatchStore {
@@ -239,6 +259,15 @@ interface OverwatchStore {
   hierarchyData: Record<string, unknown> | null;
   allocationReport: Record<string, unknown> | null;
 
+  // Space assets — single client-side mirror of `space_assets` (the DB SSOT)
+  // so every view (dashboard, map, gantt) reads asset state from one place.
+  spaceAssets: SpaceAssetEntry[];
+
+  // What-if state — non-destructive preview overrides for asset status.
+  // While `active`, every consumer should prefer `whatIf.previewReport`
+  // over the committed `allocationReport`.
+  whatIf: WhatIfState;
+
   // Actions
   connect: () => void;
   disconnect: () => void;
@@ -268,6 +297,12 @@ interface OverwatchStore {
   fetchHierarchy: (scenarioId: string) => Promise<void>;
   fetchAllocations: (scenarioId: string, day: number) => Promise<void>;
 
+  // Space assets + what-if
+  fetchSpaceAssets: (scenarioId: string) => Promise<void>;
+  setAssetWhatIf: (assetId: string, status: 'OPERATIONAL' | 'DEGRADED' | 'OFFLINE' | null, scenarioId: string, day: number) => Promise<void>;
+  commitWhatIf: (scenarioId: string) => Promise<boolean>;
+  resetWhatIf: () => void;
+
   // Health and Import
   fetchHealth: () => Promise<void>;
   importScenario: (file: File) => Promise<{ success: boolean; data?: { id: string }; error?: string }>;
@@ -283,6 +318,12 @@ interface OverwatchStore {
 
 // Module-level AbortController for setActiveScenario race condition prevention
 let activeScenarioAbort: AbortController | null = null;
+
+// Monotonically-incrementing token for what-if preview requests. Each call to
+// setAssetWhatIf increments it; the in-flight request captures the value at
+// start and only applies its response if the token still matches when the
+// response arrives. Cheap, allocation-free, order-insensitive.
+let previewRequestSeq = 0;
 
 export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
   // ─── Initial State ───────────────────────────────────────────────────────
@@ -315,6 +356,13 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
   ingestToasts: [],
   hierarchyData: null,
   allocationReport: null,
+  spaceAssets: [],
+  whatIf: {
+    active: false,
+    statusOverrides: {},
+    previewReport: null,
+    previewLoading: false,
+  },
 
   // ─── WebSocket Connection ────────────────────────────────────────────────
   connect: () => {
@@ -435,6 +483,17 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
     };
     socket.on('decision:executed', handleDecisionDone);
     socket.on('decision:resolved', handleDecisionDone);
+
+    // Space asset status committed by another client (or sim/decision). Re-pull
+    // the asset roster + the current day's allocations so every view stays
+    // consistent with the DB SSOT.
+    socket.on('spaceAsset:updated', (data: any) => {
+      const activeId = get().activeScenarioId;
+      if (!activeId || activeId !== data.scenarioId) return;
+      void get().fetchSpaceAssets(activeId);
+      const day = get().simulation.currentAtoDay;
+      if (day > 0) void get().fetchAllocations(activeId, day);
+    });
 
     // Order published
     socket.on('order:published', (data: any) => {
@@ -1135,6 +1194,115 @@ export const useOverwatchStore = create<OverwatchStore>((set, get) => ({
     } catch (err) {
       console.error('[STORE] Failed to fetch allocations:', err);
     }
+  },
+
+  // ─── Space assets + what-if ─────────────────────────────────────────────
+  fetchSpaceAssets: async (scenarioId: string) => {
+    try {
+      const res = await fetch(`/api/space-assets?scenarioId=${scenarioId}`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.data)) {
+        const assets: SpaceAssetEntry[] = data.data.map((a: any) => ({
+          id: a.id,
+          name: a.name,
+          constellation: a.constellation,
+          status: a.status,
+          capabilities: a.capabilities ?? [],
+          operator: a.operator ?? null,
+          affiliation: a.affiliation,
+          coverageRegion: a.coverageRegion ?? null,
+        }));
+        set({ spaceAssets: assets });
+      }
+    } catch (err) {
+      console.error('[STORE] Failed to fetch space assets:', err);
+    }
+  },
+
+  setAssetWhatIf: async (assetId, status, scenarioId, day) => {
+    const current = get().whatIf;
+    const next: Record<string, WhatIfStatus> = { ...current.statusOverrides };
+    if (status === null) {
+      delete next[assetId];
+    } else {
+      next[assetId] = status;
+    }
+    const active = Object.keys(next).length > 0;
+    set({
+      whatIf: {
+        ...current,
+        statusOverrides: next,
+        active,
+        previewLoading: active,
+        previewReport: active ? current.previewReport : null,
+      },
+    });
+    if (!active) return;
+    const myReqId = ++previewRequestSeq;
+    try {
+      const res = await fetch('/api/space-assets/allocations/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scenarioId, day, statusOverrides: next }),
+      });
+      const data = await res.json();
+      // Drop stale responses — a newer call superseded this one.
+      if (myReqId !== previewRequestSeq) return;
+      set({
+        whatIf: {
+          ...get().whatIf,
+          previewReport: data.success ? data.data : null,
+          previewLoading: false,
+        },
+      });
+    } catch (err) {
+      if (myReqId !== previewRequestSeq) return;
+      console.error('[STORE] What-if preview failed:', err);
+      set({ whatIf: { ...get().whatIf, previewLoading: false } });
+    }
+  },
+
+  commitWhatIf: async (scenarioId: string) => {
+    const { statusOverrides } = get().whatIf;
+    const ids = Object.keys(statusOverrides);
+    if (ids.length === 0) return false;
+    // Translate the client-side tri-state to canonical DB statuses.
+    // OFFLINE is non-destructive: maps to MAINTENANCE (reversible), not LOST.
+    const assetStatusChanges = ids.map(id => {
+      const s = statusOverrides[id];
+      const dbStatus = s === 'OFFLINE' ? 'MAINTENANCE' : s;
+      return { id, status: dbStatus };
+    });
+    try {
+      const res = await fetch('/api/space-assets/allocations/commit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scenarioId, assetStatusChanges }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        console.error('[STORE] What-if commit failed:', data.error);
+        return false;
+      }
+      // The server emits spaceAsset:updated; the socket handler refetches.
+      // Clear local what-if state since changes are now persisted.
+      get().resetWhatIf();
+      return true;
+    } catch (err) {
+      console.error('[STORE] What-if commit failed:', err);
+      return false;
+    }
+  },
+
+  resetWhatIf: () => {
+    set({
+      whatIf: {
+        active: false,
+        statusOverrides: {},
+        previewReport: null,
+        previewLoading: false,
+      },
+    });
   },
 
   // ─── Decision Resolution ────────────────────────────────────────────────

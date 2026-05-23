@@ -2,6 +2,13 @@ import { Router } from 'express';
 import prisma from '../db/prisma-client.js';
 import { SpacePosition, approximateGeoPosition, propagateFromTLE } from '../services/space-propagator.js';
 import { refreshTLEsForScenario } from '../services/udl-client.js';
+import { allocateSpaceResources } from '../services/space-allocator.js';
+import { broadcastSpaceAssetUpdated } from '../websocket/ws-server.js';
+
+const VALID_DB_STATUSES = ['OPERATIONAL', 'DEGRADED', 'MAINTENANCE', 'LOST'] as const;
+type DbAssetStatus = (typeof VALID_DB_STATUSES)[number];
+const VALID_OVERRIDE_STATUSES = ['OPERATIONAL', 'DEGRADED', 'OFFLINE'] as const;
+type OverrideStatus = (typeof VALID_OVERRIDE_STATUSES)[number];
 
 const router = Router();
 
@@ -131,6 +138,133 @@ router.get('/allocations', async (req, res) => {
     return res.json({ success: true, data: allocations, timestamp: new Date().toISOString() });
   } catch (err) {
     console.error('[API] Failed to fetch space allocations:', err);
+    return res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
+  }
+});
+
+/**
+ * POST /api/space-assets/allocations/preview
+ * Body: { scenarioId, day, excludeAssetIds?, statusOverrides? }
+ *
+ * Runs the allocator in dry-run mode with the supplied what-if overrides and
+ * returns the hypothetical AllocationReport. No DB writes — the canonical
+ * `space_assets.status` (the single source of truth) is untouched.
+ */
+router.post('/allocations/preview', async (req, res) => {
+  const { scenarioId, day, excludeAssetIds, statusOverrides } = req.body ?? {};
+
+  if (!scenarioId || typeof scenarioId !== 'string') {
+    return res.status(400).json({ success: false, error: 'scenarioId is required', timestamp: new Date().toISOString() });
+  }
+  if (typeof day !== 'number' || !Number.isInteger(day) || day < 1) {
+    return res.status(400).json({ success: false, error: 'day must be a positive integer', timestamp: new Date().toISOString() });
+  }
+  if (excludeAssetIds !== undefined && !Array.isArray(excludeAssetIds)) {
+    return res.status(400).json({ success: false, error: 'excludeAssetIds must be an array of asset IDs', timestamp: new Date().toISOString() });
+  }
+  const sanitizedOverrides: Record<string, OverrideStatus> = {};
+  if (statusOverrides !== undefined) {
+    if (typeof statusOverrides !== 'object' || statusOverrides === null) {
+      return res.status(400).json({ success: false, error: 'statusOverrides must be an object', timestamp: new Date().toISOString() });
+    }
+    for (const [id, st] of Object.entries(statusOverrides)) {
+      if (!VALID_OVERRIDE_STATUSES.includes(st as OverrideStatus)) {
+        return res.status(400).json({ success: false, error: `Invalid override status "${st}" for asset ${id}`, timestamp: new Date().toISOString() });
+      }
+      sanitizedOverrides[id] = st as OverrideStatus;
+    }
+  }
+
+  try {
+    const report = await allocateSpaceResources(scenarioId, day, {
+      dryRun: true,
+      excludeAssetIds: Array.isArray(excludeAssetIds) ? excludeAssetIds : undefined,
+      statusOverrides: sanitizedOverrides,
+    });
+    return res.json({ success: true, data: report, timestamp: new Date().toISOString() });
+  } catch (err) {
+    console.error('[API] Allocation preview failed:', err);
+    return res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
+  }
+});
+
+/**
+ * POST /api/space-assets/allocations/commit
+ * Body: { scenarioId, assetStatusChanges: [{ id, status }] }
+ *
+ * Persists the requested asset status changes (the single source of truth)
+ * and re-runs the allocator for every ATO day with orders. Emits a
+ * `spaceAsset:updated` socket event so every open client view re-fetches.
+ */
+router.post('/allocations/commit', async (req, res) => {
+  const { scenarioId, assetStatusChanges } = req.body ?? {};
+
+  if (!scenarioId || typeof scenarioId !== 'string') {
+    return res.status(400).json({ success: false, error: 'scenarioId is required', timestamp: new Date().toISOString() });
+  }
+  if (!Array.isArray(assetStatusChanges) || assetStatusChanges.length === 0) {
+    return res.status(400).json({ success: false, error: 'assetStatusChanges must be a non-empty array', timestamp: new Date().toISOString() });
+  }
+  for (const c of assetStatusChanges) {
+    if (!c || typeof c.id !== 'string' || !VALID_DB_STATUSES.includes(c.status)) {
+      return res.status(400).json({
+        success: false,
+        error: `Each change requires { id: string, status: ${VALID_DB_STATUSES.join('|')} }`,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
+
+  try {
+    // 1. Persist status changes atomically. Read prior values inside the
+    //    transaction so the broadcast `from`/`to` accurately reflect the diff.
+    const changes = await prisma.$transaction(async (tx) => {
+      const applied: Array<{ id: string; field: 'status'; from: string; to: string }> = [];
+      for (const c of assetStatusChanges as Array<{ id: string; status: DbAssetStatus }>) {
+        const asset = await tx.spaceAsset.findFirst({
+          where: { id: c.id, scenarioId },
+          select: { id: true, status: true },
+        });
+        if (!asset) continue; // ignore IDs that aren't in this scenario
+        if (asset.status === c.status) continue; // no-op
+        await tx.spaceAsset.update({ where: { id: c.id }, data: { status: c.status } });
+        applied.push({ id: c.id, field: 'status', from: asset.status, to: c.status });
+      }
+      return applied;
+    });
+
+    // 2. Re-run allocation for every ATO day that has orders (asset status is
+    //    day-independent, so a single status flip can ripple through all days).
+    //    Days are independent — they touch disjoint SpaceNeed rows — so we
+    //    parallelize. A scenario typically has ~14 days, well inside the
+    //    Prisma connection pool and far faster than sequential awaits.
+    const days = await prisma.taskingOrder.findMany({
+      where: { scenarioId },
+      distinct: ['atoDayNumber'],
+      select: { atoDayNumber: true },
+    });
+    await Promise.all(days.map(async ({ atoDayNumber }) => {
+      if (typeof atoDayNumber !== 'number') return;
+      try {
+        await allocateSpaceResources(scenarioId, atoDayNumber);
+      } catch (err) {
+        console.warn(`[API] Re-allocation for Day ${atoDayNumber} failed (non-fatal):`, err);
+      }
+    }));
+
+    // 3. Notify every open view in this scenario room. Clients re-fetch the
+    //    asset roster + the current day's allocations off this one event.
+    if (changes.length > 0) {
+      broadcastSpaceAssetUpdated(scenarioId, { changes });
+    }
+
+    return res.json({
+      success: true,
+      data: { changes, reallocatedDays: days.map(d => d.atoDayNumber).filter(d => typeof d === 'number') },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[API] Allocation commit failed:', err);
     return res.status(500).json({ success: false, error: 'Internal server error', timestamp: new Date().toISOString() });
   }
 });

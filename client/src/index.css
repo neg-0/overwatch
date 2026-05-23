@@ -1406,6 +1406,243 @@ body {
   color: var(--color-space);
 }
 
+/* ─── Asset-Centric Dashboard ─────────────────────────────────────────────── */
+
+.space-constellation-group {
+  margin-top: 20px;
+}
+
+.space-constellation-header {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-bright);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.space-asset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.asset-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-muted);
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color 0.15s ease;
+}
+
+.asset-card--operational { border-left-color: var(--accent-success); }
+.asset-card--degraded    { border-left-color: var(--accent-warning); }
+.asset-card--offline,
+.asset-card--maintenance,
+.asset-card--lost        { border-left-color: var(--accent-danger); opacity: 0.7; }
+
+.asset-card__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.asset-card__name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-bright);
+  font-family: var(--font-mono);
+}
+
+.asset-card__meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.status-pill {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.asset-card__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.asset-card__load {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.asset-card__load-text {
+  font-size: 11px;
+  color: var(--text-bright);
+}
+
+.asset-card__load-bar {
+  display: flex;
+  height: 4px;
+  background: var(--bg-secondary);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.asset-card__load-bar-fill {
+  height: 100%;
+}
+
+.asset-card__flags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.asset-card__flag {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.3px;
+}
+
+.asset-card__flag--spof {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--accent-danger);
+}
+
+.asset-card__flag--contention {
+  background: rgba(251, 146, 60, 0.15);
+  color: var(--accent-warning);
+}
+
+.asset-card__expand {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 10px;
+  cursor: pointer;
+  text-align: left;
+  padding: 2px 0;
+}
+
+.asset-card__expand:hover {
+  color: var(--text-bright);
+}
+
+.asset-card__expanded {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 6px;
+  margin-top: 4px;
+}
+
+/* ─── 3-state what-if toggle ──────────────────────────────────────────────── */
+
+.three-state-toggle {
+  display: flex;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.three-state-toggle__btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  letter-spacing: 0.5px;
+  padding: 4px 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.three-state-toggle__btn:hover {
+  color: var(--text-bright);
+}
+
+.three-state-toggle__btn--active.three-state-toggle__btn--operational {
+  background: var(--accent-success);
+  color: #000;
+}
+
+.three-state-toggle__btn--active.three-state-toggle__btn--degraded {
+  background: var(--accent-warning);
+  color: #000;
+}
+
+.three-state-toggle__btn--active.three-state-toggle__btn--offline {
+  background: var(--accent-danger);
+  color: #000;
+}
+
+/* ─── What-if banner ──────────────────────────────────────────────────────── */
+
+.what-if-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: rgba(116, 185, 255, 0.08);
+  border: 1px solid rgba(116, 185, 255, 0.25);
+  border-radius: 6px;
+}
+
+.what-if-banner__title {
+  font-size: 12px;
+  color: var(--text-bright);
+}
+
+.what-if-banner__delta {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+}
+
+.what-if-banner__pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+
+.what-if-banner__pill--bad {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--accent-danger);
+}
+
+.what-if-banner__pill--warn {
+  background: rgba(251, 146, 60, 0.15);
+  color: var(--accent-warning);
+}
+
+.what-if-banner__pill--good {
+  background: rgba(74, 222, 128, 0.15);
+  color: var(--accent-success);
+}
+
+.what-if-banner__actions {
+  display: flex;
+  gap: 6px;
+}
+
 /* ─── Stats Grid ──────────────────────────────────────────────────────────── */
 
 .stats-grid {

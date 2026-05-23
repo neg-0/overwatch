@@ -63,6 +63,8 @@ function makeOrder(needs: any[]) {
       missions: needs.map((n, i) => ({
         missionId: n.missionId ?? `MSN-${i + 1}`,
         callsign: n.callsign ?? `VIPER ${i + 1}`,
+        domain: n.domain ?? 'AIR',
+        missionType: n.missionType ?? 'STRIKE',
         spaceNeeds: [n],
       })),
     }],
@@ -655,5 +657,93 @@ describe('allocateSpaceResources', () => {
     expect(report.summary.degraded).toBe(1);
     expect(report.summary.denied).toBe(0);
     expect(report.summary.riskLevel).toBe('MODERATE');
+  });
+
+  // ─── Enrichment + what-if options ────────────────────────────────────────
+
+  it('enriches each allocation with asset and mission summary fields', async () => {
+    mockTaskingOrderFindMany.mockResolvedValue(makeOrder([
+      makeNeed({ id: 'sn-1', capabilityType: 'SATCOM_PROTECTED' }),
+    ]));
+    mockSpaceAssetFindMany.mockResolvedValue([
+      { id: 'sat-aehf', name: 'AEHF-6', constellation: 'AEHF', capabilities: ['SATCOM_PROTECTED'], status: 'OPERATIONAL' },
+    ]);
+
+    const report = await allocateSpaceResources('scn-1', 1);
+    const a = report.allocations[0];
+    expect(a.spaceAssetId).toBe('sat-aehf');
+    expect(a.spaceAssetName).toBe('AEHF-6');
+    expect(a.constellation).toBe('AEHF');
+    expect(a.capabilityType).toBe('SATCOM_PROTECTED');
+    expect(a.missionId).toBe('MSN-1');
+    expect(a.missionCallsign).toBe('VIPER 1');
+    expect(a.missionDomain).toBe('AIR');
+    expect(a.missionType).toBe('STRIKE');
+    expect(a.missionCriticality).toBe('ESSENTIAL');
+  });
+
+  it('dryRun: produces a hypothetical report without any DB writes', async () => {
+    mockTaskingOrderFindMany.mockResolvedValue(makeOrder([
+      makeNeed({ id: 'sn-1', capabilityType: 'SATCOM_WIDEBAND' }),
+    ]));
+    mockSpaceAssetFindMany.mockResolvedValue([
+      { id: 'sat-wgs-1', name: 'WGS-7', constellation: 'WGS', capabilities: ['SATCOM_WIDEBAND'], status: 'OPERATIONAL' },
+    ]);
+
+    const report = await allocateSpaceResources('scn-1', 1, { dryRun: true });
+    expect(report.allocations[0].status).toBe('FULFILLED');
+    expect(report.allocations[0].id).toMatch(/^preview:/);
+    expect(mockSpaceAllocationCreate).not.toHaveBeenCalled();
+    expect(mockSpaceAllocationUpdate).not.toHaveBeenCalled();
+  });
+
+  it('excludeAssetIds: removing the only capable asset cascades FULFILLED → DENIED', async () => {
+    mockTaskingOrderFindMany.mockResolvedValue(makeOrder([
+      makeNeed({ id: 'sn-1', capabilityType: 'SATCOM_WIDEBAND' }),
+    ]));
+    mockSpaceAssetFindMany.mockResolvedValue([
+      { id: 'sat-wgs-1', name: 'WGS-7', constellation: 'WGS', capabilities: ['SATCOM_WIDEBAND'], status: 'OPERATIONAL' },
+    ]);
+
+    const baseline = await allocateSpaceResources('scn-1', 1, { dryRun: true });
+    expect(baseline.allocations[0].status).toBe('FULFILLED');
+
+    const whatIf = await allocateSpaceResources('scn-1', 1, {
+      dryRun: true,
+      excludeAssetIds: ['sat-wgs-1'],
+    });
+    expect(whatIf.allocations[0].status).toBe('DENIED');
+    expect(whatIf.allocations[0].spaceAssetId).toBeNull();
+  });
+
+  it('statusOverrides: flipping the only OPERATIONAL asset to DEGRADED downgrades the allocation', async () => {
+    mockTaskingOrderFindMany.mockResolvedValue(makeOrder([
+      makeNeed({ id: 'sn-1', capabilityType: 'SATCOM_PROTECTED' }),
+    ]));
+    mockSpaceAssetFindMany.mockResolvedValue([
+      { id: 'sat-aehf', name: 'AEHF-6', constellation: 'AEHF', capabilities: ['SATCOM_PROTECTED'], status: 'OPERATIONAL' },
+    ]);
+
+    const whatIf = await allocateSpaceResources('scn-1', 1, {
+      dryRun: true,
+      statusOverrides: { 'sat-aehf': 'DEGRADED' },
+    });
+    expect(whatIf.allocations[0].status).toBe('DEGRADED');
+    expect(whatIf.allocations[0].spaceAssetName).toBe('AEHF-6');
+  });
+
+  it('statusOverrides OFFLINE: equivalent to excludeAssetIds', async () => {
+    mockTaskingOrderFindMany.mockResolvedValue(makeOrder([
+      makeNeed({ id: 'sn-1', capabilityType: 'SATCOM_WIDEBAND' }),
+    ]));
+    mockSpaceAssetFindMany.mockResolvedValue([
+      { id: 'sat-wgs-1', name: 'WGS-7', constellation: 'WGS', capabilities: ['SATCOM_WIDEBAND'], status: 'OPERATIONAL' },
+    ]);
+
+    const whatIf = await allocateSpaceResources('scn-1', 1, {
+      dryRun: true,
+      statusOverrides: { 'sat-wgs-1': 'OFFLINE' },
+    });
+    expect(whatIf.allocations[0].status).toBe('DENIED');
   });
 });
