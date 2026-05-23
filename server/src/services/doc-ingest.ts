@@ -1070,6 +1070,7 @@ async function persistStrategy(
   data: NormalizedStrategy,
   rawText: string,
   classification: ClassifyResult,
+  existingDocId?: string,
 ): Promise<{ createdId: string; parentLinkId?: string }> {
   const effectiveDate = parseSafeDate(data.effectiveDate || classification.effectiveDateStr);
 
@@ -1078,43 +1079,58 @@ async function persistStrategy(
   const docType = data.docType || classification.documentType;
   const tier = data.tier || tierMap[docType] || 0;
 
-  // Find parent strategy doc via cascade — link to highest-tier doc below this one's tier
+  // Find parent strategy doc via cascade — link to highest-tier doc below this one's tier.
+  // When updating in place, also exclude self so the doc can't end up as its own parent.
   const parentDoc = await prisma.strategyDocument.findFirst({
-    where: { scenarioId, tier: { lt: tier } },
+    where: {
+      scenarioId,
+      tier: { lt: tier },
+      ...(existingDocId ? { id: { not: existingDocId } } : {}),
+    },
     orderBy: [{ tier: 'desc' }, { effectiveDate: 'desc' }],
   });
 
-  const created = await prisma.strategyDocument.create({
-    data: {
-      scenarioId,
-      title: data.title || classification.title,
-      docType,
-      content: rawText,
-      authorityLevel: data.authorityLevel || classification.issuingAuthority,
-      effectiveDate,
-      tier,
-      parentDocId: parentDoc?.id || null,
-      sourceFormat: classification.sourceFormat,
-      confidence: classification.confidence,
-      ingestedAt: new Date(),
-    },
-  });
+  const docData = {
+    scenarioId,
+    title: data.title || classification.title,
+    docType,
+    content: rawText,
+    authorityLevel: data.authorityLevel || classification.issuingAuthority,
+    effectiveDate,
+    tier,
+    parentDocId: parentDoc?.id || null,
+    sourceFormat: classification.sourceFormat,
+    confidence: classification.confidence,
+    ingestedAt: new Date(),
+  };
 
-  // Extract and persist strategic priorities (AI-derived)
-  let priorityCount = 0;
-  for (const p of data.priorities || []) {
-    await prisma.strategyPriority.create({
-      data: {
-        strategyDocId: created.id,
-        rank: p.rank,
-        objective: (p as any).objective || p.description?.substring(0, 100) || `Priority ${p.rank}`,
-        description: p.description || p.justification,
-        effect: p.effect || null,
-        confidence: classification.confidence,
-      },
-    });
-    priorityCount++;
-  }
+  // Atomic write: deleting prior children and recreating them must be all-or-nothing,
+  // otherwise a mid-loop failure would leave the doc with no priorities at all.
+  const { created, priorityCount } = await prisma.$transaction(async (tx) => {
+    let doc;
+    if (existingDocId) {
+      await tx.strategyPriority.deleteMany({ where: { strategyDocId: existingDocId } });
+      doc = await tx.strategyDocument.update({ where: { id: existingDocId }, data: docData });
+    } else {
+      doc = await tx.strategyDocument.create({ data: docData });
+    }
+
+    let count = 0;
+    for (const p of data.priorities || []) {
+      await tx.strategyPriority.create({
+        data: {
+          strategyDocId: doc.id,
+          rank: p.rank,
+          objective: (p as any).objective || p.description?.substring(0, 100) || `Priority ${p.rank}`,
+          description: p.description || p.justification,
+          effect: p.effect || null,
+          confidence: classification.confidence,
+        },
+      });
+      count++;
+    }
+    return { created: doc, priorityCount: count };
+  });
 
   console.log(`  [INGEST] Strategy doc created: ${created.title} (tier ${tier}) with ${priorityCount} strategic priorities`);
   return { createdId: created.id, parentLinkId: parentDoc?.id };
@@ -1127,6 +1143,7 @@ async function persistOPLAN(
   data: NormalizedOPLAN,
   rawText: string,
   classification: ClassifyResult,
+  existingDocId?: string,
 ): Promise<{ createdId: string; parentLinkId?: string; extracted: IngestResult['extracted'] }> {
   const effectiveDate = parseSafeDate(data.effectiveDate || classification.effectiveDateStr);
 
@@ -1135,29 +1152,42 @@ async function persistOPLAN(
   const tier = data.tier || tierMap[docType] || 5;
 
   const parentDoc = await prisma.strategyDocument.findFirst({
-    where: { scenarioId, tier: { lt: tier } },
+    where: {
+      scenarioId,
+      tier: { lt: tier },
+      ...(existingDocId ? { id: { not: existingDocId } } : {}),
+    },
     orderBy: [{ tier: 'desc' }, { effectiveDate: 'desc' }],
   });
 
   // Persist atomically — all OPLAN entities in a single transaction
   const created = await prisma.$transaction(async (tx) => {
-    const doc = await tx.strategyDocument.create({
-      data: {
-        scenarioId,
-        title: data.title || classification.title,
-        docType,
-        content: rawText,
-        authorityLevel: data.authorityLevel || classification.issuingAuthority,
-        effectiveDate,
-        tier,
-        parentDocId: parentDoc?.id || null,
-        sourceFormat: classification.sourceFormat,
-        confidence: classification.confidence,
-        commanderIntent: data.commanderIntent || null,
-        mission: data.mission || null,
-        ingestedAt: new Date(),
-      },
-    });
+    const docData = {
+      scenarioId,
+      title: data.title || classification.title,
+      docType,
+      content: rawText,
+      authorityLevel: data.authorityLevel || classification.issuingAuthority,
+      effectiveDate,
+      tier,
+      parentDocId: parentDoc?.id || null,
+      sourceFormat: classification.sourceFormat,
+      confidence: classification.confidence,
+      commanderIntent: data.commanderIntent || null,
+      mission: data.mission || null,
+      ingestedAt: new Date(),
+    };
+
+    let doc;
+    if (existingDocId) {
+      await tx.strategyPriority.deleteMany({ where: { strategyDocId: existingDocId } });
+      await tx.oPLANPhase.deleteMany({ where: { strategyDocId: existingDocId } });
+      await tx.commandTask.deleteMany({ where: { strategyDocId: existingDocId } });
+      await tx.pACEComm.deleteMany({ where: { strategyDocId: existingDocId } });
+      doc = await tx.strategyDocument.update({ where: { id: existingDocId }, data: docData });
+    } else {
+      doc = await tx.strategyDocument.create({ data: docData });
+    }
 
     // Strategic priorities
     for (const p of data.priorities || []) {
@@ -1240,25 +1270,24 @@ async function persistPlanning(
   data: NormalizedPlanning,
   rawText: string,
   classification: ClassifyResult,
+  existingDocId?: string,
 ): Promise<{ createdId: string; parentLinkId?: string; matchedPriorities: number[] }> {
   const effectiveDate = parseSafeDate(data.effectiveDate || classification.effectiveDateStr);
   const strategyDocId = await findParentStrategyDoc(scenarioId, classification);
 
-  const created = await prisma.planningDocument.create({
-    data: {
-      scenarioId,
-      strategyDocId,
-      title: data.title || classification.title,
-      docType: data.docType || classification.documentType,
-      content: rawText,
-      effectiveDate,
-      sourceFormat: classification.sourceFormat,
-      confidence: classification.confidence,
-      ingestedAt: new Date(),
-    },
-  });
+  const docData = {
+    scenarioId,
+    strategyDocId,
+    title: data.title || classification.title,
+    docType: data.docType || classification.documentType,
+    content: rawText,
+    effectiveDate,
+    sourceFormat: classification.sourceFormat,
+    confidence: classification.confidence,
+    ingestedAt: new Date(),
+  };
 
-  // Create priority entries with AI-traced links to strategy priorities
+  // Reads can run outside the write transaction.
   let strategyPriorities: StrategyPriorityRef[] = [];
   if (strategyDocId) {
     strategyPriorities = await prisma.strategyPriority.findMany({
@@ -1269,23 +1298,34 @@ async function persistPlanning(
   }
   const precomputed = strategyPriorities.map(prepareStrategyKeywords);
 
-  for (const p of data.priorities || []) {
-    const bestMatchId = matchStrategyPriority(p, strategyPriorities, precomputed);
+  // Atomic write: delete + update + recreate children must succeed together.
+  const created = await prisma.$transaction(async (tx) => {
+    let doc;
+    if (existingDocId) {
+      await tx.priorityEntry.deleteMany({ where: { planningDocId: existingDocId } });
+      doc = await tx.planningDocument.update({ where: { id: existingDocId }, data: docData });
+    } else {
+      doc = await tx.planningDocument.create({ data: docData });
+    }
 
-    await prisma.priorityEntry.create({
-      data: {
-        planningDocId: created.id,
-        rank: p.rank,
-        targetId: p.targetId || null,
-        effect: p.effect,
-        description: p.description,
-        justification: p.justification,
-        latitude: p.latitude ?? null,
-        longitude: p.longitude ?? null,
-        strategyPriorityId: bestMatchId,
-      },
-    });
-  }
+    for (const p of data.priorities || []) {
+      const bestMatchId = matchStrategyPriority(p, strategyPriorities, precomputed);
+      await tx.priorityEntry.create({
+        data: {
+          planningDocId: doc.id,
+          rank: p.rank,
+          targetId: p.targetId || null,
+          effect: p.effect,
+          description: p.description,
+          justification: p.justification,
+          latitude: p.latitude ?? null,
+          longitude: p.longitude ?? null,
+          strategyPriorityId: bestMatchId,
+        },
+      });
+    }
+    return doc;
+  });
 
   console.log(`  [INGEST] Planning doc created: ${created.title} with ${data.priorities?.length || 0} priorities`);
   return {
@@ -1302,26 +1342,25 @@ async function persistJIPTL(
   data: NormalizedJIPTL,
   rawText: string,
   classification: ClassifyResult,
+  existingDocId?: string,
 ): Promise<{ createdId: string; parentLinkId?: string; matchedPriorities: number[]; extracted: IngestResult['extracted'] }> {
   const effectiveDate = parseSafeDate(data.effectiveDate || classification.effectiveDateStr);
   const strategyDocId = await findParentStrategyDoc(scenarioId, classification);
 
-  const created = await prisma.planningDocument.create({
-    data: {
-      scenarioId,
-      strategyDocId,
-      title: data.title || classification.title,
-      docType: data.docType || 'JIPTL',
-      content: rawText,
-      docTier: 3, // JIPTL tier
-      effectiveDate,
-      sourceFormat: classification.sourceFormat,
-      confidence: classification.confidence,
-      ingestedAt: new Date(),
-    },
-  });
+  const docData = {
+    scenarioId,
+    strategyDocId,
+    title: data.title || classification.title,
+    docType: data.docType || 'JIPTL',
+    content: rawText,
+    docTier: 3, // JIPTL tier
+    effectiveDate,
+    sourceFormat: classification.sourceFormat,
+    confidence: classification.confidence,
+    ingestedAt: new Date(),
+  };
 
-  // Fetch strategy priorities for traceability matching
+  // Fetch strategy priorities for traceability matching (read, outside txn).
   let strategyPriorities: StrategyPriorityRef[] = [];
   if (strategyDocId) {
     strategyPriorities = await prisma.strategyPriority.findMany({
@@ -1332,30 +1371,41 @@ async function persistJIPTL(
   }
   const precomputed = strategyPriorities.map(prepareStrategyKeywords);
 
-  for (const p of data.priorities || []) {
-    const bestMatchId = matchStrategyPriority(p, strategyPriorities, precomputed);
+  // Atomic write: delete + update + recreate children must succeed together.
+  const created = await prisma.$transaction(async (tx) => {
+    let doc;
+    if (existingDocId) {
+      await tx.priorityEntry.deleteMany({ where: { planningDocId: existingDocId } });
+      doc = await tx.planningDocument.update({ where: { id: existingDocId }, data: docData });
+    } else {
+      doc = await tx.planningDocument.create({ data: docData });
+    }
 
-    await prisma.priorityEntry.create({
-      data: {
-        planningDocId: created.id,
-        rank: p.rank,
-        targetId: p.targetId || null,
-        effect: p.effect,
-        description: p.description,
-        justification: p.justification,
-        latitude: p.latitude ?? null,
-        longitude: p.longitude ?? null,
-        targetSystemCategory: p.targetSystemCategory || null,
-        cdeLevel: p.cdeLevel || null,
-        noStrike: p.noStrike ?? false,
-        timeSensitive: p.timeSensitive ?? false,
-        engagementAuthority: p.engagementAuthority || null,
-        weaponeering: p.weaponeering || null,
-        targetStatus: p.targetStatus || null,
-        strategyPriorityId: bestMatchId,
-      },
-    });
-  }
+    for (const p of data.priorities || []) {
+      const bestMatchId = matchStrategyPriority(p, strategyPriorities, precomputed);
+      await tx.priorityEntry.create({
+        data: {
+          planningDocId: doc.id,
+          rank: p.rank,
+          targetId: p.targetId || null,
+          effect: p.effect,
+          description: p.description,
+          justification: p.justification,
+          latitude: p.latitude ?? null,
+          longitude: p.longitude ?? null,
+          targetSystemCategory: p.targetSystemCategory || null,
+          cdeLevel: p.cdeLevel || null,
+          noStrike: p.noStrike ?? false,
+          timeSensitive: p.timeSensitive ?? false,
+          engagementAuthority: p.engagementAuthority || null,
+          weaponeering: p.weaponeering || null,
+          targetStatus: p.targetStatus || null,
+          strategyPriorityId: bestMatchId,
+        },
+      });
+    }
+    return doc;
+  });
 
   console.log(`  [INGEST] JIPTL created: ${created.title} with ${data.priorities?.length || 0} enhanced targets`);
   return {
@@ -1373,55 +1423,65 @@ async function persistSPINS(
   data: NormalizedSPINS,
   rawText: string,
   classification: ClassifyResult,
+  existingDocId?: string,
 ): Promise<{ createdId: string; parentLinkId?: string; extracted: IngestResult['extracted'] }> {
   const effectiveDate = parseSafeDate(data.effectiveDate || classification.effectiveDateStr);
   const strategyDocId = await findParentStrategyDoc(scenarioId, classification);
 
-  const created = await prisma.planningDocument.create({
-    data: {
-      scenarioId,
-      strategyDocId,
-      title: data.title || classification.title,
-      docType: 'SPINS',
-      content: rawText,
-      docTier: 5, // SPINS tier
-      effectiveDate,
-      sourceFormat: classification.sourceFormat,
-      confidence: classification.confidence,
-      ingestedAt: new Date(),
-    },
+  const docData = {
+    scenarioId,
+    strategyDocId,
+    title: data.title || classification.title,
+    docType: 'SPINS',
+    content: rawText,
+    docTier: 5, // SPINS tier
+    effectiveDate,
+    sourceFormat: classification.sourceFormat,
+    confidence: classification.confidence,
+    ingestedAt: new Date(),
+  };
+
+  // Atomic write: delete + update + recreate children must succeed together.
+  const created = await prisma.$transaction(async (tx) => {
+    let doc;
+    if (existingDocId) {
+      await tx.sPINSEntry.deleteMany({ where: { planningDocId: existingDocId } });
+      await tx.commPlan.deleteMany({ where: { planningDocId: existingDocId } });
+      doc = await tx.planningDocument.update({ where: { id: existingDocId }, data: docData });
+    } else {
+      doc = await tx.planningDocument.create({ data: docData });
+    }
+
+    for (const proc of data.procedures || []) {
+      await tx.sPINSEntry.create({
+        data: {
+          planningDocId: doc.id,
+          category: proc.category,
+          title: proc.title,
+          description: proc.description,
+          conditions: proc.conditions || null,
+          authority: proc.authority || null,
+          applicableTo: normalizeApplicableTo(proc.applicableTo),
+        },
+      });
+    }
+
+    for (const comm of data.commPlans || []) {
+      await tx.commPlan.create({
+        data: {
+          planningDocId: doc.id,
+          netName: comm.netName,
+          frequency: comm.frequency || null,
+          band: comm.band || null,
+          callsign: comm.callsign || null,
+          purpose: comm.purpose,
+          paceOrder: comm.paceOrder || null,
+          applicableTo: normalizeApplicableTo(comm.applicableTo),
+        },
+      });
+    }
+    return doc;
   });
-
-  // Persist procedures (ROE, EMCON, etc.)
-  for (const proc of data.procedures || []) {
-    await prisma.sPINSEntry.create({
-      data: {
-        planningDocId: created.id,
-        category: proc.category,
-        title: proc.title,
-        description: proc.description,
-        conditions: proc.conditions || null,
-        authority: proc.authority || null,
-        applicableTo: normalizeApplicableTo(proc.applicableTo),
-      },
-    });
-  }
-
-  // Persist comm plans
-  for (const comm of data.commPlans || []) {
-    await prisma.commPlan.create({
-      data: {
-        planningDocId: created.id,
-        netName: comm.netName,
-        frequency: comm.frequency || null,
-        band: comm.band || null,
-        callsign: comm.callsign || null,
-        purpose: comm.purpose,
-        paceOrder: comm.paceOrder || null,
-        applicableTo: normalizeApplicableTo(comm.applicableTo),
-      },
-    });
-  }
 
   console.log(`  [INGEST] SPINS created: ${created.title} — ${data.procedures?.length || 0} procedures, ${data.commPlans?.length || 0} comm plans, ${data.codeWords?.length || 0} code words`);
   return {
@@ -1442,59 +1502,70 @@ async function persistACO(
   data: NormalizedACO,
   rawText: string,
   classification: ClassifyResult,
+  existingDocId?: string,
 ): Promise<{ createdId: string; parentLinkId?: string; extracted: IngestResult['extracted'] }> {
   const effectiveDate = parseSafeDate(data.effectiveDate || classification.effectiveDateStr);
   const strategyDocId = await findParentStrategyDoc(scenarioId, classification);
 
-  const created = await prisma.planningDocument.create({
-    data: {
-      scenarioId,
-      strategyDocId,
-      title: data.title || classification.title,
-      docType: 'ACO',
-      content: rawText,
-      docTier: 5, // ACO tier
-      effectiveDate,
-      sourceFormat: classification.sourceFormat,
-      confidence: classification.confidence,
-      ingestedAt: new Date(),
-    },
+  const docData = {
+    scenarioId,
+    strategyDocId,
+    title: data.title || classification.title,
+    docType: 'ACO',
+    content: rawText,
+    docTier: 5, // ACO tier
+    effectiveDate,
+    sourceFormat: classification.sourceFormat,
+    confidence: classification.confidence,
+    ingestedAt: new Date(),
+  };
+
+  // Atomic write: delete + update + recreate children must succeed together.
+  const created = await prisma.$transaction(async (tx) => {
+    let doc;
+    if (existingDocId) {
+      await tx.fireSupportMeasure.deleteMany({ where: { planningDocId: existingDocId } });
+      // AirspaceStructure.sourceDocId is a plain string FK (no relation) — clean up by hand.
+      await tx.airspaceStructure.deleteMany({ where: { sourceDocId: existingDocId } });
+      doc = await tx.planningDocument.update({ where: { id: existingDocId }, data: docData });
+    } else {
+      doc = await tx.planningDocument.create({ data: docData });
+    }
+
+    for (const acm of data.airspaceControlMeasures || []) {
+      await tx.airspaceStructure.create({
+        data: {
+          scenarioId,
+          structureType: acm.measureType,
+          name: acm.name,
+          coordinatesJson: [], // Will be populated by aco-parser.ts from boundaryDescription
+          altitudeLow: acm.altitudeFloor ?? null,
+          altitudeHigh: acm.altitudeCeiling ?? null,
+          altitudeUnit: acm.altitudeUnit || null,
+          effectiveStart: acm.effectiveStart ? parseSafeDate(acm.effectiveStart) : null,
+          effectiveEnd: acm.effectiveEnd ? parseSafeDate(acm.effectiveEnd) : null,
+          sourceDocId: doc.id,
+          controllingAuthority: acm.controllingAuthority || null,
+          activationConditions: acm.activationConditions || null,
+          usageRestrictions: acm.usageRestrictions || null,
+        },
+      });
+    }
+
+    for (const fsm of data.fireSupportMeasures || []) {
+      await tx.fireSupportMeasure.create({
+        data: {
+          planningDocId: doc.id,
+          measureType: fsm.measureType,
+          name: fsm.name,
+          description: fsm.description || null,
+          effectiveStart: fsm.effectiveStart ? parseSafeDate(fsm.effectiveStart) : null,
+          effectiveEnd: fsm.effectiveEnd ? parseSafeDate(fsm.effectiveEnd) : null,
+        },
+      });
+    }
+    return doc;
   });
-
-  // Persist airspace control measures into AirspaceStructure model
-  for (const acm of data.airspaceControlMeasures || []) {
-    await prisma.airspaceStructure.create({
-      data: {
-        scenarioId,
-        structureType: acm.measureType,
-        name: acm.name,
-        coordinatesJson: [], // Will be populated by aco-parser.ts from boundaryDescription
-        altitudeLow: acm.altitudeFloor ?? null,
-        altitudeHigh: acm.altitudeCeiling ?? null,
-        altitudeUnit: acm.altitudeUnit || null,
-        effectiveStart: acm.effectiveStart ? parseSafeDate(acm.effectiveStart) : null,
-        effectiveEnd: acm.effectiveEnd ? parseSafeDate(acm.effectiveEnd) : null,
-        sourceDocId: created.id,
-        controllingAuthority: acm.controllingAuthority || null,
-        activationConditions: acm.activationConditions || null,
-        usageRestrictions: acm.usageRestrictions || null,
-      },
-    });
-  }
-
-  // Persist fire support coordination measures
-  for (const fsm of data.fireSupportMeasures || []) {
-    await prisma.fireSupportMeasure.create({
-      data: {
-        planningDocId: created.id,
-        measureType: fsm.measureType,
-        name: fsm.name,
-        description: fsm.description || null,
-        effectiveStart: fsm.effectiveStart ? parseSafeDate(fsm.effectiveStart) : null,
-        effectiveEnd: fsm.effectiveEnd ? parseSafeDate(fsm.effectiveEnd) : null,
-      },
-    });
-  }
 
   console.log(`  [INGEST] ACO created: ${created.title} — ${data.airspaceControlMeasures?.length || 0} airspace measures, ${data.fireSupportMeasures?.length || 0} fire support measures`);
   return {
@@ -1514,81 +1585,91 @@ async function persistMAAP(
   data: NormalizedMAAP,
   rawText: string,
   classification: ClassifyResult,
+  existingDocId?: string,
 ): Promise<{ createdId: string; parentLinkId?: string; matchedPriorities: number[]; extracted: IngestResult['extracted'] }> {
   const effectiveDate = parseSafeDate(data.effectiveDate || classification.effectiveDateStr);
   const strategyDocId = await findParentStrategyDoc(scenarioId, classification);
 
-  const created = await prisma.planningDocument.create({
-    data: {
-      scenarioId,
-      strategyDocId,
-      title: data.title || classification.title,
-      docType: 'MAAP',
-      content: rawText,
-      docTier: 4, // MAAP tier
-      effectiveDate,
-      sourceFormat: classification.sourceFormat,
-      confidence: classification.confidence,
-      ingestedAt: new Date(),
-    },
+  const docData = {
+    scenarioId,
+    strategyDocId,
+    title: data.title || classification.title,
+    docType: 'MAAP',
+    content: rawText,
+    docTier: 4, // MAAP tier
+    effectiveDate,
+    sourceFormat: classification.sourceFormat,
+    confidence: classification.confidence,
+    ingestedAt: new Date(),
+  };
+
+  // Atomic write: delete + update + recreate children must succeed together.
+  const created = await prisma.$transaction(async (tx) => {
+    let doc;
+    if (existingDocId) {
+      await tx.priorityEntry.deleteMany({ where: { planningDocId: existingDocId } });
+      await tx.forceApportionment.deleteMany({ where: { planningDocId: existingDocId } });
+      await tx.weaponTargetPair.deleteMany({ where: { planningDocId: existingDocId } });
+      await tx.coordinationMeasure.deleteMany({ where: { planningDocId: existingDocId } });
+      doc = await tx.planningDocument.update({ where: { id: existingDocId }, data: docData });
+    } else {
+      doc = await tx.planningDocument.create({ data: docData });
+    }
+
+    for (const t of data.targetPriorityList || []) {
+      await tx.priorityEntry.create({
+        data: {
+          planningDocId: doc.id,
+          rank: t.rank,
+          targetId: t.targetId || null,
+          effect: t.desiredEffect,
+          description: `${t.targetName} (${t.targetCategory})`,
+          justification: t.justification,
+        },
+      });
+    }
+
+    for (const fa of data.forceApportionment || []) {
+      await tx.forceApportionment.create({
+        data: {
+          planningDocId: doc.id,
+          missionType: fa.missionType,
+          percentAllocation: fa.percentAllocation,
+          sorties: fa.sorties,
+          rationale: fa.rationale || null,
+        },
+      });
+    }
+
+    for (const wtp of data.weaponTargetPairings || []) {
+      await tx.weaponTargetPair.create({
+        data: {
+          planningDocId: doc.id,
+          targetName: wtp.targetName,
+          targetId: wtp.targetId || null,
+          weaponSystem: wtp.weaponSystem,
+          platform: wtp.platform || null,
+          quantity: wtp.quantity ?? null,
+          desiredEffect: wtp.desiredEffect,
+          guidanceType: wtp.guidanceType || null,
+        },
+      });
+    }
+
+    for (const cm of data.coordinationMeasures || []) {
+      await tx.coordinationMeasure.create({
+        data: {
+          planningDocId: doc.id,
+          measureType: cm.measureType,
+          name: cm.name,
+          description: cm.description || null,
+          effectiveStart: cm.effectiveStart ? parseSafeDate(cm.effectiveStart) : null,
+          effectiveEnd: cm.effectiveEnd ? parseSafeDate(cm.effectiveEnd) : null,
+        },
+      });
+    }
+    return doc;
   });
-
-  // Persist target priority list as PriorityEntry records (maintains traceability chain)
-  for (const t of data.targetPriorityList || []) {
-    await prisma.priorityEntry.create({
-      data: {
-        planningDocId: created.id,
-        rank: t.rank,
-        targetId: t.targetId || null,
-        effect: t.desiredEffect,
-        description: `${t.targetName} (${t.targetCategory})`,
-        justification: t.justification,
-      },
-    });
-  }
-
-  // Persist force apportionment
-  for (const fa of data.forceApportionment || []) {
-    await prisma.forceApportionment.create({
-      data: {
-        planningDocId: created.id,
-        missionType: fa.missionType,
-        percentAllocation: fa.percentAllocation,
-        sorties: fa.sorties,
-        rationale: fa.rationale || null,
-      },
-    });
-  }
-
-  // Persist weapon-target pairings
-  for (const wtp of data.weaponTargetPairings || []) {
-    await prisma.weaponTargetPair.create({
-      data: {
-        planningDocId: created.id,
-        targetName: wtp.targetName,
-        targetId: wtp.targetId || null,
-        weaponSystem: wtp.weaponSystem,
-        platform: wtp.platform || null,
-        quantity: wtp.quantity ?? null,
-        desiredEffect: wtp.desiredEffect,
-        guidanceType: wtp.guidanceType || null,
-      },
-    });
-  }
-
-  // Persist coordination measures
-  for (const cm of data.coordinationMeasures || []) {
-    await prisma.coordinationMeasure.create({
-      data: {
-        planningDocId: created.id,
-        measureType: cm.measureType,
-        name: cm.name,
-        description: cm.description || null,
-        effectiveStart: cm.effectiveStart ? parseSafeDate(cm.effectiveStart) : null,
-        effectiveEnd: cm.effectiveEnd ? parseSafeDate(cm.effectiveEnd) : null,
-      },
-    });
-  }
 
   console.log(`  [INGEST] MAAP created: ${created.title} — ${data.targetPriorityList?.length || 0} targets, ${data.forceApportionment?.length || 0} apportionments, ${data.weaponTargetPairings?.length || 0} W-T pairs, ${data.coordinationMeasures?.length || 0} coord measures`);
   return {
@@ -1650,6 +1731,7 @@ async function persistOrder(
   data: NormalizedOrder,
   rawText: string,
   classification: ClassifyResult,
+  existingDocId?: string,
 ): Promise<{ createdId: string; parentLinkId?: string; matchedPriorities: number[]; extracted: IngestResult['extracted'] }> {
   // Anchor the order to the simulation calendar by its ATO day ordinal. The
   // document's absolute dates are unreliable (abbreviated DTGs, exercise
@@ -1699,24 +1781,31 @@ async function persistOrder(
     const unitIndex = buildUnitIndex(units);
 
     // Create the tasking order
-    const order = await tx.taskingOrder.create({
-      data: {
-        scenarioId,
-        planningDocId,
-        orderType,
-        orderId: data.orderId || `${orderType}-INGEST-${Date.now()}`,
-        issuingAuthority: data.issuingAuthority || classification.issuingAuthority || 'UNKNOWN',
-        effectiveStart,
-        effectiveEnd,
-        classification: classificationVal,
-        atoDayNumber: data.atoDayNumber || null,
-        rawText,
-        rawFormat: classification.sourceFormat,
-        sourceFormat: classification.sourceFormat,
-        confidence: classification.confidence,
-        ingestedAt: new Date(),
-      },
-    });
+    const orderData = {
+      scenarioId,
+      planningDocId,
+      orderType,
+      orderId: data.orderId || `${orderType}-INGEST-${Date.now()}`,
+      issuingAuthority: data.issuingAuthority || classification.issuingAuthority || 'UNKNOWN',
+      effectiveStart,
+      effectiveEnd,
+      classification: classificationVal,
+      atoDayNumber: data.atoDayNumber || null,
+      rawText,
+      rawFormat: classification.sourceFormat,
+      sourceFormat: classification.sourceFormat,
+      confidence: classification.confidence,
+      ingestedAt: new Date(),
+    };
+
+    let order;
+    if (existingDocId) {
+      // MissionPackage cascade-deletes Missions → Waypoints/TimeWindows/MissionTargets/SupportRequirements/SpaceNeeds.
+      await tx.missionPackage.deleteMany({ where: { taskingOrderId: existingDocId } });
+      order = await tx.taskingOrder.update({ where: { id: existingDocId }, data: orderData });
+    } else {
+      order = await tx.taskingOrder.create({ data: orderData });
+    }
 
     let missionCount = 0;
     let waypointCount = 0;
@@ -1957,64 +2046,73 @@ async function persistMSEL(
   data: NormalizedMSEL,
   rawText: string,
   classification: ClassifyResult,
+  existingDocId?: string,
 ): Promise<{ createdId: string; extracted: IngestResult['extracted'] }> {
   // First, store the MSEL as a PlanningDocument (docType: 'MSEL')
   const effectiveDate = parseSafeDate(classification.effectiveDateStr);
 
-  const planningDoc = await prisma.planningDocument.create({
-    data: {
-      scenarioId,
-      title: `MSEL — ${data.exerciseName || classification.title || 'Exercise'}`,
-      docType: 'MSEL',
-      content: rawText,
-      docTier: 6, // MSEL tier (above SPINS/ACO)
-      effectiveDate,
-      sourceFormat: classification.sourceFormat,
-      confidence: classification.confidence,
-      ingestedAt: new Date(),
-    },
-  });
+  const docData = {
+    scenarioId,
+    title: `MSEL — ${data.exerciseName || classification.title || 'Exercise'}`,
+    docType: 'MSEL',
+    content: rawText,
+    docTier: 6, // MSEL tier (above SPINS/ACO)
+    effectiveDate,
+    sourceFormat: classification.sourceFormat,
+    confidence: classification.confidence,
+    ingestedAt: new Date(),
+  };
 
-  // Get scenario dates for DTG parsing
+  // Get scenario dates for DTG parsing (read, outside txn).
   const scenario = await prisma.scenario.findUnique({
     where: { id: scenarioId },
     select: { startDate: true },
   });
   const scenarioStart = scenario?.startDate || effectiveDate;
 
-  // Create ScenarioInject records from normalized injects
-  let injectCount = 0;
-  for (const inject of data.injects || []) {
-    // Parse DTG to extract triggerDay and triggerHour
-    const { day, hour } = parseDTG(inject.dtg, scenarioStart);
+  // Atomic write: delete + update + recreate injects must succeed together.
+  const { planningDoc, injectCount } = await prisma.$transaction(async (tx) => {
+    let doc;
+    if (existingDocId) {
+      // ScenarioInject.planningDocId is an optional FK — clean stale injects so re-ingest doesn't double up.
+      await tx.scenarioInject.deleteMany({ where: { planningDocId: existingDocId } });
+      doc = await tx.planningDocument.update({ where: { id: existingDocId }, data: docData });
+    } else {
+      doc = await tx.planningDocument.create({ data: docData });
+    }
 
-    await prisma.scenarioInject.create({
-      data: {
-        scenarioId,
-        planningDocId: planningDoc.id,
-        triggerDay: day,
-        triggerHour: hour,
-        injectType: inject.eventType || 'INFORMATION',
-        title: inject.message?.substring(0, 120) || `Inject ${inject.serialNumber}`,
-        description: inject.message || '',
-        impact: inject.notes || '',
-        // CJCSM 3500.03F doctrine fields
-        serialNumber: inject.serialNumber,
-        mselLevel: inject.mselLevel,
-        injectMode: inject.injectMode,
-        fromEntity: inject.fromEntity,
-        toEntity: inject.toEntity,
-        expectedResponse: inject.expectedResponse,
-        objectiveTested: inject.objectiveTested,
-        // Entity linkage — callsigns, units, assets affected by this inject
-        affectedEntities: inject.affectedEntities || [],
-        // Geolocation — AI-extracted from inject message
-        latitude: inject.latitude ?? null,
-        longitude: inject.longitude ?? null,
-      },
-    });
-    injectCount++;
-  }
+    let count = 0;
+    for (const inject of data.injects || []) {
+      const { day, hour } = parseDTG(inject.dtg, scenarioStart);
+      await tx.scenarioInject.create({
+        data: {
+          scenarioId,
+          planningDocId: doc.id,
+          triggerDay: day,
+          triggerHour: hour,
+          injectType: inject.eventType || 'INFORMATION',
+          title: inject.message?.substring(0, 120) || `Inject ${inject.serialNumber}`,
+          description: inject.message || '',
+          impact: inject.notes || '',
+          // CJCSM 3500.03F doctrine fields
+          serialNumber: inject.serialNumber,
+          mselLevel: inject.mselLevel,
+          injectMode: inject.injectMode,
+          fromEntity: inject.fromEntity,
+          toEntity: inject.toEntity,
+          expectedResponse: inject.expectedResponse,
+          objectiveTested: inject.objectiveTested,
+          // Entity linkage — callsigns, units, assets affected by this inject
+          affectedEntities: inject.affectedEntities || [],
+          // Geolocation — AI-extracted from inject message
+          latitude: inject.latitude ?? null,
+          longitude: inject.longitude ?? null,
+        },
+      });
+      count++;
+    }
+    return { planningDoc: doc, injectCount: count };
+  });
 
   console.log(`  [INGEST] MSEL created: ${planningDoc.title} — ${injectCount} injects extracted`);
 
@@ -2029,6 +2127,7 @@ async function persistBDA(
   data: NormalizedBDA,
   rawText: string,
   classification: ClassifyResult,
+  existingDocId?: string,
 ): Promise<{ createdId: string; extracted: IngestResult['extracted'] }> {
   const effectiveDate = data.effectiveDate
     ? parseSafeDate(data.effectiveDate)
@@ -2036,20 +2135,22 @@ async function persistBDA(
 
   // rawText is stored verbatim; the LLM's structured extraction is kept
   // separately as JSON — document text is never derived from model output.
-  const bda = await prisma.battleDamageAssessment.create({
-    data: {
-      scenarioId,
-      atoDayNumber: data.atoDayNumber ?? null,
-      title: data.title || classification.title || 'Battle Damage Assessment',
-      issuingAuthority: data.issuingAuthority || classification.issuingAuthority || null,
-      rawText,
-      structured: data as object,
-      effectiveDate,
-      sourceFormat: classification.sourceFormat,
-      confidence: classification.confidence,
-      ingestedAt: new Date(),
-    },
-  });
+  const bdaData = {
+    scenarioId,
+    atoDayNumber: data.atoDayNumber ?? null,
+    title: data.title || classification.title || 'Battle Damage Assessment',
+    issuingAuthority: data.issuingAuthority || classification.issuingAuthority || null,
+    rawText,
+    structured: data as object,
+    effectiveDate,
+    sourceFormat: classification.sourceFormat,
+    confidence: classification.confidence,
+    ingestedAt: new Date(),
+  };
+
+  const bda = existingDocId
+    ? await prisma.battleDamageAssessment.update({ where: { id: existingDocId }, data: bdaData })
+    : await prisma.battleDamageAssessment.create({ data: bdaData });
 
   console.log(`  [INGEST] BDA created: ${bda.title} — Day ${data.atoDayNumber ?? '?'}, ${data.targetAssessments?.length ?? 0} target assessments`);
 
@@ -2194,6 +2295,72 @@ export async function ingestDocument(
   // Stage 3: Link & Persist
   console.log('[INGEST] Stage 3: Linking and persisting...');
 
+  // Resolve which existing un-ingested row (if any) this ingest should update
+  // in place. The scenario generator drops stubs (content only, no structured
+  // children); ingest enriches those stubs rather than creating a duplicate.
+  // Paste-path uploads have no sourceDocId — fall back to content-match.
+  type DocTable = 'strategy' | 'planning' | 'order' | 'bda';
+  const expectedTable: DocTable | null =
+    classification.hierarchyLevel === 'STRATEGY' ? 'strategy'
+      : classification.hierarchyLevel === 'PLANNING' ? 'planning'
+        : classification.hierarchyLevel === 'EVENT_LIST' ? 'planning'
+          : classification.hierarchyLevel === 'ORDER' ? 'order'
+            : classification.hierarchyLevel === 'BDA' ? 'bda'
+              : null;
+
+  let existingDocId: string | undefined;
+  if (sourceDocId && expectedTable) {
+    // Locate the source doc — generator may have stored it in a different table
+    // than the AI classifier picks (e.g. scenario gen put it in strategy, but
+    // ingest classified it as planning). On table mismatch, delete the stub so
+    // the new ingest record lands in the right table without a duplicate.
+    const [stratStub, planStub, orderStub, bdaStub] = await Promise.all([
+      prisma.strategyDocument.findFirst({ where: { id: sourceDocId, scenarioId }, select: { id: true } }),
+      prisma.planningDocument.findFirst({ where: { id: sourceDocId, scenarioId }, select: { id: true } }),
+      prisma.taskingOrder.findFirst({ where: { id: sourceDocId, scenarioId }, select: { id: true } }),
+      prisma.battleDamageAssessment.findFirst({ where: { id: sourceDocId, scenarioId }, select: { id: true } }),
+    ]);
+    const actualTable: DocTable | null =
+      stratStub ? 'strategy' : planStub ? 'planning' : orderStub ? 'order' : bdaStub ? 'bda' : null;
+
+    if (actualTable === expectedTable) {
+      existingDocId = sourceDocId;
+    } else if (actualTable === 'strategy') {
+      await prisma.strategyDocument.delete({ where: { id: sourceDocId } });
+    } else if (actualTable === 'planning') {
+      await prisma.planningDocument.delete({ where: { id: sourceDocId } });
+    } else if (actualTable === 'order') {
+      await prisma.taskingOrder.delete({ where: { id: sourceDocId } });
+    } else if (actualTable === 'bda') {
+      await prisma.battleDamageAssessment.delete({ where: { id: sourceDocId } });
+    }
+    // actualTable === null → already ingested or never existed; no-op
+  } else if (expectedTable === 'strategy') {
+    const match = await prisma.strategyDocument.findFirst({
+      where: { scenarioId, content: rawText, ingestedAt: null },
+      select: { id: true },
+    });
+    if (match) existingDocId = match.id;
+  } else if (expectedTable === 'planning') {
+    const match = await prisma.planningDocument.findFirst({
+      where: { scenarioId, content: rawText, ingestedAt: null },
+      select: { id: true },
+    });
+    if (match) existingDocId = match.id;
+  } else if (expectedTable === 'order') {
+    const match = await prisma.taskingOrder.findFirst({
+      where: { scenarioId, rawText, ingestedAt: null },
+      select: { id: true },
+    });
+    if (match) existingDocId = match.id;
+  } else if (expectedTable === 'bda') {
+    const match = await prisma.battleDamageAssessment.findFirst({
+      where: { scenarioId, rawText, ingestedAt: null },
+      select: { id: true },
+    });
+    if (match) existingDocId = match.id;
+  }
+
   let createdId: string;
   let parentLinkId: string | undefined;
   let matchedPriorities: number[] = [];
@@ -2204,12 +2371,12 @@ export async function ingestDocument(
       case 'STRATEGY': {
         // OPLAN/CONPLAN get richer extraction with phases, command tasks, PACE comms
         if (classification.documentType === 'OPLAN' || classification.documentType === 'CONPLAN') {
-          const result = await persistOPLAN(scenarioId, normalized as NormalizedOPLAN, rawText, classification);
+          const result = await persistOPLAN(scenarioId, normalized as NormalizedOPLAN, rawText, classification, existingDocId);
           createdId = result.createdId;
           parentLinkId = result.parentLinkId;
           extracted = result.extracted;
         } else {
-          const result = await persistStrategy(scenarioId, normalized as NormalizedStrategy, rawText, classification);
+          const result = await persistStrategy(scenarioId, normalized as NormalizedStrategy, rawText, classification, existingDocId);
           createdId = result.createdId;
           parentLinkId = result.parentLinkId;
           const stratData = normalized as NormalizedStrategy;
@@ -2222,7 +2389,7 @@ export async function ingestDocument(
         switch (classification.documentType) {
           case 'JIPTL':
           case 'JPEL': {
-            const result = await persistJIPTL(scenarioId, normalized as NormalizedJIPTL, rawText, classification);
+            const result = await persistJIPTL(scenarioId, normalized as NormalizedJIPTL, rawText, classification, existingDocId);
             createdId = result.createdId;
             parentLinkId = result.parentLinkId;
             matchedPriorities = result.matchedPriorities;
@@ -2230,21 +2397,21 @@ export async function ingestDocument(
             break;
           }
           case 'SPINS': {
-            const result = await persistSPINS(scenarioId, normalized as NormalizedSPINS, rawText, classification);
+            const result = await persistSPINS(scenarioId, normalized as NormalizedSPINS, rawText, classification, existingDocId);
             createdId = result.createdId;
             parentLinkId = result.parentLinkId;
             extracted = result.extracted;
             break;
           }
           case 'ACO': {
-            const result = await persistACO(scenarioId, normalized as NormalizedACO, rawText, classification);
+            const result = await persistACO(scenarioId, normalized as NormalizedACO, rawText, classification, existingDocId);
             createdId = result.createdId;
             parentLinkId = result.parentLinkId;
             extracted = result.extracted;
             break;
           }
           case 'MAAP': {
-            const result = await persistMAAP(scenarioId, normalized as NormalizedMAAP, rawText, classification);
+            const result = await persistMAAP(scenarioId, normalized as NormalizedMAAP, rawText, classification, existingDocId);
             createdId = result.createdId;
             parentLinkId = result.parentLinkId;
             matchedPriorities = result.matchedPriorities;
@@ -2253,7 +2420,7 @@ export async function ingestDocument(
           }
           default: {
             // Generic planning persist (COMPONENT_PRIORITY, etc.)
-            const result = await persistPlanning(scenarioId, normalized as NormalizedPlanning, rawText, classification);
+            const result = await persistPlanning(scenarioId, normalized as NormalizedPlanning, rawText, classification, existingDocId);
             createdId = result.createdId;
             parentLinkId = result.parentLinkId;
             matchedPriorities = result.matchedPriorities;
@@ -2265,7 +2432,7 @@ export async function ingestDocument(
         break;
       }
       case 'ORDER': {
-        const result = await persistOrder(scenarioId, normalized as NormalizedOrder, rawText, classification);
+        const result = await persistOrder(scenarioId, normalized as NormalizedOrder, rawText, classification, existingDocId);
         createdId = result.createdId;
         parentLinkId = result.parentLinkId;
         matchedPriorities = result.matchedPriorities;
@@ -2273,13 +2440,13 @@ export async function ingestDocument(
         break;
       }
       case 'EVENT_LIST': {
-        const result = await persistMSEL(scenarioId, normalized as NormalizedMSEL, rawText, classification);
+        const result = await persistMSEL(scenarioId, normalized as NormalizedMSEL, rawText, classification, existingDocId);
         createdId = result.createdId;
         extracted = result.extracted;
         break;
       }
       case 'BDA': {
-        const result = await persistBDA(scenarioId, normalized as NormalizedBDA, rawText, classification);
+        const result = await persistBDA(scenarioId, normalized as NormalizedBDA, rawText, classification, existingDocId);
         createdId = result.createdId;
         extracted = result.extracted;
         break;
@@ -2311,49 +2478,6 @@ export async function ingestDocument(
       parseTimeMs,
     },
   });
-
-  // Stamp ingestedAt on the original scenario-generated doc so the client
-  // knows this document has been processed through the ingest pipeline.
-  // The original docs (from scenario generation) have ingestedAt = null.
-  try {
-    const now = new Date();
-    if (sourceDocId) {
-      // Prefer ID-based stamping — immune to content mismatch and classification errors.
-      // Try both tables since classification may disagree with where the generator stored the doc.
-      const [stratResult, planResult] = await Promise.all([
-        prisma.strategyDocument.updateMany({
-          where: { id: sourceDocId, scenarioId, ingestedAt: null },
-          data: { ingestedAt: now },
-        }),
-        prisma.planningDocument.updateMany({
-          where: { id: sourceDocId, scenarioId, ingestedAt: null },
-          data: { ingestedAt: now },
-        }),
-      ]);
-      const stamped = stratResult.count + planResult.count;
-      if (stamped === 0) {
-        console.warn(`[INGEST] sourceDocId ${sourceDocId} not found in strategy or planning tables (already ingested?)`);
-      }
-    } else if (classification.hierarchyLevel === 'STRATEGY') {
-      await prisma.strategyDocument.updateMany({
-        where: { scenarioId, content: rawText, ingestedAt: null },
-        data: { ingestedAt: now },
-      });
-    } else if (classification.hierarchyLevel === 'PLANNING' || classification.hierarchyLevel === 'EVENT_LIST') {
-      await prisma.planningDocument.updateMany({
-        where: { scenarioId, content: rawText, ingestedAt: null },
-        data: { ingestedAt: now },
-      });
-    } else if (classification.hierarchyLevel === 'ORDER') {
-      await prisma.taskingOrder.updateMany({
-        where: { scenarioId, rawText, ingestedAt: null },
-        data: { ingestedAt: now },
-      });
-    }
-  } catch (stampErr) {
-    // Non-fatal — don't break the pipeline for this bookkeeping
-    console.warn('[INGEST] Failed to stamp ingestedAt on original doc:', stampErr);
-  }
 
   const result: IngestResult = {
     success: true,

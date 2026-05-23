@@ -820,7 +820,7 @@ export function DocumentIntake() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          documents: unprocessed.map(d => ({ text: d.content })),
+          documents: unprocessed.map(d => ({ text: d.content, sourceDocId: d.id })),
         }),
       });
       const json = await res.json();
