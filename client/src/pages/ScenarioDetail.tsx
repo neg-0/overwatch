@@ -3,8 +3,7 @@ import { Link, useParams, useNavigate } from 'react-router-dom';
 import { DocumentReaderModal } from '../components/DocumentReaderModal';
 import { DocumentEditModal } from '../components/DocumentEditModal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { GenerationProgressModal } from '../components/GenerationProgressModal';
-import { useOverwatchStore, type ModelOverrides } from '../store/overwatch-store';
+import { useOverwatchStore, type ModelOverrides, type ArtifactResult } from '../store/overwatch-store';
 
 // A tasking order being edited — raw text is fetched on demand.
 interface EditingOrder {
@@ -27,21 +26,42 @@ type PendingAction =
 
 const MODEL_OPTIONS = ['gpt-5.4', 'gpt-5-mini', 'gpt-5-nano'];
 
-const ARTIFACT_MODEL_CONFIG: Array<{
-  key: keyof ModelOverrides;
+// Mirrors the backend's 8-step GENERATION_STEPS. Each step optionally has a
+// model override key; deterministic steps (Theater Bases, Space Constellation)
+// don't take an AI model. expectedArtifacts is used to mark a step "complete"
+// once all its websocket artifact-result events have arrived.
+interface PipelineStep {
+  name: string;
   label: string;
   icon: string;
-  defaultTier: string;
   desc: string;
-}> = [
-    { key: 'strategyDocs', label: 'Strategy Documents', icon: '📄', defaultTier: 'gpt-5.4', desc: 'NDS, NMS, JSCP' },
-    { key: 'campaignPlan', label: 'Campaign Plan', icon: '🗺', defaultTier: 'gpt-5.4', desc: 'CONPLAN, OPLAN' },
-    { key: 'orbat', label: 'Joint Force ORBAT', icon: '⚔️', defaultTier: 'gpt-5-mini', desc: 'Units, platforms, assets' },
-    { key: 'planningDocs', label: 'Planning Documents', icon: '🎯', defaultTier: 'gpt-5-mini', desc: 'JIPTL, SPINS, ACO' },
-    { key: 'maap', label: 'MAAP', icon: '✈️', defaultTier: 'gpt-5.4', desc: 'Master Air Attack Plan' },
-    { key: 'mselInjects', label: 'MSEL Injects', icon: '💥', defaultTier: 'gpt-5-mini', desc: 'Friction events' },
-    { key: 'dailyOrders', label: 'Daily Orders', icon: '📋', defaultTier: 'gpt-5-mini', desc: 'ATO, MTO, STO' },
-  ];
+  modelKey?: keyof ModelOverrides;
+  defaultTier?: string;
+  expectedArtifacts: number;
+}
+
+const PIPELINE_STEPS: PipelineStep[] = [
+  { name: 'Strategic Context',   label: 'Strategic Context',   icon: '📄', desc: 'NDS, NMS, JSCP',           modelKey: 'strategyDocs',  defaultTier: 'gpt-5.4',    expectedArtifacts: 3 },
+  { name: 'Campaign Plan',       label: 'Campaign Plan',       icon: '🗺', desc: 'CONPLAN, OPLAN',           modelKey: 'campaignPlan',  defaultTier: 'gpt-5.4',    expectedArtifacts: 2 },
+  { name: 'Theater Bases',       label: 'Theater Bases',       icon: '🏗', desc: 'Operating locations',                                                              expectedArtifacts: 1 },
+  { name: 'Joint Force ORBAT',   label: 'Joint Force ORBAT',   icon: '⚔️', desc: 'Units, platforms, assets', modelKey: 'orbat',         defaultTier: 'gpt-5-mini', expectedArtifacts: 1 },
+  { name: 'Space Constellation', label: 'Space Constellation', icon: '🛰', desc: 'Satellites, ground stations',                                                     expectedArtifacts: 1 },
+  { name: 'Planning Documents',  label: 'Planning Documents',  icon: '🎯', desc: 'JIPTL, SPINS, ACO',        modelKey: 'planningDocs',  defaultTier: 'gpt-5-mini', expectedArtifacts: 3 },
+  { name: 'MAAP',                label: 'MAAP',                icon: '✈️', desc: 'Master Air Attack Plan',   modelKey: 'maap',          defaultTier: 'gpt-5.4',    expectedArtifacts: 1 },
+  { name: 'MSEL Injects',        label: 'MSEL Injects',        icon: '💥', desc: 'Friction events',          modelKey: 'mselInjects',   defaultTier: 'gpt-5-mini', expectedArtifacts: 1 },
+];
+
+type StepStatus = 'pending' | 'active' | 'complete' | 'error';
+
+const STATUS_PULSE_KEYFRAME = `
+@keyframes ow-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.9); }
+  50%      { opacity: 1;   transform: scale(1.15); }
+}
+@keyframes ow-spin {
+  to { transform: rotate(360deg); }
+}
+`;
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -50,7 +70,7 @@ export function ScenarioDetail() {
   const navigate = useNavigate();
 
   const {
-    generateScenario,
+    startScenarioGeneration,
     fetchScenarioDetail,
     resumeScenarioGeneration,
     activeScenarioId,
@@ -58,12 +78,12 @@ export function ScenarioDetail() {
     setActiveScenario,
     resetGenerationProgress,
   } = useOverwatchStore();
+  const artifactResults = useOverwatchStore(s => s.artifactResults);
 
   const scenarioId = paramId || activeScenarioId;
 
   const [scenarioDetail, setScenarioDetail] = useState<any>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [showProgressModal, setShowProgressModal] = useState(false);
   const [regenerateFromStep, setRegenerateFromStep] = useState<string | undefined>(undefined);
   const [selectedDoc, setSelectedDoc] = useState<{ title: string; docType: string; content: string; effectiveDate?: string } | null>(null);
   const [modelOverrides, setModelOverrides] = useState<ModelOverrides>({});
@@ -99,9 +119,11 @@ export function ScenarioDetail() {
     if (generationProgress?.status === 'COMPLETE' && scenarioId) {
       loadScenarioDetail(scenarioId);
       setRegeneratingSteps({});
+      setRegenerateFromStep(undefined);
     }
     if (generationProgress?.status === 'FAILED') {
       setRegeneratingSteps({});
+      setRegenerateFromStep(undefined);
     }
   }, [generationProgress, scenarioId, loadScenarioDetail]);
 
@@ -132,19 +154,11 @@ export function ScenarioDetail() {
 
   // ─── Generate / Regenerate ──────────────────────────────────────
   const handleGenerate = async () => {
-    if (!scenarioDetail) return;
+    if (!scenarioId) return;
     setGenerating(true);
-    setShowProgressModal(true);
     resetGenerationProgress();
     try {
-      await generateScenario({
-        name: scenarioDetail.name,
-        theater: scenarioDetail.theater,
-        adversary: scenarioDetail.adversary,
-        description: scenarioDetail.description,
-        duration: Math.ceil((new Date(scenarioDetail.endDate).getTime() - new Date(scenarioDetail.startDate).getTime()) / (24 * 3600000)),
-        modelOverrides,
-      });
+      await startScenarioGeneration(scenarioId, modelOverrides);
     } finally {
       setGenerating(false);
     }
@@ -157,7 +171,6 @@ export function ScenarioDetail() {
   const handleResume = async () => {
     if (!scenarioId) return;
     setGenerating(true);
-    setShowProgressModal(true);
     resetGenerationProgress();
     try {
       await resumeScenarioGeneration(scenarioId, modelOverrides);
@@ -165,12 +178,6 @@ export function ScenarioDetail() {
       setGenerating(false);
     }
   };
-
-  const PIPELINE_STEPS = [
-    'Strategic Context', 'Campaign Plan', 'Theater Bases',
-    'Joint Force ORBAT', 'Space Constellation', 'Planning Documents',
-    'MAAP', 'MSEL Injects',
-  ];
 
   const handleRegenerateStep = (stepName: string) => {
     if (!scenarioId) return;
@@ -182,7 +189,6 @@ export function ScenarioDetail() {
     try {
       setRegeneratingSteps(prev => ({ ...prev, [stepName]: true }));
       setRegenerateFromStep(stepName);
-      setShowProgressModal(true);
       resetGenerationProgress();
       const encoded = encodeURIComponent(stepName);
       const res = await fetch(`/api/scenarios/${scenarioId}/steps/${encoded}/regenerate`, {
@@ -310,8 +316,8 @@ export function ScenarioDetail() {
           ),
         };
       case 'regenerate-step': {
-        const idx = PIPELINE_STEPS.indexOf(pendingAction.stepName);
-        const downstream = PIPELINE_STEPS.slice(idx);
+        const idx = PIPELINE_STEPS.findIndex(s => s.name === pendingAction.stepName);
+        const downstream = PIPELINE_STEPS.slice(idx).map(s => s.name);
         return {
           variant: 'warning' as const,
           title: 'Cascading regeneration',
@@ -479,35 +485,22 @@ export function ScenarioDetail() {
               </div>
             )}
 
-            {isGenerating && !showProgressModal && (
-              <div
-                style={{
-                  marginTop: '12px', padding: '12px', borderRadius: '8px',
-                  background: 'rgba(0, 212, 255, 0.06)', border: '1px solid rgba(0, 212, 255, 0.15)',
-                  cursor: 'pointer', textAlign: 'center',
-                }}
-                onClick={() => setShowProgressModal(true)}
-              >
-                <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--accent-primary)' }}>
-                  ⚡ View Generation Progress
-                </span>
-              </div>
-            )}
-
             {/* ─── Artifact Sections ───────────────────────────────── */}
             {isComplete && scenarioDetail ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <ArtifactSection icon="📄" title="Strategy Documents" count={scenarioDetail.strategies?.length || 0}
-                  expanded={expanded === 'strategies'} onToggle={() => toggleExpand('strategies')}
-                  onRegenerate={() => handleRegenerateStep('Strategic Context')} isRegenerating={regeneratingSteps['Strategic Context']}
-                >
-                  {scenarioDetail.strategies?.map((s: any, i: number) => {
+                {(() => {
+                  const strategicDocs = (scenarioDetail.strategies || []).filter((s: any) =>
+                    ['NDS', 'NMS', 'JSCP'].includes(s.docType)
+                  );
+                  const campaignDocs = (scenarioDetail.strategies || []).filter((s: any) =>
+                    ['CONPLAN', 'OPLAN'].includes(s.docType)
+                  );
+                  const renderStrategyRow = (s: any, i: number) => {
                     const badges: { label: string; count: number }[] = [];
                     if (s.priorities?.length > 0) badges.push({ label: 'priorities', count: s.priorities.length });
                     if (s.oplanPhases?.length > 0) badges.push({ label: 'phases', count: s.oplanPhases.length });
                     if (s.commandTasks?.length > 0) badges.push({ label: 'tasks', count: s.commandTasks.length });
                     if (s.paceComms?.length > 0) badges.push({ label: 'PACE', count: s.paceComms.length });
-
                     return (
                       <div key={i} style={{ ...artifactDetailStyle, cursor: 'pointer', transition: 'background 0.2s ease' }}
                         onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-tertiary)'}
@@ -545,8 +538,24 @@ export function ScenarioDetail() {
                         </div>
                       </div>
                     );
-                  })}
-                </ArtifactSection>
+                  };
+                  return (
+                    <>
+                      <ArtifactSection icon="📄" title="Strategic Context" count={strategicDocs.length}
+                        expanded={expanded === 'strategies'} onToggle={() => toggleExpand('strategies')}
+                        onRegenerate={() => handleRegenerateStep('Strategic Context')} isRegenerating={regeneratingSteps['Strategic Context']}
+                      >
+                        {strategicDocs.map(renderStrategyRow)}
+                      </ArtifactSection>
+                      <ArtifactSection icon="🗺" title="Campaign Plan" count={campaignDocs.length}
+                        expanded={expanded === 'campaign'} onToggle={() => toggleExpand('campaign')}
+                        onRegenerate={() => handleRegenerateStep('Campaign Plan')} isRegenerating={regeneratingSteps['Campaign Plan']}
+                      >
+                        {campaignDocs.map(renderStrategyRow)}
+                      </ArtifactSection>
+                    </>
+                  );
+                })()}
 
                 <ArtifactSection icon="🎯" title="Planning Documents" count={scenarioDetail.planningDocs?.length || 0}
                   expanded={expanded === 'planning'} onToggle={() => toggleExpand('planning')}
@@ -619,6 +628,23 @@ export function ScenarioDetail() {
                         <span className={`badge badge-${u.affiliation === 'FRIENDLY' ? 'primary' : 'danger'}`}>{u.affiliation}</span>
                         <span className="badge badge-inactive">{u.assets?.length || 0} assets</span>
                       </div>
+                    </div>
+                  ))}
+                </ArtifactSection>
+
+                <ArtifactSection icon="🏗" title="Theater Bases" count={scenarioDetail.bases?.length || 0}
+                  expanded={expanded === 'bases'} onToggle={() => toggleExpand('bases')}
+                  onRegenerate={() => handleRegenerateStep('Theater Bases')} isRegenerating={regeneratingSteps['Theater Bases']}
+                >
+                  {scenarioDetail.bases?.map((b: any, i: number) => (
+                    <div key={i} style={{ ...artifactDetailStyle, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <span style={{ fontWeight: 600, fontSize: '13px' }}>{b.name}</span>
+                        <span style={{ marginLeft: '8px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                          {b.country}{b.icaoCode ? ` · ${b.icaoCode}` : ''}
+                        </span>
+                      </div>
+                      <span className="badge badge-inactive" style={{ fontSize: '10px' }}>{b.baseType}</span>
                     </div>
                   ))}
                 </ArtifactSection>
@@ -716,33 +742,53 @@ export function ScenarioDetail() {
                 </div>
               </div>
             ) : (
-              /* ─── Pre-generation preview ─── */
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {ARTIFACT_MODEL_CONFIG.map(item => (
-                  <div key={item.key} style={{
-                    display: 'flex', gap: '12px', padding: '10px 12px',
-                    background: 'var(--bg-tertiary)', borderRadius: '8px', alignItems: 'flex-start',
-                  }}>
-                    <span style={{ fontSize: '20px' }}>{item.icon}</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '2px' }}>{item.label}</div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{item.desc}</div>
-                    </div>
-                    <select
-                      value={modelOverrides[item.key] || ''}
-                      onChange={e => updateModel(item.key, e.target.value)}
-                      style={{
-                        padding: '4px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border-subtle)',
-                        borderRadius: '4px', color: modelOverrides[item.key] ? 'var(--accent-primary)' : 'var(--text-muted)',
-                        fontSize: '11px', fontFamily: 'var(--font-mono)', cursor: 'pointer',
-                      }}
-                    >
-                      <option value="">{item.defaultTier} (default)</option>
-                      {MODEL_OPTIONS.map(m => (<option key={m} value={m}>{m}</option>))}
-                    </select>
-                  </div>
-                ))}
-              </div>
+              /* ─── Pre-generation / in-flight pipeline ─── */
+              <>
+                <style>{STATUS_PULSE_KEYFRAME}</style>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {PIPELINE_STEPS.map((step, idx) => {
+                    const status = getStepStatus(step, idx, generationProgress, artifactResults, regenerateFromStep);
+                    return (
+                      <div key={step.name} style={{
+                        display: 'flex', gap: '12px', padding: '10px 12px',
+                        background: status === 'active' ? 'rgba(0, 212, 255, 0.06)' : 'var(--bg-tertiary)',
+                        border: '1px solid ' + (status === 'active' ? 'rgba(0, 212, 255, 0.25)' : 'transparent'),
+                        borderRadius: '8px', alignItems: 'center',
+                        transition: 'background 0.2s ease, border-color 0.2s ease',
+                      }}>
+                        <StatusIndicator status={status} />
+                        <span style={{ fontSize: '20px', opacity: status === 'pending' ? 0.5 : 1 }}>{step.icon}</span>
+                        <div style={{ flex: 1 }}>
+                          <div style={{
+                            fontWeight: 600, fontSize: '13px', marginBottom: '2px',
+                            color: status === 'pending' ? 'var(--text-muted)' : 'var(--text-bright)',
+                          }}>
+                            {step.label}
+                          </div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{step.desc}</div>
+                        </div>
+                        {step.modelKey && (
+                          <select
+                            value={modelOverrides[step.modelKey] || ''}
+                            onChange={e => updateModel(step.modelKey!, e.target.value)}
+                            disabled={isGenerating}
+                            style={{
+                              padding: '4px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border-subtle)',
+                              borderRadius: '4px', color: modelOverrides[step.modelKey] ? 'var(--accent-primary)' : 'var(--text-muted)',
+                              fontSize: '11px', fontFamily: 'var(--font-mono)',
+                              cursor: isGenerating ? 'not-allowed' : 'pointer',
+                              opacity: isGenerating ? 0.5 : 1,
+                            }}
+                          >
+                            <option value="">{step.defaultTier} (default)</option>
+                            {MODEL_OPTIONS.map(m => (<option key={m} value={m}>{m}</option>))}
+                          </select>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
             )}
           </div>
         </div>
@@ -826,17 +872,6 @@ export function ScenarioDetail() {
           onClose={() => { if (!actionBusy) setPendingAction(null); }}
         />
       )}
-
-      <GenerationProgressModal
-        open={showProgressModal}
-        onClose={() => {
-          setShowProgressModal(false);
-          setRegenerateFromStep(undefined);
-          setRegeneratingSteps({});
-          if (scenarioId) loadScenarioDetail(scenarioId);
-        }}
-        resumeFromStep={regenerateFromStep}
-      />
 
       {selectedDoc && (
         <DocumentReaderModal
@@ -933,6 +968,64 @@ function DocAction({ label, onClick, danger }: { label: string; onClick: () => v
       {label}
     </button>
   );
+}
+
+function StatusIndicator({ status }: { status: StepStatus }) {
+  if (status === 'complete') {
+    return <span style={{ color: 'var(--accent-success)', fontSize: '14px', width: 14, textAlign: 'center' }}>✓</span>;
+  }
+  if (status === 'error') {
+    return <span style={{ color: 'var(--accent-danger)', fontSize: '14px', width: 14, textAlign: 'center' }}>✗</span>;
+  }
+  if (status === 'active') {
+    return (
+      <span style={{
+        display: 'inline-block', width: 10, height: 10, borderRadius: '50%',
+        background: 'var(--accent-primary)', boxShadow: '0 0 8px rgba(0, 212, 255, 0.6)',
+        animation: 'ow-pulse 1s ease-in-out infinite',
+      }} />
+    );
+  }
+  return (
+    <span style={{
+      display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+      background: 'var(--border-subtle)', opacity: 0.5,
+    }} />
+  );
+}
+
+// Derive per-step status from generation progress + per-artifact websocket events.
+// Mirrors the logic that used to live in GenerationProgressModal.
+function getStepStatus(
+  step: PipelineStep,
+  stepIdx: number,
+  progress: { step?: string; status?: string; error?: string } | null | undefined,
+  artifactResults: ArtifactResult[],
+  resumeFromStep: string | undefined,
+): StepStatus {
+  const status = progress?.status;
+  const currentStep = progress?.step || '';
+  const isComplete = status === 'COMPLETE';
+  const isFailed = status === 'FAILED';
+
+  const resumeIdx = resumeFromStep ? PIPELINE_STEPS.findIndex(s => s.name === resumeFromStep) : -1;
+  if (resumeIdx > 0 && stepIdx < resumeIdx) return 'complete';
+
+  if (isFailed && step.name === currentStep) return 'error';
+  if (isComplete) return 'complete';
+
+  // Step done if all expected artifact events have arrived
+  const doneCount = artifactResults.filter(r => r.step === step.name).length;
+  if (doneCount >= step.expectedArtifacts) return 'complete';
+
+  if (step.name === currentStep) return 'active';
+
+  // Steps before the current one are complete (covers the moment between
+  // step-N finishing and the next websocket "active" arriving).
+  const activeIdx = PIPELINE_STEPS.findIndex(s => s.name === currentStep);
+  if (activeIdx >= 0 && stepIdx < activeIdx) return 'complete';
+
+  return 'pending';
 }
 
 // ─── Styles ──────────────────────────────────────────────────────────────────

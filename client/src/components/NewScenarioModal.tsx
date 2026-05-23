@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useOverwatchStore, type ModelOverrides } from '../store/overwatch-store';
+import { useOverwatchStore } from '../store/overwatch-store';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -11,24 +11,6 @@ interface ScenarioConfig {
   duration: number;
 }
 
-const MODEL_OPTIONS = ['gpt-5.4', 'gpt-5-mini', 'gpt-5-nano'];
-
-const ARTIFACT_MODEL_CONFIG: Array<{
-  key: keyof ModelOverrides;
-  label: string;
-  icon: string;
-  defaultTier: string;
-  desc: string;
-}> = [
-    { key: 'strategyDocs', label: 'Strategy Documents', icon: '📄', defaultTier: 'gpt-5.4', desc: 'NDS, NMS, JSCP' },
-    { key: 'campaignPlan', label: 'Campaign Plan', icon: '🗺', defaultTier: 'gpt-5.4', desc: 'CONPLAN, OPLAN' },
-    { key: 'orbat', label: 'Joint Force ORBAT', icon: '⚔️', defaultTier: 'gpt-5-mini', desc: 'Units, platforms, assets' },
-    { key: 'planningDocs', label: 'Planning Documents', icon: '🎯', defaultTier: 'gpt-5-mini', desc: 'JIPTL, SPINS, ACO' },
-    { key: 'maap', label: 'MAAP', icon: '✈️', defaultTier: 'gpt-5.4', desc: 'Master Air Attack Plan' },
-    { key: 'mselInjects', label: 'MSEL Injects', icon: '💥', defaultTier: 'gpt-5-mini', desc: 'Friction events' },
-    { key: 'dailyOrders', label: 'Daily Orders', icon: '📋', defaultTier: 'gpt-5-mini', desc: 'ATO, MTO, STO' },
-  ];
-
 // ─── Component ───────────────────────────────────────────────────────────────
 
 interface NewScenarioModalProps {
@@ -38,7 +20,7 @@ interface NewScenarioModalProps {
 }
 
 export function NewScenarioModal({ open, onClose, onCreated }: NewScenarioModalProps) {
-  const { createScenario, generateScenario, setActiveScenario, resetGenerationProgress } = useOverwatchStore();
+  const { createScenario } = useOverwatchStore();
 
   const [config, setConfig] = useState<ScenarioConfig>({
     name: '',
@@ -48,15 +30,10 @@ export function NewScenarioModal({ open, onClose, onCreated }: NewScenarioModalP
     duration: 14,
   });
 
-  const [modelOverrides, setModelOverrides] = useState<ModelOverrides>({});
-  const [showModelPanel, setShowModelPanel] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const update = (key: keyof ScenarioConfig, value: string | number) =>
     setConfig(prev => ({ ...prev, [key]: value }));
-
-  const updateModel = (key: keyof ModelOverrides, value: string) =>
-    setModelOverrides(prev => ({ ...prev, [key]: value || undefined }));
 
   const handleSaveOnly = async () => {
     if (!config.name.trim()) return;
@@ -72,23 +49,6 @@ export function NewScenarioModal({ open, onClose, onCreated }: NewScenarioModalP
     }
   };
 
-  const handleSaveAndGenerate = async () => {
-    if (!config.name.trim()) return;
-    setSaving(true);
-    try {
-      const result = await generateScenario({ ...config, modelOverrides });
-      if (result && result.success && result.data && result.data.id) {
-        resetGenerationProgress();
-        resetForm();
-        onCreated(result.data.id);
-      }
-    } catch (err) {
-      console.error('[MODAL] Generation failed:', err);
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const resetForm = () => {
     setConfig({
       name: '',
@@ -97,7 +57,6 @@ export function NewScenarioModal({ open, onClose, onCreated }: NewScenarioModalP
       description: 'Multi-domain joint operation — air/maritime/space integration exercise with contested logistics and satellite coverage gaps.',
       duration: 14,
     });
-    setModelOverrides({});
   };
 
   if (!open) return null;
@@ -142,62 +101,6 @@ export function NewScenarioModal({ open, onClose, onCreated }: NewScenarioModalP
           </div>
         </div>
 
-        {/* ─── Model Overrides Panel ──────────────────────────────── */}
-        <div style={{ marginTop: '20px', borderTop: '1px solid var(--border-subtle)', paddingTop: '12px' }}>
-          <div
-            onClick={() => setShowModelPanel(!showModelPanel)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', padding: '4px 0',
-            }}
-          >
-            <span style={{ fontSize: '14px' }}>🧠</span>
-            <span style={{ flex: 1, fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>
-              LLM Model Selection
-            </span>
-            <span style={{
-              fontSize: '10px', fontFamily: 'var(--font-mono)', padding: '2px 6px', borderRadius: '4px',
-              background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc',
-            }}>
-              {Object.keys(modelOverrides).filter(k => (modelOverrides as any)[k]).length || 'defaults'}
-            </span>
-            <span style={{
-              fontSize: '12px', color: 'var(--text-muted)',
-              transition: 'transform 0.15s ease',
-              transform: showModelPanel ? 'rotate(180deg)' : 'rotate(0deg)',
-            }}>▾</span>
-          </div>
-
-          {showModelPanel && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '8px' }}>
-              {ARTIFACT_MODEL_CONFIG.map(item => (
-                <div key={item.key} style={{
-                  display: 'flex', alignItems: 'center', gap: '8px',
-                  padding: '5px 8px', background: 'var(--bg-tertiary)', borderRadius: '6px',
-                }}>
-                  <span style={{ fontSize: '14px' }}>{item.icon}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '12px', fontWeight: 600 }}>{item.label}</div>
-                  </div>
-                  <select
-                    value={modelOverrides[item.key] || ''}
-                    onChange={e => updateModel(item.key, e.target.value)}
-                    style={{
-                      padding: '3px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border-subtle)',
-                      borderRadius: '4px', color: modelOverrides[item.key] ? 'var(--accent-primary)' : 'var(--text-muted)',
-                      fontSize: '11px', fontFamily: 'var(--font-mono)', cursor: 'pointer',
-                    }}
-                  >
-                    <option value="">{item.defaultTier} (default)</option>
-                    {MODEL_OPTIONS.map(m => (
-                      <option key={m} value={m}>{m}</option>
-                    ))}
-                  </select>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
         {/* ─── Action Buttons ─────────────────────────────────────── */}
         <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'flex-end' }}>
           <button
@@ -213,26 +116,13 @@ export function NewScenarioModal({ open, onClose, onCreated }: NewScenarioModalP
           <button
             onClick={handleSaveOnly}
             disabled={!config.name.trim() || saving}
-            className="btn"
-            style={{
-              padding: '10px 20px', fontSize: '14px', fontWeight: 600,
-              background: 'var(--bg-tertiary)', border: '1px solid var(--accent-primary)',
-              color: 'var(--accent-primary)',
-              opacity: !config.name.trim() || saving ? 0.5 : 1,
-            }}
-          >
-            💾 Save Scenario
-          </button>
-          <button
-            onClick={handleSaveAndGenerate}
-            disabled={!config.name.trim() || saving}
             className="btn btn-primary"
             style={{
               padding: '10px 20px', fontSize: '14px', fontWeight: 700,
               opacity: !config.name.trim() || saving ? 0.5 : 1,
             }}
           >
-            ⚡ Save & Generate
+            💾 Save Scenario
           </button>
         </div>
       </div>
